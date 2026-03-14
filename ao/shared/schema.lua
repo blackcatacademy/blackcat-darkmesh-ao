@@ -81,9 +81,9 @@ local SCHEMAS = {
           cors = { type = "boolean" },
           immutable = { type = "boolean" },
           allowUploads = { type = "boolean" },
-          ttlSeconds = { type = "number" },
-          rateLimitPerMinute = { type = "number" },
-          maxUploadBytes = { type = "number" },
+          ttlSeconds = { type = "number", minimum = 0, maximum = 31536000 },
+          rateLimitPerMinute = { type = "number", minimum = 0, maximum = 10000 },
+          maxUploadBytes = { type = "number", minimum = 0, maximum = 104857600 },
           allowAnonRead = { type = "boolean" },
           requireMfa = { type = "boolean" }
         },
@@ -97,7 +97,10 @@ local SCHEMAS = {
           allowAnonymousWrite = { type = "boolean" },
           auditLevel = { type = "string", enum = { "none", "basic", "full" } },
           dataResidency = { type = "string", enum = { "eu", "us", "apac", "global" } },
-          piiHandling = { type = "string", enum = { "deny", "mask", "allow" } }
+          piiHandling = { type = "string", enum = { "deny", "mask", "allow" } },
+          allowedOrigins = { type = "array", items = { type = "string", pattern = "^https?://[^%s]+$" }, minItems = 0 },
+          ipAllowlist = { type = "array", items = { type = "string", pattern = "^%d+%.%d+%.%d+%.%d+/%d%d?$" }, minItems = 0 },
+          allowedMethods = { type = "array", items = { type = "string", enum = { "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS" } }, minItems = 0 }
         },
       },
     },
@@ -167,6 +170,16 @@ local function validate_properties(value, schema, path, errors)
             if prop.items.type and item_type ~= prop.items.type then
               table.insert(errors, path .. name .. "[" .. idx .. "] expected " .. prop.items.type .. ", got " .. item_type)
             end
+            if prop.items.pattern and type(item) == "string" and not tostring(item):match(prop.items.pattern) then
+              table.insert(errors, path .. name .. "[" .. idx .. "] does not match pattern")
+            end
+            if prop.items.enum then
+              local ok_enum = false
+              for _, ev in ipairs(prop.items.enum) do if ev == item then ok_enum = true end end
+              if not ok_enum then
+                table.insert(errors, path .. name .. "[" .. idx .. "] not in enum")
+              end
+            end
           end
           if prop.minItems and #value[name] < prop.minItems then
             table.insert(errors, path .. name .. " fewer than minItems")
@@ -178,6 +191,12 @@ local function validate_properties(value, schema, path, errors)
           if not tostring(value[name]):match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$") then
             table.insert(errors, path .. name .. " invalid date-time")
           end
+        end
+        if prop.minimum and actual_type == "number" and value[name] < prop.minimum then
+          table.insert(errors, path .. name .. " below minimum")
+        end
+        if prop.maximum and actual_type == "number" and value[name] > prop.maximum then
+          table.insert(errors, path .. name .. " above maximum")
         end
       end
     end
