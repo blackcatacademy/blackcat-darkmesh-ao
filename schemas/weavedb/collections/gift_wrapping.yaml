@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: gift_wrapping
+schema:
+  type: object
+  required: [id, site_id, name, price, currency]
+  properties:
+    id:       { type: string }
+    site_id:  { type: string }
+    name:     { type: string }
+    price:    { type: number }
+    currency: { type: string, minLength: 3, maxLength: 3 }
+    message:  { type: string }
+indexes:
+  - fields: [site_id, name]

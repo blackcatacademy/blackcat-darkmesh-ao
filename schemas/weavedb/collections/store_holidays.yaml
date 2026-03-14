@@ -1,0 +1,12 @@
+format: weavedb-collection/v1
+name: store_holidays
+schema:
+  type: object
+  required: [id, site_id, date]
+  properties:
+    id:      { type: string }
+    site_id: { type: string }
+    date:    { type: string, format: date }
+    note:    { type: string }
+indexes:
+  - fields: [site_id, date]

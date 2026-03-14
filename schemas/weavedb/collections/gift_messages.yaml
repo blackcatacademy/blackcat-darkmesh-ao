@@ -1,0 +1,13 @@
+format: weavedb-collection/v1
+name: gift_messages
+schema:
+  type: object
+  required: [id, order_id, message]
+  properties:
+    id:       { type: string }
+    order_id: { type: string }
+    message:  { type: string }
+    from:     { type: string }
+    to:       { type: string }
+indexes:
+  - fields: [order_id]
