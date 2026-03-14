@@ -23,6 +23,7 @@ local SHELL_FALLBACK = os.getenv("AUTH_ALLOW_SHELL_FALLBACK") == "1" -- default 
 
 local nonce_store = {}
 local rate_store = {}
+local rate_db_loaded = false
 
 -- load persisted rate store (simple CSV key,count,reset)
 if RL_STATE_FILE then
@@ -145,17 +146,24 @@ function Auth.require_signature(msg)
     if not SIG_SECRET then
       return not REQUIRE_SIGNATURE, REQUIRE_SIGNATURE and "missing_signature_secret" or nil
     end
-    local cmd = string.format("printf %%s %q | openssl dgst -sha256 -hmac %q 2>/dev/null", target, SIG_SECRET)
-    local h = io.popen(cmd, "r")
-    if not h then return false, "sig_verify_failed" end
-    local out = h:read("*a") or ""
-    h:close()
-    local computed = out:match("= (%w+)")
-    if not computed then return false, "sig_verify_failed" end
-    if computed:lower() ~= tostring(sig):lower() then
-      return false, "bad_signature"
+    if openssl_ok and openssl.hmac then
+      local raw = openssl.hmac.digest("sha256", target, SIG_SECRET, true)
+      if not raw then return false, "sig_verify_failed" end
+      local hex = (openssl.hex and openssl.hex(raw)) or raw:gsub(".", function(c) return string.format("%02x", string.byte(c)) end)
+      if hex:lower() ~= tostring(sig):lower() then
+        return false, "bad_signature"
+      end
+      return true
+    elseif sodium_ok and sodium.crypto_auth then
+      local tag = sodium.crypto_auth(target, SIG_SECRET)
+      local hex = sodium.to_hex(tag)
+      if hex:lower() ~= tostring(sig):lower() then
+        return false, "bad_signature"
+      end
+      return true
+    else
+      return false, "sig_verify_failed"
     end
-    return true
   end
 end
 
@@ -174,7 +182,18 @@ local function prune_rate()
   end
 end
 
+local function load_rate_store_sqlite()
+  if not RL_SQLITE or not sqlite_ok or rate_db_loaded then return end
+  Auth._db = sqlite.open(RL_SQLITE)
+  Auth._db:exec("CREATE TABLE IF NOT EXISTS rate (k TEXT PRIMARY KEY, count INT, reset INT)")
+  for row in Auth._db:nrows("SELECT k,count,reset FROM rate") do
+    rate_store[row.k] = { count = tonumber(row.count) or 0, reset = tonumber(row.reset) or os_time() }
+  end
+  rate_db_loaded = true
+end
+
 function Auth.check_rate_limit(msg)
+  load_rate_store_sqlite()
   prune_rate()
   local key = rate_key(msg)
   local now = os_time()

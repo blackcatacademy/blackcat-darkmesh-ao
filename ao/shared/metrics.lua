@@ -77,4 +77,10 @@ function Metrics._reset()
   counters = {}
 end
 
+function Metrics.start_background()
+  if FLUSH_INTERVAL > 0 then
+    timer.start(FLUSH_INTERVAL, Metrics.flush_prom)
+  end
+end
+
 return Metrics

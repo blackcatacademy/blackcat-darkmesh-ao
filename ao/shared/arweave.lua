@@ -26,6 +26,8 @@ local RESPONSE_PATTERN = os.getenv("ARWEAVE_RESPONSE_PATTERN") or "^%s*%{\""
 local ok_cjson_safe, cjson_safe = pcall(require, "cjson.safe")
 local cjson = cjson_safe or require("cjson") -- required dependency
 local schema = require("ao.shared.schema")
+local openssl_ok, openssl = pcall(require, "openssl")
+local sodium_ok, sodium = pcall(require, "sodium")
 
 local function next_tx()
   counter = counter + 1
@@ -36,18 +38,24 @@ local function ensure_dir(path)
   os.execute(string.format('mkdir -p "%s"', path))
 end
 
+local function bin_to_hex(bytes)
+  return (bytes:gsub(".", function(c) return string.format("%02x", string.byte(c)) end))
+end
+
 local function sha256(str)
-  local p = io.popen("openssl dgst -sha256 2>/dev/null", "w")
-  if p then
-    p:write(str)
-    p:close()
-  end
-  local r = io.popen("echo -n \"" .. str:gsub("\"", "\\\"") .. "\" | openssl dgst -sha256 2>/dev/null")
-  if r then
-    local out = r:read("*a")
-    r:close()
-    if out and out:match("= (%w+)$") then
-      return out:match("= (%w+)$")
+  if openssl_ok and openssl.digest then
+    local d = openssl.digest.new("sha256")
+    d:update(str)
+    return bin_to_hex(d:final())
+  elseif sodium_ok and sodium.crypto_hash_sha256 then
+    return bin_to_hex(sodium.crypto_hash_sha256(str))
+  else
+    local r = io.popen("printf %s \"" .. str:gsub("\"", "\\\"") .. "\" | openssl dgst -sha256 -binary 2>/dev/null | xxd -p", "r")
+    if r then
+      local out = r:read("*a") or ""
+      r:close()
+      out = out:gsub("%s+", "")
+      if #out > 0 then return out end
     end
   end
   return nil
@@ -241,6 +249,13 @@ if MODE == "http" then
         return tx, hash
       end
       httpStatus, response_path = http_post(serialized, tx)
+    else
+      -- offline simulated response body so schema validation/path logic still runs
+      ensure_dir(REQUEST_LOG)
+      response_path = string.format("%s/%s-response.json", REQUEST_LOG, tx)
+      local body = os.getenv("ARWEAVE_HTTP_SIM_BODY") or string.format('{"status":"ok","tx":"%s"}', tx)
+      local f = io.open(response_path, "w"); if f then f:write(body); f:close() end
+      httpStatus = tonumber(os.getenv("ARWEAVE_HTTP_SIM_STATUS") or "200")
     end
     local signerHash = SIGNER and file_sha256(SIGNER) or nil
     if httpStatus and httpStatus >= 400 then

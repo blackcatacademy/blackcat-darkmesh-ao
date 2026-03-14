@@ -63,6 +63,25 @@ do
   package.loaded["ao.shared.arweave"] = nil
 end
 
+-- Arweave response corpus: simulate bad schema/body/status
+do
+  package.loaded["ao.shared.arweave"] = nil
+  os.setenv("ARWEAVE_MODE", "http")
+  os.setenv("ARWEAVE_HTTP_SIM_STATUS", "500")
+  local ar3 = require("ao.shared.arweave")
+  local tx, err = ar3.put_snapshot({ dummy = "ok" })
+  if err ~= "http_error" then error("expected http_error on simulated 500") end
+  package.loaded["ao.shared.arweave"] = nil
+  os.setenv("ARWEAVE_HTTP_SIM_STATUS", "200")
+  os.setenv("ARWEAVE_HTTP_SIM_BODY", '{"status":"ok","message":"hi","tx":123}') -- tx wrong type
+  local ar4 = require("ao.shared.arweave")
+  local tx2, err2 = ar4.put_snapshot({ dummy = "ok" })
+  if err2 ~= "http_response_schema_invalid" then error("expected schema invalid on bad body") end
+  os.setenv("ARWEAVE_HTTP_SIM_BODY", nil)
+  os.setenv("ARWEAVE_MODE", "mock")
+  package.loaded["ao.shared.arweave"] = nil
+end
+
 -- Auth ed25519 verification round-trip
 do
   -- generate keypair
@@ -122,6 +141,26 @@ do
     if resp.payload.manifestHash then
       local ok, decoded = pcall(require("cjson").decode, '{}')
       if not ok then error("cjson decode failed in fuzz") end
+    end
+  end
+
+  -- Random interleavings: PublishVersion vs SetActiveVersion cross-process
+  local reg3 = require("ao.registry.process")
+  reg3.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "conc-reg3", ["Actor-Role"] = "admin" }))
+  local versions = {}
+  for i = 1, 30 do
+    local pick = math.random()
+    if pick < 0.6 then
+      local ver = "v" .. i
+      table.insert(versions, ver)
+      site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "conc-reg3", ["Page-Id"] = "p" .. i, Content = { title = "T" .. i }, ["Actor-Role"] = "editor" }))
+      site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "conc-reg3", Version = ver, ["Actor-Role"] = "publisher" }))
+    else
+      local target = (#versions > 0) and versions[math.random(1, #versions)] or "v1"
+      local resp = reg3.route(with_req({ Action = "SetActiveVersion", ["Site-Id"] = "conc-reg3", Version = target, ["Actor-Role"] = "registry-admin" }))
+      if resp.status ~= "OK" and resp.code ~= "VERSION_CONFLICT" then
+        error("unexpected status in interleaving: " .. tostring(resp.status))
+      end
     end
   end
 end

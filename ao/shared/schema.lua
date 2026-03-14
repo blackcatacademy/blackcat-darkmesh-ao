@@ -79,6 +79,7 @@ local SCHEMAS = {
         type = "object",
         properties = {
           cors = { type = "boolean" },
+          corsAllowlist = { type = "array", minItems = 1, items = { type = "string", pattern = "^https?://[%w%.-]+(:%d+)?/?$" } },
           immutable = { type = "boolean" },
           allowUploads = { type = "boolean" },
           ttlSeconds = { type = "number", minimum = 0, maximum = 31536000 },
@@ -104,9 +105,9 @@ local SCHEMAS = {
           auditLevel = { type = "string", enum = { "none", "basic", "full" } },
           dataResidency = { type = "string", enum = { "eu", "us", "apac", "global" } },
           piiHandling = { type = "string", enum = { "deny", "mask", "allow" } },
-          allowedOrigins = { type = "array", items = { type = "string", pattern = "^https?://[^%s]+$" }, minItems = 0 },
+          allowedOrigins = { type = "array", items = { type = "string", pattern = "^https?://[%w%.-]+(:%d+)?/?$" }, minItems = 1 },
           ipAllowlist = { type = "array", items = { type = "string", pattern = "^%d+%.%d+%.%d+%.%d+/%d%d?$" }, minItems = 0 },
-          allowedMethods = { type = "array", items = { type = "string", enum = { "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS" } }, minItems = 0 }
+          allowedMethods = { type = "array", items = { type = "string", enum = { "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS" } }, minItems = 1 }
         },
       },
     },

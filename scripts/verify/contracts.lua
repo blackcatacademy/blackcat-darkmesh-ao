@@ -77,6 +77,14 @@ do
   assert_status(bad_cfg, "ERROR", "register bad cfg status")
   assert_code(bad_cfg, "INVALID_INPUT", "register bad cfg code")
 
+  -- Invalid policies arrays / flags patterns
+  local bad_origins = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-badorigins", Config = { policies = { allowedOrigins = {} } }, ["Actor-Role"] = "admin" }))
+  assert_status(bad_origins, "ERROR", "register bad origins status")
+  local bad_methods = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-badmethods", Config = { policies = { allowedMethods = {} } }, ["Actor-Role"] = "admin" }))
+  assert_status(bad_methods, "ERROR", "register bad methods status")
+  local bad_cors = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-badcors", Config = { flags = { corsAllowlist = { "ftp://invalid" } } }, ["Actor-Role"] = "admin" }))
+  assert_status(bad_cors, "ERROR", "register bad cors status")
+
   -- Unknown tableProfile
   local bad_profile = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-badprofile", Config = { tableProfile = "nonexistent" }, ["Actor-Role"] = "admin" }))
   assert_status(bad_profile, "ERROR", "register bad profile status")
