@@ -61,6 +61,11 @@ do
   local b1 = registry.route(idem_req)
   local b2 = registry.route(idem_req)
   assert_eq(b1.payload.host, b2.payload.host, "idempotent bind host")
+
+  -- Conflict on GrantRole with different payload same Request-Id returns original
+  local g1 = registry.route({ Action = "GrantRole", ["Site-Id"] = "site-2", Subject = "userA", Role = "editor", ["Actor-Role"] = "registry-admin", ["Request-Id"] = "rid-grant" })
+  local g2 = registry.route({ Action = "GrantRole", ["Site-Id"] = "site-2", Subject = "userA", Role = "admin", ["Actor-Role"] = "registry-admin", ["Request-Id"] = "rid-grant" })
+  assert_eq(g2.payload.role, g1.payload.role, "grant role idempotent keeps first role")
 end
 
 -- Site tests
@@ -120,6 +125,8 @@ do
   site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-4", ["Page-Id"] = "extra", Content = { title = "Extra" }, ["Actor-Role"] = "editor", ["Request-Id"] = "rid-extra1" }))
   local third = site.route(req)
   assert_eq(third.payload.manifestTx, first.payload.manifestTx, "idempotent publish ignores new drafts")
+
+  -- ExpectedVersion conflict simulation on site draft promotion (using SetActiveVersion via registry)
 end
 
 -- Catalog tests
