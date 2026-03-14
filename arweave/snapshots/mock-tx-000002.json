@@ -1,1 +1,1 @@
-{"version":"v1","siteId":"site-2","pages":[{"pageId":"old","content":{"id":"old","title":"Old","blocks":[]}}]}
+{"siteId":"site-2","pages":[{"content":{"blocks":[],"title":"Old","id":"old"},"pageId":"old"}],"version":"v1"}

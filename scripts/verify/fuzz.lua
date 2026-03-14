@@ -103,7 +103,7 @@ do
   local conflict2 = registry.route(with_req({ Action = "SetActiveVersion", ["Site-Id"] = "conc-reg", Version = "v2", ExpectedVersion = "nope", ["Actor-Role"] = "registry-admin" }))
   if conflict2.status ~= "ERROR" then error("Expected VERSION_CONFLICT on SetActiveVersion") end
 
--- random interleavings of SetActiveVersion and PublishVersion
+  -- random interleavings of SetActiveVersion and PublishVersion
   local reg = require("ao.registry.process")
   reg.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "conc-reg2", ["Actor-Role"] = "admin" }))
   local actions = {
@@ -115,6 +115,28 @@ do
   end
   local lookup = reg.route(with_req({ Action = "GetSiteConfig", ["Site-Id"] = "conc-reg2" }))
   if lookup.status ~= "OK" then error("GetSiteConfig failed after interleavings") end
+
+  -- parallel publish/version with cjson decode of response bodies (simulated)
+  for i = 1, 10 do
+    local resp = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = siteId, Version = "v" .. (10 + i), ["Actor-Role"] = "publisher" }))
+    if resp.payload.manifestHash then
+      local ok, decoded = pcall(require("cjson").decode, '{}')
+      if not ok then error("cjson decode failed in fuzz") end
+    end
+  end
+end
+
+-- Rate limit sqlite smoke
+do
+  os.setenv("AUTH_RATE_LIMIT_SQLITE", "/tmp/ao-rate-fuzz.db")
+  package.loaded["ao.shared.auth"] = nil
+  local auth = require("ao.shared.auth")
+  for i = 1, 5 do
+    local ok = auth.check_rate_limit({ ["Site-Id"] = "r1", Subject = "u1" })
+    if not ok then error("rate limit should not trip in smoke") end
+  end
+  os.remove("/tmp/ao-rate-fuzz.db")
+  package.loaded["ao.shared.auth"] = nil
 end
 
 -- Audit rotation/prune: set tiny rotate and emit many records

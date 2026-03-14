@@ -102,6 +102,15 @@ local SCHEMAS = {
       },
     },
   },
+  arweaveResponse = {
+    type = "object",
+    required = { "status" },
+    properties = {
+      status = { type = "string" },
+      message = { type = "string" },
+      tx = { type = "string" },
+    },
+  },
 }
 
 local function type_of(value)
