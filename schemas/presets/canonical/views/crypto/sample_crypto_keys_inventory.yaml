@@ -1,9 +1,0 @@
-format: ao-view/v1
-id: sample_crypto_keys_inventory
-owner: blackcat-crypto
-tags:
-- crypto
-- ops
-requires:
-- crypto_keys
-- crypto_algorithms

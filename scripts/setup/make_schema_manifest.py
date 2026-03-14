@@ -14,7 +14,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 TABLE_DIR = ROOT / "schemas" / "canonical-db" / "tables"
-VIEW_DIR = ROOT / "schemas" / "presets" / "canonical" / "views"
 WEAVEDB_DIR = ROOT / "schemas" / "weavedb" / "collections"
 OUT = ROOT / "schemas" / "manifest" / "schema-manifest.json"
 
@@ -42,24 +41,6 @@ def load_tables():
     return tables
 
 
-def load_views():
-    # Views metadata is optional; exclude if directory missing or empty
-    views = {}
-    if VIEW_DIR.exists():
-        for path in sorted(VIEW_DIR.rglob("*.yaml")):
-            data = yaml.safe_load(path.read_text()) or {}
-            vid = data.get("id") or path.stem
-            views[vid] = {
-                "owner": data.get("owner"),
-                "tags": data.get("tags", []),
-                "requires": data.get("requires", []),
-                "format": data.get("format"),
-                "hash": sha256(path),
-                "source": str(path.relative_to(ROOT)),
-            }
-    return views
-
-
 def load_weavedb():
     cols = {}
     for path in sorted(WEAVEDB_DIR.glob("*.yaml")):
@@ -81,7 +62,7 @@ def main():
         "format": "ao-schema-manifest",
         "version": 3,
         "tables": load_tables(),
-        "views": load_views(),       # optional metadata, not bundled if empty
+        "views": {},                 # views removed from bundle
         "weavedb": load_weavedb(),   # primary runtime schema
     }
     OUT.write_text(json.dumps(manifest, separators=(",", ":")))

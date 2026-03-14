@@ -1,9 +1,0 @@
-format: ao-view/v1
-id: sample_orders_with_user
-owner: blackcat-commerce
-tags:
-- commerce
-- reporting
-requires:
-- orders
-- users

@@ -1,8 +1,0 @@
-format: ao-view/v1
-id: sample_event_outbox_metrics
-owner: blackcat-monitoring
-tags:
-- monitoring
-- ops
-requires:
-- event_outbox

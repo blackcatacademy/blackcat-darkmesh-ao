@@ -1,5 +1,0 @@
-format: ao-view/v1
-id: rbac_user_roles_expiring_assignments
-owner: blackcat-auth
-tags: []
-requires: []
