@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: inventory_adjustments
+schema:
+  type: object
+  required: [id, inventory_id, qty, reason, ts]
+  properties:
+    id:           { type: string }
+    inventory_id: { type: string }
+    location_id:  { type: string }
+    qty:          { type: integer }
+    reason:       { type: string }
+    ts:           { type: string, format: date-time }
+    meta:         { type: object }
+indexes:
+  - fields: [inventory_id, ts]

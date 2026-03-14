@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: redirects
+schema:
+  type: object
+  required: [id, site_id, from, to]
+  properties:
+    id:      { type: string }
+    site_id: { type: string }
+    from:    { type: string }
+    to:      { type: string }
+    status:  { type: integer }
+    locale:  { type: string }
+    updated_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, from]

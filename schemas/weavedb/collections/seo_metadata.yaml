@@ -1,0 +1,17 @@
+format: weavedb-collection/v1
+name: seo_metadata
+schema:
+  type: object
+  required: [id, site_id, target_id, target_type]
+  properties:
+    id:          { type: string }
+    site_id:     { type: string }
+    target_id:   { type: string }
+    target_type: { type: string, enum: [page, product, category, blog_post, other] }
+    title:       { type: string }
+    description: { type: string }
+    keywords:    { type: array, items: { type: string } }
+    canonical:   { type: string }
+    updated_at:  { type: string, format: date-time }
+indexes:
+  - fields: [site_id, target_id]

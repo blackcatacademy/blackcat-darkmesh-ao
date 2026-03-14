@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: policy_versions
+schema:
+  type: object
+  required: [id, site_id, type, version, published_at]
+  properties:
+    id:           { type: string }
+    site_id:      { type: string }
+    type:         { type: string, enum: [privacy, terms, cookies, returns, warranty] }
+    version:      { type: string }
+    published_at: { type: string, format: date-time }
+    url:          { type: string }
+    hash:         { type: string }
+indexes:
+  - fields: [site_id, type]

@@ -1,0 +1,11 @@
+format: weavedb-collection/v1
+name: customer_tags
+schema:
+  type: object
+  required: [id, user_id, tag]
+  properties:
+    id:      { type: string }
+    user_id: { type: string }
+    tag:     { type: string }
+indexes:
+  - fields: [user_id, tag]
