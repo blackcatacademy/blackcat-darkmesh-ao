@@ -126,7 +126,10 @@ do
   local third = site.route(req)
   assert_eq(third.payload.manifestTx, first.payload.manifestTx, "idempotent publish ignores new drafts")
 
-  -- ExpectedVersion conflict simulation on site draft promotion (using SetActiveVersion via registry)
+  -- ExpectedVersion conflict on publish
+  local conflict = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-1", Version = "v3", ExpectedVersion = "old", ["Actor-Role"] = "publisher" }))
+  assert_status(conflict, "ERROR", "publish expected version conflict")
+  assert_code(conflict, "VERSION_CONFLICT", "publish conflict code")
 end
 
 -- Catalog tests
@@ -179,6 +182,12 @@ do
   local conflict = catalog.route({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-idem", Payload = { name = "changed" }, ["Actor-Role"] = "catalog-admin", ["Request-Id"] = "rid-upsert" })
   assert_status(conflict, "OK", "idempotent conflict status")
   assert_eq(conflict.payload.sku, first.payload.sku, "idempotent conflict ignores change")
+
+  -- ExpectedVersion conflict on PublishCatalogVersion
+  catalog.route(with_req({ Action = "PublishCatalogVersion", ["Site-Id"] = "site-1", Version = "cat-v1", ["Actor-Role"] = "catalog-admin" }))
+  local publish_conflict = catalog.route(with_req({ Action = "PublishCatalogVersion", ["Site-Id"] = "site-1", Version = "cat-v2", ExpectedVersion = "different", ["Actor-Role"] = "catalog-admin" }))
+  assert_status(publish_conflict, "ERROR", "catalog publish conflict status")
+  assert_code(publish_conflict, "VERSION_CONFLICT", "catalog publish conflict code")
 end
 
 -- Access tests

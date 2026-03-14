@@ -131,6 +131,10 @@ end
 function handlers.PublishCatalogVersion(msg)
   local ok, missing = ensure({ "Site-Id", "Version" }, msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local current = state.active_versions[msg["Site-Id"]]
+  if msg.ExpectedVersion and current and current ~= msg.ExpectedVersion then
+    return codec.error("VERSION_CONFLICT", "ExpectedVersion mismatch", { expected = msg.ExpectedVersion, current = current })
+  end
   state.active_versions[msg["Site-Id"]] = msg.Version
   return codec.ok({ siteId = msg["Site-Id"], activeVersion = msg.Version })
 end

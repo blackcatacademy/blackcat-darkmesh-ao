@@ -138,6 +138,10 @@ function handlers.PublishVersion(msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local site = msg["Site-Id"]
   local snapshots = {}
+  local current = state.active_versions[site]
+  if msg.ExpectedVersion and current and current ~= msg.ExpectedVersion then
+    return codec.error("VERSION_CONFLICT", "ExpectedVersion mismatch", { expected = msg.ExpectedVersion, current = current })
+  end
   -- promote drafts to versioned pages for this site and bundle snapshot
   local prefix = "page:" .. site .. ":"
   for key, draft in pairs(state.drafts) do
