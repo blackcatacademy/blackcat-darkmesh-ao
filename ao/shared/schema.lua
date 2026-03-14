@@ -90,6 +90,9 @@ local SCHEMAS = {
       },
       region = { type = "string", enum = { "eu", "us", "apac" } },
       tier = { type = "string", enum = { "dev", "staging", "prod" } },
+      codeHash = { type = "string", pattern = "^[a-fA-F0-9]{64}$" },
+      buildId = { type = "string", minLength = 1, maxLength = 128 },
+      signerPubKey = { type = "string", pattern = "^[a-fA-F0-9]{64}$" },
       policies = {
         type = "object",
         properties = {

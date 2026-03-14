@@ -77,6 +77,11 @@ do
   assert_status(bad_cfg, "ERROR", "register bad cfg status")
   assert_code(bad_cfg, "INVALID_INPUT", "register bad cfg code")
 
+  -- Invalid codeHash pattern
+  local bad_hash = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-badhash", Config = { codeHash = "xyz" }, ["Actor-Role"] = "admin" }))
+  assert_status(bad_hash, "ERROR", "register bad hash status")
+  assert_code(bad_hash, "INVALID_INPUT", "register bad hash code")
+
   -- Oversize config guard
   local big_cfg = { blob = string.rep("x", 20 * 1024) }
   local oversize_cfg = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-big", Config = big_cfg, ["Actor-Role"] = "admin" }))
