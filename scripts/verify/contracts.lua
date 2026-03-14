@@ -55,6 +55,12 @@ do
   local conflict = registry.route(with_req({ Action = "SetActiveVersion", ["Site-Id"] = "site-2", Version = "v11", ExpectedVersion = "v0", ["Actor-Role"] = "registry-admin" }))
   assert_status(conflict, "ERROR", "set version conflict status")
   assert_code(conflict, "VERSION_CONFLICT", "set version conflict code")
+
+  -- Idempotent bind (same Request-Id)
+  local idem_req = { Action = "BindDomain", ["Site-Id"] = "site-2", Host = "example.com", ["Actor-Role"] = "registry-admin", ["Request-Id"] = "rid-bind" }
+  local b1 = registry.route(idem_req)
+  local b2 = registry.route(idem_req)
+  assert_eq(b1.payload.host, b2.payload.host, "idempotent bind host")
 end
 
 -- Site tests
@@ -150,6 +156,12 @@ do
   local denied = catalog.route(with_req({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "bad", Payload = {}, ["Actor-Role"] = "viewer" }))
   assert_status(denied, "ERROR", "catalog forbidden status")
   assert_code(denied, "FORBIDDEN", "catalog forbidden code")
+
+  -- Idempotent upsert
+  local idem_req = { Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-idem", Payload = {}, ["Actor-Role"] = "catalog-admin", ["Request-Id"] = "rid-upsert" }
+  local first = catalog.route(idem_req)
+  local second = catalog.route(idem_req)
+  assert_eq(first.payload.sku, second.payload.sku, "idempotent upsert sku")
 end
 
 -- Access tests
@@ -181,6 +193,12 @@ do
   local deny = access.route(with_req({ Action = "GrantEntitlement", Subject = "u2", Asset = "asset-2", Policy = "view", ["Actor-Role"] = "viewer" }))
   assert_status(deny, "ERROR", "grant forbidden status")
   assert_code(deny, "FORBIDDEN", "grant forbidden code")
+
+  -- Idempotent grant (same Request-Id returns same ref)
+  local idem_req = { Action = "GrantEntitlement", Subject = "u3", Asset = "asset-3", Policy = "view", ["Actor-Role"] = "admin", ["Request-Id"] = "idem-grant" }
+  local first = access.route(idem_req)
+  local second = access.route(idem_req)
+  assert_eq(first.payload.subject, second.payload.subject, "idempotent grant subject")
 end
 
 -- Unknown action test

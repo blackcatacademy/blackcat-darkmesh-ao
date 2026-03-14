@@ -1,1 +1,3 @@
 arweave/snapshots/*.json
+arweave/manifests/*.json
+arweave/manifests/*.log
