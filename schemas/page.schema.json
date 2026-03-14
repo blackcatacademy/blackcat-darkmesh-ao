@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Page",
+  "type": "object",
+  "required": ["id", "title", "blocks"],
+  "properties": {
+    "id": {"type": "string"},
+    "title": {"type": "string"},
+    "locale": {"type": "string"},
+    "layoutId": {"type": "string"},
+    "blocks": {"type": "array", "items": {"type": "object"}}
+  }
+}

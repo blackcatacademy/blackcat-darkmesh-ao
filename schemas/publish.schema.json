@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Publish",
+  "type": "object",
+  "required": ["publishId", "versionId", "manifestTx"],
+  "properties": {
+    "publishId": {"type": "string"},
+    "versionId": {"type": "string"},
+    "manifestTx": {"type": "string"},
+    "activatedAt": {"type": "string", "format": "date-time"},
+    "rollbackTo": {"type": "string"}
+  }
+}

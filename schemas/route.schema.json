@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Route",
+  "type": "object",
+  "required": ["siteId", "path", "pageId"],
+  "properties": {
+    "siteId": {"type": "string"},
+    "path": {"type": "string"},
+    "locale": {"type": "string"},
+    "pageId": {"type": "string"},
+    "type": {"type": "string"}
+  }
+}

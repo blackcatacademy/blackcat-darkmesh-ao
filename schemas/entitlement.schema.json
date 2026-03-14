@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Entitlement",
+  "type": "object",
+  "required": ["subject", "asset"],
+  "properties": {
+    "subject": {"type": "string"},
+    "asset": {"type": "string"},
+    "policy": {"type": "string"}
+  }
+}
