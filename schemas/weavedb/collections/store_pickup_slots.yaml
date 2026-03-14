@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: store_pickup_slots
+schema:
+  type: object
+  required: [id, site_id, location_id, starts_at, ends_at, capacity]
+  properties:
+    id:          { type: string }
+    site_id:     { type: string }
+    location_id: { type: string }
+    starts_at:   { type: string, format: date-time }
+    ends_at:     { type: string, format: date-time }
+    capacity:    { type: integer, minimum: 1 }
+    reserved:    { type: integer, minimum: 0 }
+indexes:
+  - fields: [site_id, location_id, starts_at]

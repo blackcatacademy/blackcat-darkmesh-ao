@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: product_bundles
+schema:
+  type: object
+  required: [id, site_id, name, items]
+  properties:
+    id:      { type: string }
+    site_id: { type: string }
+    name:    { type: string }
+    items:   { type: array, items: { type: object } } # {product_id, qty}
+    price:   { type: number }
+    currency: { type: string, minLength: 3, maxLength: 3 }
+indexes:
+  - fields: [site_id, name]
