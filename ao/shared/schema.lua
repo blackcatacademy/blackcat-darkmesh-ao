@@ -64,9 +64,9 @@ local SCHEMAS = {
     type = "object",
     required = { "asset", "ref" },
     properties = {
-      asset = { type = "string", minLength = 1, maxLength = 256 },
-      ref = { type = "string", minLength = 1, maxLength = 2048 },
-      visibility = { type = "string", enum = { "protected", "public" } }
+      asset = { type = "string", minLength = 1, maxLength = 256, pattern = "^[%w%-%._:/]+$" },
+      ref = { type = "string", minLength = 1, maxLength = 2048, pattern = "^ar://[%w%-]+$" },
+      visibility = { type = "string", enum = { "protected", "public", "private" } }
     },
   },
   registryConfig = {
@@ -76,6 +76,8 @@ local SCHEMAS = {
       version = { type = "string", minLength = 1, maxLength = 128 },
       metadata = { type = "object" },
       flags = { type = "object" },
+      region = { type = "string", enum = { "eu", "us", "apac" } },
+      tier = { type = "string", enum = { "dev", "staging", "prod" } },
     },
   },
 }

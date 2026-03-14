@@ -11,6 +11,7 @@ local REQUIRE_SIGNATURE = os.getenv("AUTH_REQUIRE_SIGNATURE") == "1"
 local RL_WINDOW = tonumber(os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS") or "60")
 local RL_MAX = tonumber(os.getenv("AUTH_RATE_LIMIT_MAX_REQUESTS") or "200")
 local RL_STATE_FILE = os.getenv("AUTH_RATE_LIMIT_FILE")
+local RL_SQLITE = os.getenv("AUTH_RATE_LIMIT_SQLITE")
 local SIG_SECRET = os.getenv("AUTH_SIGNATURE_SECRET")
 local SIG_PUBLIC = os.getenv("AUTH_SIGNATURE_PUBLIC")
 local SIG_TYPE = os.getenv("AUTH_SIGNATURE_TYPE") or "hmac" -- hmac | ed25519
@@ -156,7 +157,11 @@ function Auth.check_rate_limit(msg)
   if bucket.count > RL_MAX then
     return false, "rate_limited"
   end
-  if RL_STATE_FILE then
+  if RL_SQLITE and (os.execute("command -v sqlite3 >/dev/null 2>&1") == 0 or os.execute("command -v sqlite3 >/dev/null 2>&1") == true) then
+    local db = RL_SQLITE
+    os.execute(string.format("sqlite3 %q \"CREATE TABLE IF NOT EXISTS rate (k TEXT PRIMARY KEY, count INT, reset INT);\"", db))
+    os.execute(string.format("sqlite3 %q \"INSERT OR REPLACE INTO rate (k,count,reset) VALUES ('%s',%d,%d);\"", db, key, bucket.count, bucket.reset))
+  elseif RL_STATE_FILE then
     local f = io.open(RL_STATE_FILE, "w")
     if f then
       for rk, rv in pairs(rate_store) do

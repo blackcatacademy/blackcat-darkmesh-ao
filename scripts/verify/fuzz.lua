@@ -53,6 +53,7 @@ do
   os.setenv("ARWEAVE_MODE", "http")
   os.setenv("ARWEAVE_HTTP_REAL", "1")
   os.setenv("ARWEAVE_FORCE_ERROR", "1")
+  os.setenv("ARWEAVE_HTTP_MAX_BODY", "32")
   local ar2 = require("ao.shared.arweave")
   local tx, err = ar2.put_snapshot({ dummy = "ok" })
   if err ~= "http_error" then
@@ -94,6 +95,13 @@ do
   local ok1 = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = siteId, Version = "v1", ["Actor-Role"] = "publisher" }))
   local conflict = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = siteId, Version = "v2", ExpectedVersion = "old", ["Actor-Role"] = "publisher" }))
   if conflict.status ~= "ERROR" then error("Expected VERSION_CONFLICT on second publish") end
+
+  -- Concurrent SetActiveVersion vs PublishVersion in registry
+  local registry = require("ao.registry.process")
+  registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "conc-reg", ["Actor-Role"] = "admin" }))
+  registry.route(with_req({ Action = "SetActiveVersion", ["Site-Id"] = "conc-reg", Version = "v1", ["Actor-Role"] = "registry-admin" }))
+  local conflict2 = registry.route(with_req({ Action = "SetActiveVersion", ["Site-Id"] = "conc-reg", Version = "v2", ExpectedVersion = "nope", ["Actor-Role"] = "registry-admin" }))
+  if conflict2.status ~= "ERROR" then error("Expected VERSION_CONFLICT on SetActiveVersion") end
 end
 
 -- Audit rotation/prune: set tiny rotate and emit many records

@@ -126,6 +126,8 @@ function handlers.PutProtectedAssetRef(msg)
     local ok_len_vis, err_vis = validation.check_length(msg.Visibility, 32, "Visibility")
     if not ok_len_vis then return codec.error("INVALID_INPUT", err_vis, { field = "Visibility" }) end
   end
+  local ok_schema, schema_err = schema.validate("accessAsset", { asset = msg.Asset, ref = msg.Ref, visibility = msg.Visibility or "protected" })
+  if not ok_schema then return codec.error("INVALID_INPUT", "Ref failed schema", { errors = schema_err }) end
   state.protected[msg.Asset] = { ref = msg.Ref, visibility = msg.Visibility or "protected" }
   audit.record("access", "PutProtectedAssetRef", msg, nil, { asset = msg.Asset, ref = msg.Ref })
   return codec.ok({ asset = msg.Asset, ref = msg.Ref })
