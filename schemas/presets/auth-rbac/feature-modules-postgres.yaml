@@ -1,0 +1,53 @@
+Views:
+  rbac_roles_coverage:
+    create: |-
+      CREATE OR REPLACE VIEW vw_rbac_roles_coverage AS
+      SELECT
+        rr.id   AS role_id,
+        rr.slug AS role_slug,
+        COUNT(DISTINCT rp.permission_id) AS permissions_count,
+        COUNT(DISTINCT ur.user_id)       AS users_count
+      FROM rbac_roles rr
+      LEFT JOIN rbac_role_permissions rp ON rp.role_id = rr.id
+      LEFT JOIN rbac_user_roles ur       ON ur.role_id = rr.id AND ur.status = 'active'
+      GROUP BY rr.id, rr.slug;
+    Owner: blackcat-auth
+  rbac_sync_cursors_status:
+    create: |-
+      CREATE OR REPLACE VIEW vw_rbac_sync_cursors_status AS
+      SELECT
+        r.id AS repo_id,
+        r.name AS repo_name,
+        c.peer           AS cursor_name,
+        c.last_commit    AS cursor_value,
+        c.last_synced_at AS updated_at
+      FROM rbac_repositories r
+      LEFT JOIN rbac_sync_cursors c ON c.repo_id = r.id;
+    Owner: blackcat-auth
+  rbac_user_roles_access_summary:
+    create: |-
+      CREATE OR REPLACE VIEW vw_rbac_user_roles_access_summary AS
+      SELECT
+        u.id AS user_id,
+        COUNT(DISTINCT CASE
+            WHEN ur.status = 'active' AND (ur.expires_at IS NULL OR ur.expires_at > now())
+            THEN ur.role_id END) AS active_roles,
+        COUNT(DISTINCT ep.permission_id) AS effective_permissions
+      FROM users u
+      LEFT JOIN rbac_user_roles ur ON ur.user_id = u.id
+      LEFT JOIN vw_rbac_effective_permissions ep ON ep.user_id = u.id
+      GROUP BY u.id;
+    Owner: blackcat-auth
+  rbac_user_roles_expiring_assignments:
+    create: |-
+      CREATE OR REPLACE VIEW vw_rbac_user_roles_expiring_assignments AS
+      SELECT
+        ur.user_id,
+        ur.role_id,
+        ur.expires_at,
+        ur.status
+      FROM rbac_user_roles ur
+      WHERE ur.expires_at IS NOT NULL
+        AND ur.expires_at <= now() + interval '30 day';
+    Owner: blackcat-auth
+FormatVersion: 1.1

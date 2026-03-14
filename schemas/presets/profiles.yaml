@@ -1,0 +1,10 @@
+profiles:
+  minimal:
+    tags: None
+  full:
+    tags:
+      - core
+  analytics:
+    tags:
+      - analytics
+      - reporting

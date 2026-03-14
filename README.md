@@ -90,8 +90,10 @@ tests/             # integration, message-contracts, snapshots, security
 
 ## Table presets (generated from blackcat-database)
 - Presets live in `config/table-presets.json` (built from `blackcat-database/views-library`).
+- Vendored YAML source of truth is now in `schemas/presets/` (copied from `views-library/*`). Edit there if you need local tweaks; re-export bundles from this copy.
 - Helper: `lua scripts/setup/table_presets.lua list` or `suggest "commerce analytics"`, `dump core-observability`.
 - Registry config accepts `tableProfile` (enum) to bind a site to a preset; invalid IDs are rejected by the schema.
+- Registry config can also carry `schemaManifestTx` + `schemaHash` (sha256 of the bundle) when you publish the schema bundle to Arweave; this keeps the canonical schema decentralized.
 
 ## License
 Blackcat Darkmesh AO Proprietary License (see `LICENSE`). External contributions require written permission from Black Cat Academy s. r. o.
