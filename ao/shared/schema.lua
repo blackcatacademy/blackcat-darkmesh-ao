@@ -171,6 +171,8 @@ local function validate_properties(value, schema, path, errors)
           if prop.minItems and #value[name] < prop.minItems then
             table.insert(errors, path .. name .. " fewer than minItems")
           end
+        elseif prop.type == "object" and prop.properties and type(value[name]) == "table" then
+          validate_properties(value[name], prop, path .. name .. ".", errors)
         end
         if prop.format == "date-time" and actual_type == "string" then
           if not tostring(value[name]):match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$") then

@@ -23,7 +23,8 @@ local HTTP_MAX_BODY = tonumber(os.getenv("ARWEAVE_HTTP_MAX_BODY") or "1048576") 
 local EXPECT_RESPONSE_HASH = os.getenv("ARWEAVE_EXPECT_RESPONSE_HASH")
 local FORCE_ERROR = os.getenv("ARWEAVE_FORCE_ERROR") == "1"
 local RESPONSE_PATTERN = os.getenv("ARWEAVE_RESPONSE_PATTERN") or "^%s*%{\""
-local cjson_ok, cjson = pcall(require, "cjson.safe")
+local ok_cjson_safe, cjson_safe = pcall(require, "cjson.safe")
+local cjson = cjson_safe or require("cjson") -- required dependency
 local schema = require("ao.shared.schema")
 
 local function next_tx()
@@ -249,16 +250,14 @@ if MODE == "http" then
             log_request(tx, { warning = "response_unexpected_pattern" })
             return nil, "http_response_invalid"
           end
-          if cjson_ok then
-            local parsed = cjson.decode(body)
-            if not parsed then
-              return nil, "http_response_invalid_json"
-            end
-            local ok_schema, err_schema = schema.validate("arweaveResponse", parsed)
-            if not ok_schema then
-              log_request(tx, { warning = "response_schema_invalid" })
-              return nil, "http_response_schema_invalid"
-            end
+          local parsed = cjson.decode(body)
+          if not parsed then
+            return nil, "http_response_invalid_json"
+          end
+          local ok_schema, err_schema = schema.validate("arweaveResponse", parsed)
+          if not ok_schema then
+            log_request(tx, { warning = "response_schema_invalid" })
+            return nil, "http_response_schema_invalid"
           end
           local resp_hash = sha256(body)
           if not resp_hash then

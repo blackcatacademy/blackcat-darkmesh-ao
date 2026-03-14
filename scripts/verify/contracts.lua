@@ -72,6 +72,11 @@ do
   assert_status(extra, "ERROR", "register extra status")
   assert_code(extra, "UNSUPPORTED_FIELD", "register extra code")
 
+  -- Invalid flags/policies schema
+  local bad_cfg = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-badcfg", Config = { policies = { auditLevel = "ultra" } }, ["Actor-Role"] = "admin" }))
+  assert_status(bad_cfg, "ERROR", "register bad cfg status")
+  assert_code(bad_cfg, "INVALID_INPUT", "register bad cfg code")
+
   -- Oversize config guard
   local big_cfg = { blob = string.rep("x", 20 * 1024) }
   local oversize_cfg = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-big", Config = big_cfg, ["Actor-Role"] = "admin" }))

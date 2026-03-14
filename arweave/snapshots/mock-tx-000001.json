@@ -1,1 +1,1 @@
-{"siteId":"site-1","pages":[{"content":{"blocks":[],"title":"Hello","id":"home"},"pageId":"home"}],"version":"v2"}
+{"siteId":"site-1","version":"v2","pages":[{"content":{"id":"home","title":"Hello","blocks":[]},"pageId":"home"}]}
