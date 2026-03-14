@@ -1,6 +1,0 @@
-Repositories:
-  -
-    Alias: payments
-    Import: use BlackCat\Database\Packages\Orders\Repository\PaymentsRepository;
-    Class: BlackCat\Database\Packages\Orders\Repository\PaymentsRepository
-    VarName: paymentsRepo
