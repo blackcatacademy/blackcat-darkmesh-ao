@@ -3,6 +3,7 @@
 local codec = require("ao.shared.codec")
 local validation = require("ao.shared.validation")
 local ids = require("ao.shared.ids")
+local auth = require("ao.shared.auth")
 
 local handlers = {}
 local allowed_actions = {
@@ -11,6 +12,12 @@ local allowed_actions = {
   "GrantEntitlement",
   "RevokeEntitlement",
   "PutProtectedAssetRef",
+}
+
+local role_policy = {
+  GrantEntitlement = { "admin", "access-admin" },
+  RevokeEntitlement = { "admin", "access-admin" },
+  PutProtectedAssetRef = { "admin", "access-admin" },
 }
 
 local state = {
@@ -95,6 +102,11 @@ local function route(msg)
       return codec.unknown_action(msg.Action)
     end
     return codec.error("MISSING_ACTION", "Action is required")
+  end
+
+  local ok_role, role_err = auth.require_role_for_action(msg, role_policy)
+  if not ok_role then
+    return codec.error("FORBIDDEN", role_err)
   end
 
   local handler = handlers[msg.Action]

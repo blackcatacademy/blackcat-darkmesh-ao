@@ -49,9 +49,9 @@ end
 -- Site tests
 do
   local site = require("ao.site.process")
-  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-1", ["Page-Id"] = "home", Content = { title = "Hello" } }))
-  site.route(with_req({ Action = "UpsertRoute", ["Site-Id"] = "site-1", Path = "/", ["Page-Id"] = "home", ["Layout-Id"] = "layout-1" }))
-  local publish = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-1", Version = "v2" }))
+  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-1", ["Page-Id"] = "home", Content = { title = "Hello" }, ["Actor-Role"] = "editor" }))
+  site.route(with_req({ Action = "UpsertRoute", ["Site-Id"] = "site-1", Path = "/", ["Page-Id"] = "home", ["Layout-Id"] = "layout-1", ["Actor-Role"] = "editor" }))
+  local publish = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-1", Version = "v2", ["Actor-Role"] = "publisher" }))
   assert_eq(publish.status, "OK", "publish status")
   assert_truthy(publish.payload.manifestTx, "publish manifestTx")
   assert_truthy(publish.payload.manifestHash, "publish manifestHash")
@@ -76,26 +76,31 @@ do
   assert_eq(notfound.status, "ERROR", "resolve unknown status")
   assert_code(notfound, "NOT_FOUND", "resolve unknown code")
 
-  local publish_empty = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-2", Version = "v1" }))
+  local publish_empty = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-2", Version = "v1", ["Actor-Role"] = "publisher" }))
   assert_eq(publish_empty.status, "OK", "publish empty status")
   assert_falsy(publish_empty.payload.manifestTx, "publish empty manifest")
 
   -- Archive then fetch
-  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-2", ["Page-Id"] = "old", Content = { title = "Old" } }))
-  site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-2", Version = "v1" }))
-  site.route(with_req({ Action = "ArchivePage", ["Site-Id"] = "site-2", ["Page-Id"] = "old" }))
+  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-2", ["Page-Id"] = "old", Content = { title = "Old" }, ["Actor-Role"] = "editor" }))
+  site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-2", Version = "v1", ["Actor-Role"] = "publisher" }))
+  site.route(with_req({ Action = "ArchivePage", ["Site-Id"] = "site-2", ["Page-Id"] = "old", ["Actor-Role"] = "publisher" }))
   local archived = site.route(with_req({ Action = "GetPage", ["Site-Id"] = "site-2", ["Page-Id"] = "old" }))
   assert_status(archived, "ERROR", "archived page status")
   assert_code(archived, "NOT_FOUND", "archived page code")
+
+  -- Forbidden publish
+  local denied = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-3", Version = "v1", ["Actor-Role"] = "viewer" }))
+  assert_status(denied, "ERROR", "publish forbidden status")
+  assert_code(denied, "FORBIDDEN", "publish forbidden code")
 end
 
 -- Catalog tests
 do
   local catalog = require("ao.catalog.process")
   for i = 1, 60 do
-    catalog.route(with_req({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-" .. i, Payload = { name = "Prod" .. i } }))
+    catalog.route(with_req({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-" .. i, Payload = { name = "Prod" .. i }, ["Actor-Role"] = "catalog-admin" }))
   end
-  catalog.route(with_req({ Action = "UpsertCategory", ["Site-Id"] = "site-1", ["Category-Id"] = "cat-1", Products = { "sku-1", "sku-2", "sku-3", "sku-55" } }))
+  catalog.route(with_req({ Action = "UpsertCategory", ["Site-Id"] = "site-1", ["Category-Id"] = "cat-1", Products = { "sku-1", "sku-2", "sku-3", "sku-55" }, ["Actor-Role"] = "catalog-admin" }))
   local product = catalog.route(with_req({ Action = "GetProduct", ["Site-Id"] = "site-1", Sku = "sku-1" }))
   assert_eq(product.status, "OK", "get product status")
   local listing = catalog.route(with_req({ Action = "ListCategoryProducts", ["Site-Id"] = "site-1", ["Category-Id"] = "cat-1" }))
@@ -118,13 +123,18 @@ do
   -- search miss
   local search_miss = catalog.route(with_req({ Action = "SearchCatalog", ["Site-Id"] = "site-1", Query = "zzz" }))
   assert_eq(search_miss.payload.total, 0, "search miss total")
+
+  -- Forbidden upsert
+  local denied = catalog.route(with_req({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "bad", Payload = {}, ["Actor-Role"] = "viewer" }))
+  assert_status(denied, "ERROR", "catalog forbidden status")
+  assert_code(denied, "FORBIDDEN", "catalog forbidden code")
 end
 
 -- Access tests
 do
   local access = require("ao.access.process")
-  access.route(with_req({ Action = "GrantEntitlement", Subject = "user-1", Asset = "asset-1", Policy = "view" }))
-  access.route(with_req({ Action = "PutProtectedAssetRef", Asset = "asset-1", Ref = "ar://tx123", Visibility = "protected" }))
+  access.route(with_req({ Action = "GrantEntitlement", Subject = "user-1", Asset = "asset-1", Policy = "view", ["Actor-Role"] = "admin" }))
+  access.route(with_req({ Action = "PutProtectedAssetRef", Asset = "asset-1", Ref = "ar://tx123", Visibility = "protected", ["Actor-Role"] = "access-admin" }))
   local check = access.route(with_req({ Action = "HasEntitlement", Subject = "user-1", Asset = "asset-1" }))
   assert_eq(check.status, "OK", "has entitlement status")
   assert_truthy(check.payload.hasEntitlement, "entitlement flag")
@@ -132,7 +142,7 @@ do
   assert_eq(asset.status, "OK", "get asset ref")
   assert_eq(asset.payload.ref, "ar://tx123", "asset ref matches")
 
-  access.route(with_req({ Action = "RevokeEntitlement", Subject = "user-1", Asset = "asset-1" }))
+  access.route(with_req({ Action = "RevokeEntitlement", Subject = "user-1", Asset = "asset-1", ["Actor-Role"] = "admin" }))
   local check2 = access.route(with_req({ Action = "HasEntitlement", Subject = "user-1", Asset = "asset-1" }))
   assert_eq(check2.status, "OK", "has entitlement revoked status")
   assert_falsy(check2.payload.hasEntitlement, "entitlement revoked flag")
@@ -142,8 +152,13 @@ do
   assert_code(missing_asset, "NOT_FOUND", "missing asset ref code")
 
   -- revoke idempotency
-  local rev2 = access.route(with_req({ Action = "RevokeEntitlement", Subject = "user-1", Asset = "asset-1" }))
+  local rev2 = access.route(with_req({ Action = "RevokeEntitlement", Subject = "user-1", Asset = "asset-1", ["Actor-Role"] = "admin" }))
   assert_status(rev2, "OK", "second revoke status")
+
+  -- Forbidden grant
+  local deny = access.route(with_req({ Action = "GrantEntitlement", Subject = "u2", Asset = "asset-2", Policy = "view", ["Actor-Role"] = "viewer" }))
+  assert_status(deny, "ERROR", "grant forbidden status")
+  assert_code(deny, "FORBIDDEN", "grant forbidden code")
 end
 
 -- Unknown action test

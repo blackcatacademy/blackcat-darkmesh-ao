@@ -4,6 +4,7 @@ local codec = require("ao.shared.codec")
 local validation = require("ao.shared.validation")
 local ids = require("ao.shared.ids")
 local ar = require("ao.shared.arweave")
+local auth = require("ao.shared.auth")
 
 local handlers = {}
 local allowed_actions = {
@@ -15,6 +16,13 @@ local allowed_actions = {
   "UpsertRoute",
   "PublishVersion",
   "ArchivePage",
+}
+
+local role_policy = {
+  PutDraft = { "editor", "publisher", "admin" },
+  UpsertRoute = { "editor", "publisher", "admin" },
+  PublishVersion = { "publisher", "admin" },
+  ArchivePage = { "publisher", "admin" },
 }
 
 -- pseudo-state for scaffolding
@@ -174,6 +182,11 @@ local function route(msg)
       return codec.unknown_action(msg.Action)
     end
     return codec.error("MISSING_ACTION", "Action is required")
+  end
+
+  local ok_role, role_err = auth.require_role_for_action(msg, role_policy)
+  if not ok_role then
+    return codec.error("FORBIDDEN", role_err)
   end
 
   local handler = handlers[msg.Action]

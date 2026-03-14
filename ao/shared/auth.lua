@@ -31,4 +31,13 @@ function Auth.require_role(msg, allowed_roles)
   return true
 end
 
+-- Convenience: pick allowlist by action map { action = {roles...} }
+function Auth.require_role_for_action(msg, policy_table)
+  local roles = policy_table[msg.Action]
+  if not roles then
+    return true
+  end
+  return Auth.require_role(msg, roles)
+end
+
 return Auth
