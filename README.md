@@ -51,7 +51,7 @@ tests/             # integration, message-contracts, snapshots, security
 - All comments and documentation in this repository stay in English.
 
 ## Development
-- Prereqs: `lua5.4` (or `luac`) and `python3`.
+- Prereqs: `python3` (3.8+) and Lua (`lua5.1`–`lua5.4`) with rocks `lua-cjson`, `lsqlite3`, `luv`, `luaossl`, and `libsodium` headers for native crypto. Run `lua scripts/verify/deps_check.lua` to verify.
 - Run static checks before opening a PR: `scripts/verify/preflight.sh`.
 - Contract smoke tests are bundled in the preflight script (runs under Lua 5.4).
 - Branches: `main` (releasable), `develop` (integration), `feature/*`, `adr/*`, `release/*`.
@@ -88,11 +88,41 @@ tests/             # integration, message-contracts, snapshots, security
 - Fuzz tests: set `RUN_FUZZ=1` to run `scripts/verify/fuzz.lua` during preflight.
 - Production baseline env: see `ops/env.prod.example` (strict signatures, sqlite rate-limit, Prometheus path).
 
+## Quickstart / Deploy (PowerShell vs shell)
+The commands below ship the **schema bundle** (manifest-only), intended for dev/CI snapshots. For production, export with your curated presets and strict env (see below).
+
+Use the built-in launcher; it detects Windows/WSL vs Linux and prints copy/paste commands:
+```
+python scripts/start.py
+```
+
+Deploy the latest bundle to Arweave via arkb:
+- PowerShell (Windows):
+```
+npx arkb deploy "dev/schema-bundles/schema-bundle-*.tar.gz" --content-type application/gzip   # dev snapshot
+```
+- Bash (Linux/WSL):
+```
+./scripts/setup/build_schema_bundle.sh
+npx arkb deploy ./dev/schema-bundles/schema-bundle-*.tar.gz --content-type application/gzip   # dev snapshot
+```
+
+Handy CLI helpers:
+- List collections: `python scripts/setup/schema_helper.py list`
+- Suggest presets from prompt: `python scripts/setup/schema_helper.py suggest --prompt "ebook shop with subscriptions"`
+- Export bundle with presets: `python scripts/setup/schema_helper.py export --presets core,commerce,content,ebook,subscriptions --out dev/schema-bundles/custom.tar.gz`
+- Dependency check: `lua scripts/verify/deps_check.lua`
+
+**Production reminders**
+- Start from `ops/env.prod.example` and set: `AUTH_REQUIRE_SIGNATURE=1`, `AUTH_SIGNATURE_TYPE=ed25519`, `AUTH_ALLOW_SHELL_FALLBACK=0`, `AUTH_RATE_LIMIT_SQLITE=/var/lib/ao/rate.db`, `METRICS_PROM_PATH=/var/lib/ao/metrics.prom`.
+- Export only the collections you need: `python scripts/setup/schema_helper.py export --presets core,commerce,content --out dev/schema-bundles/prod.tar.gz`.
+- Deploy that prod bundle with arkb from a secured environment.
+
 ## Schemas (WeaveDB-first)
-- Canonical table definitions (columns, types, constraints) jsou po tabulkách v `schemas/canonical-db/tables/` a mapě `schemas/canonical-db/schema-map.yaml`.
-- WeaveDB-ready kolekce v `schemas/weavedb/collections/*.yaml` (JSON Schema + indexes); manifest v3 má sekci `weavedb`.
-- Manifest v3 generuj: `python3 scripts/setup/make_schema_manifest.py` → `schemas/manifest/schema-manifest.json`.
-- Bundle (manifest only) vytvoř: `./scripts/setup/build_schema_bundle.sh`; nasazeno na Arweave jako tx `iygsD6GhCXGI1cXrl2lw6VOpxbjwISZO5pqWmo7y8XM` (sha256 `b1ee8a00d4d2c989c4d7a88daf1ca45c0ea70fb0037dd8b688d44d05f9f534d5`).
+- Canonical table definitions (columns, types, constraints) live in `schemas/canonical-db/tables/` plus the map `schemas/canonical-db/schema-map.yaml`.
+- WeaveDB-ready collections are in `schemas/weavedb/collections/*.yaml` (JSON Schema + indexes); manifest v3 carries them under `weavedb`.
+- Generate manifest v3: `python3 scripts/setup/make_schema_manifest.py` → `schemas/manifest/schema-manifest.json`.
+- Build bundle (manifest only): `./scripts/setup/build_schema_bundle.sh`; current deployed bundle: tx `iygsD6GhCXGI1cXrl2lw6VOpxbjwISZO5pqWmo7y8XM` (sha256 `b1ee8a00d4d2c989c4d7a88daf1ca45c0ea70fb0037dd8b688d44d05f9f534d5`).
 
 ## License
 Blackcat Darkmesh AO Proprietary License (see `LICENSE`). External contributions require written permission from Black Cat Academy s. r. o.
