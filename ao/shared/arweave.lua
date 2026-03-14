@@ -14,6 +14,7 @@ local ENDPOINT = os.getenv("ARWEAVE_HTTP_ENDPOINT")
 local API_KEY = os.getenv("ARWEAVE_HTTP_API_KEY")
 local SIGNER = os.getenv("ARWEAVE_HTTP_SIGNER") -- path to key or wallet JSON
 local HTTP_TIMEOUT = tonumber(os.getenv("ARWEAVE_HTTP_TIMEOUT") or "10")
+local HTTP_REAL = os.getenv("ARWEAVE_HTTP_REAL") == "1"
 
 local function next_tx()
   counter = counter + 1
@@ -39,6 +40,30 @@ local function sha256(str)
     end
   end
   return nil
+end
+
+local function has_curl()
+  local ok = os.execute("command -v curl >/dev/null 2>&1")
+  return ok == true or ok == 0
+end
+
+local function http_post(serialized, tx)
+  ensure_dir(REQUEST_LOG)
+  local response_path = string.format("%s/%s-response.json", REQUEST_LOG, tx)
+  local auth_header = API_KEY and (" -H \"Authorization: Bearer " .. API_KEY .. "\"") or ""
+  local cmd = string.format("echo %q | curl -s -o \"%s\" -w \"%%{http_code}\" -H \"Content-Type: application/json\"%s --max-time %d -X POST \"%s\" --data-binary @-",
+    serialized,
+    response_path,
+    auth_header,
+    HTTP_TIMEOUT,
+    ENDPOINT or "")
+  local pipe = io.popen(cmd, "r")
+  if not pipe then return nil, "curl_failed" end
+  local status = pipe:read("*a")
+  pipe:close()
+  status = status and status:match("(%d+)")
+  if status then status = tonumber(status) end
+  return status, response_path
 end
 
 local function fallback_checksum(str)
@@ -142,13 +167,19 @@ if MODE == "http" then
     local tx = next_tx()
     local serialized = json_encode(payload)
     local hash = sha256(serialized) or fallback_checksum(serialized)
+    local httpStatus, response_path
+    if HTTP_REAL and ENDPOINT and has_curl() then
+      httpStatus, response_path = http_post(serialized, tx)
+    end
     log_request(tx, {
       endpoint = ENDPOINT or "<missing-endpoint>",
       apiKey = API_KEY and "<redacted>",
       signer = SIGNER and "<redacted>",
       timeout = HTTP_TIMEOUT,
       body = payload,
-      simulated = true,
+      simulated = not HTTP_REAL,
+      httpStatus = httpStatus,
+      responsePath = response_path,
     }, hash)
     return tx, hash
   end
