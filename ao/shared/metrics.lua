@@ -11,6 +11,7 @@ local counters = {}
 local since_flush = 0
 local last_flush = os.time()
 local last_tick = os.time()
+local timer = require("ao.shared.timer")
 
 local function ensure_dir(path)
   local dir = path:match("(.+)/[^/]+$")
@@ -52,6 +53,9 @@ function Metrics.tick()
     since_flush = 0
   end
   last_tick = now
+  if FLUSH_INTERVAL > 0 then
+    timer.start(FLUSH_INTERVAL, Metrics.flush_prom)
+  end
 end
 
 function Metrics.flush_prom()

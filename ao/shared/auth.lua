@@ -17,6 +17,7 @@ local SIG_PUBLIC = os.getenv("AUTH_SIGNATURE_PUBLIC")
 local SIG_TYPE = os.getenv("AUTH_SIGNATURE_TYPE") or "hmac" -- hmac | ed25519
 local openssl_ok, openssl = pcall(require, "openssl")
 local sodium_ok, sodium = pcall(require, "sodium")
+local ed25519_ok, ed25519 = pcall(require, "ed25519") -- pure-lua (MIT) if installed
 local sqlite_ok, sqlite = pcall(require, "lsqlite3")
 local SHELL_FALLBACK = os.getenv("AUTH_ALLOW_SHELL_FALLBACK") == "1" -- default now off
 
@@ -101,6 +102,13 @@ function Auth.require_signature(msg)
   end
   local target = (msg.Action or "") .. "|" .. (msg["Site-Id"] or "") .. "|" .. (msg["Request-Id"] or "")
   if SIG_TYPE == "ed25519" and SIG_PUBLIC then
+    if ed25519_ok and ed25519.verify then
+      local pub = assert(io.open(SIG_PUBLIC, "rb")):read("*a")
+      local raw_sig = ed25519.fromhex and ed25519.fromhex(sig) or sig
+      if raw_sig and ed25519.verify(raw_sig, target, pub) then
+        return true
+      end
+    end
     -- Prefer libsodium for detached ed25519 verification (hex signature expected)
     if sodium_ok and sodium.crypto_sign_verify_detached then
       local pub = assert(io.open(SIG_PUBLIC, "rb")):read("*a")
