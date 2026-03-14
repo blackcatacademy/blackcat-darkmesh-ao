@@ -40,6 +40,8 @@ local state = {
 function handlers.ResolveRoute(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Path" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Path", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local key = ids.route_key(msg["Site-Id"], msg.Path)
   local route = state.routes[key]
   if not route then
@@ -57,6 +59,8 @@ end
 function handlers.GetPage(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Page-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Page-Id", "Version", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local version = msg.Version or state.active_versions[msg["Site-Id"]] or "active"
   local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], version)
   local page = state.pages[key]
@@ -74,6 +78,8 @@ end
 function handlers.GetLayout(msg)
   local ok, missing = validation.require_fields(msg, { "Layout-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Layout-Id", "Version", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local version = msg.Version or "active"
   local key = ids.layout_key(msg["Layout-Id"], version)
   local layout = state.layouts[key]
@@ -90,6 +96,8 @@ end
 function handlers.GetNavigation(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Menu-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Menu-Id", "Version", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local version = msg.Version or state.active_versions[msg["Site-Id"]] or "active"
   local key = ids.menu_key(msg["Site-Id"], msg["Menu-Id"], version)
   local menu = state.menus[key]

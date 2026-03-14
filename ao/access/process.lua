@@ -30,6 +30,8 @@ local state = {
 function handlers.HasEntitlement(msg)
   local ok, missing = validation.require_fields(msg, { "Subject", "Asset" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Subject", "Asset", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local key = ids.entitlement_key(msg.Subject, msg.Asset)
   local policy = state.entitlements[key]
   return codec.ok({
@@ -43,6 +45,8 @@ end
 function handlers.GetProtectedAssetRef(msg)
   local ok, missing = validation.require_fields(msg, { "Asset" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Asset", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local asset = state.protected[msg.Asset]
   if not asset then
     return codec.error("NOT_FOUND", "Asset ref not found", { asset = msg.Asset })

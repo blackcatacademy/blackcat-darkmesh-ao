@@ -32,6 +32,8 @@ local state = {
 function handlers.GetProduct(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Sku" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Sku", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local key = ids.product_key(msg["Site-Id"], msg.Sku)
   local product = state.products[key]
   if not product then
@@ -48,6 +50,8 @@ end
 function handlers.ListCategoryProducts(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Category-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Category-Id", "Page", "PageSize", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local key = ids.category_key(msg["Site-Id"], msg["Category-Id"])
   local category = state.categories[key]
   if not category then
@@ -81,6 +85,8 @@ end
 function handlers.SearchCatalog(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Query", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local q = msg.Query and msg.Query:lower() or ""
   local results = {}
   local prefix = "product:" .. msg["Site-Id"] .. ":"
