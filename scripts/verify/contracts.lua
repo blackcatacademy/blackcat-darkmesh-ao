@@ -31,19 +31,24 @@ end
 -- Registry tests
 do
   local registry = require("ao.registry.process")
-  registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-1", Config = { version = "v1" } }))
-  local bind = registry.route(with_req({ Action = "BindDomain", ["Site-Id"] = "site-1", Host = "example.com" }))
+  registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-1", Config = { version = "v1" }, ["Actor-Role"] = "admin" }))
+  local bind = registry.route(with_req({ Action = "BindDomain", ["Site-Id"] = "site-1", Host = "example.com", ["Actor-Role"] = "registry-admin" }))
   assert_eq(bind.status, "OK", "bind status")
   local lookup = registry.route(with_req({ Action = "GetSiteByHost", Host = "example.com" }))
   assert_eq(lookup.status, "OK", "get site by host status")
   assert_eq(lookup.payload.siteId, "site-1", "domain->siteId")
 
   -- conflict: binding another site to same host should overwrite in stub (and keep deterministic)
-  registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-2" }))
-  local rebind = registry.route(with_req({ Action = "BindDomain", ["Site-Id"] = "site-2", Host = "example.com" }))
+  registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-2", ["Actor-Role"] = "admin" }))
+  local rebind = registry.route(with_req({ Action = "BindDomain", ["Site-Id"] = "site-2", Host = "example.com", ["Actor-Role"] = "registry-admin" }))
   assert_status(rebind, "OK", "rebind status")
   local lookup2 = registry.route(with_req({ Action = "GetSiteByHost", Host = "example.com" }))
   assert_eq(lookup2.payload.siteId, "site-2", "rebinding took effect")
+
+  -- forbidden bind
+  local denied = registry.route(with_req({ Action = "BindDomain", ["Site-Id"] = "site-2", Host = "forbidden.com", ["Actor-Role"] = "viewer" }))
+  assert_status(denied, "ERROR", "bind forbidden status")
+  assert_code(denied, "FORBIDDEN", "bind forbidden code")
 end
 
 -- Site tests

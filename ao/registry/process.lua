@@ -3,6 +3,7 @@
 
 local codec = require("ao.shared.codec")
 local validation = require("ao.shared.validation")
+local auth = require("ao.shared.auth")
 local ids = require("ao.shared.ids")
 
 local handlers = {}
@@ -13,6 +14,13 @@ local allowed_actions = {
   "BindDomain",
   "SetActiveVersion",
   "GrantRole",
+}
+
+local role_policy = {
+  RegisterSite = { "admin", "registry-admin" },
+  BindDomain = { "admin", "registry-admin" },
+  SetActiveVersion = { "admin", "registry-admin" },
+  GrantRole = { "admin", "registry-admin" },
 }
 
 -- pseudo-state kept in-memory for now; AO runtime would persist this.
@@ -162,6 +170,11 @@ local function route(msg)
       return codec.unknown_action(msg.Action)
     end
     return codec.error("MISSING_ACTION", "Action is required")
+  end
+
+  local ok_role, role_err = auth.require_role_for_action(msg, role_policy)
+  if not ok_role then
+    return codec.error("FORBIDDEN", role_err)
   end
 
   local handler = handlers[msg.Action]
