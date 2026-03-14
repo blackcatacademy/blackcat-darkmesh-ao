@@ -45,6 +45,8 @@ function handlers.GetSiteByHost(msg)
   end
   local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Host", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_len, err = validation.check_length(msg.Host, 255, "Host")
+  if not ok_len then return codec.error("INVALID_INPUT", err, { field = "Host" }) end
   local site_id = state.domains[msg.Host]
   if not site_id then
     return codec.error("NOT_FOUND", "Domain not bound", { host = msg.Host })
@@ -62,6 +64,8 @@ function handlers.GetSiteConfig(msg)
   end
   local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_len, err = validation.check_length(msg["Site-Id"], 128, "Site-Id")
+  if not ok_len then return codec.error("INVALID_INPUT", err, { field = "Site-Id" }) end
   local site = state.sites[msg["Site-Id"]]
   if not site then
     return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
@@ -80,6 +84,8 @@ function handlers.RegisterSite(msg)
   end
   local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Config", "Version", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_len, err = validation.check_length(msg["Site-Id"], 128, "Site-Id")
+  if not ok_len then return codec.error("INVALID_INPUT", err, { field = "Site-Id" }) end
   local config = msg.Config or {}
   local existing = state.sites[msg["Site-Id"]]
   if existing then
@@ -112,6 +118,10 @@ function handlers.BindDomain(msg)
   end
   local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Host", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_len_id, err_id = validation.check_length(msg["Site-Id"], 128, "Site-Id")
+  if not ok_len_id then return codec.error("INVALID_INPUT", err_id, { field = "Site-Id" }) end
+  local ok_len_host, err_host = validation.check_length(msg.Host, 255, "Host")
+  if not ok_len_host then return codec.error("INVALID_INPUT", err_host, { field = "Host" }) end
   if not state.sites[msg["Site-Id"]] then
     return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
   end
@@ -131,6 +141,14 @@ function handlers.SetActiveVersion(msg)
   end
   local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Version", "ExpectedVersion", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_len_id, err_id = validation.check_length(msg["Site-Id"], 128, "Site-Id")
+  if not ok_len_id then return codec.error("INVALID_INPUT", err_id, { field = "Site-Id" }) end
+  local ok_len_ver, err_ver = validation.check_length(msg.Version, 128, "Version")
+  if not ok_len_ver then return codec.error("INVALID_INPUT", err_ver, { field = "Version" }) end
+  if msg.ExpectedVersion then
+    local ok_len_exp, err_exp = validation.check_length(msg.ExpectedVersion, 128, "ExpectedVersion")
+    if not ok_len_exp then return codec.error("INVALID_INPUT", err_exp, { field = "ExpectedVersion" }) end
+  end
   if not state.sites[msg["Site-Id"]] then
     return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
   end
@@ -155,6 +173,12 @@ function handlers.GrantRole(msg)
   end
   local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Subject", "Role", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_len_id, err_id = validation.check_length(msg["Site-Id"], 128, "Site-Id")
+  if not ok_len_id then return codec.error("INVALID_INPUT", err_id, { field = "Site-Id" }) end
+  local ok_len_subj, err_subj = validation.check_length(msg.Subject, 128, "Subject")
+  if not ok_len_subj then return codec.error("INVALID_INPUT", err_subj, { field = "Subject" }) end
+  local ok_len_role, err_role = validation.check_length(msg.Role, 64, "Role")
+  if not ok_len_role then return codec.error("INVALID_INPUT", err_role, { field = "Role" }) end
   if not state.sites[msg["Site-Id"]] then
     return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
   end

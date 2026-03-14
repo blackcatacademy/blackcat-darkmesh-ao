@@ -98,4 +98,13 @@ function Validation.assert_type(value, expected, field)
   return true
 end
 
+-- Check maximum string length.
+function Validation.check_length(value, max_len, field)
+  if not value or not max_len or max_len <= 0 then return true end
+  if #tostring(value) > max_len then
+    return false, ("too_long:%s"):format(field or "?")
+  end
+  return true
+end
+
 return Validation
