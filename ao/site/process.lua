@@ -6,6 +6,7 @@ local ids = require("ao.shared.ids")
 local ar = require("ao.shared.arweave")
 local auth = require("ao.shared.auth")
 local idem = require("ao.shared.idempotency")
+local audit = require("ao.shared.audit")
 
 local handlers = {}
 local allowed_actions = {
@@ -157,7 +158,9 @@ function handlers.PublishVersion(msg)
   end
 
   state.active_versions[site] = msg.Version
-  return codec.ok({ siteId = site, activeVersion = msg.Version, manifestTx = manifestTx, manifestHash = manifestHash })
+  local resp = codec.ok({ siteId = site, activeVersion = msg.Version, manifestTx = manifestTx, manifestHash = manifestHash })
+  audit.append({ action = "PublishVersion", site = site, version = msg.Version, manifestTx = manifestTx })
+  return resp
 end
 
 function handlers.ArchivePage(msg)

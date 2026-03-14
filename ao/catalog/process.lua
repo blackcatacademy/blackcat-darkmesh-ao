@@ -5,6 +5,7 @@ local validation = require("ao.shared.validation")
 local ids = require("ao.shared.ids")
 local auth = require("ao.shared.auth")
 local idem = require("ao.shared.idempotency")
+local audit = require("ao.shared.audit")
 
 local handlers = {}
 local allowed_actions = {
@@ -112,6 +113,7 @@ function handlers.UpsertProduct(msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.product_key(msg["Site-Id"], msg.Sku)
   state.products[key] = { payload = msg.Payload, version = msg.Version }
+  audit.append({ action = "UpsertProduct", site = msg["Site-Id"], sku = msg.Sku })
   return codec.ok({ sku = msg.Sku })
 end
 

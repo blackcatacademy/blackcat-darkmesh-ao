@@ -6,6 +6,7 @@ local validation = require("ao.shared.validation")
 local auth = require("ao.shared.auth")
 local idem = require("ao.shared.idempotency")
 local ids = require("ao.shared.ids")
+local audit = require("ao.shared.audit")
 
 local handlers = {}
 local allowed_actions = {
@@ -115,6 +116,7 @@ function handlers.BindDomain(msg)
     return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
   end
   state.domains[msg.Host] = msg["Site-Id"]
+  audit.append({ action = "BindDomain", host = msg.Host, siteId = msg["Site-Id"] })
   return codec.ok({
     host = msg.Host,
     siteId = msg["Site-Id"],
@@ -137,10 +139,12 @@ function handlers.SetActiveVersion(msg)
     return codec.error("VERSION_CONFLICT", "ExpectedVersion mismatch", { expected = msg.ExpectedVersion, current = current })
   end
   state.active_versions[msg["Site-Id"]] = msg.Version
-  return codec.ok({
+  local resp = codec.ok({
     siteId = msg["Site-Id"],
     activeVersion = msg.Version,
   })
+  audit.append({ action = "SetActiveVersion", siteId = msg["Site-Id"], version = msg.Version })
+  return resp
 end
 
 function handlers.GrantRole(msg)
@@ -156,6 +160,7 @@ function handlers.GrantRole(msg)
   end
   state.roles[msg["Site-Id"]] = state.roles[msg["Site-Id"]] or {}
   state.roles[msg["Site-Id"]][msg.Subject] = msg.Role
+  audit.append({ action = "GrantRole", siteId = msg["Site-Id"], subject = msg.Subject, role = msg.Role })
   return codec.ok({
     siteId = msg["Site-Id"],
     subject = msg.Subject,

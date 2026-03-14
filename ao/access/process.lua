@@ -5,6 +5,7 @@ local validation = require("ao.shared.validation")
 local ids = require("ao.shared.ids")
 local auth = require("ao.shared.auth")
 local idem = require("ao.shared.idempotency")
+local audit = require("ao.shared.audit")
 
 local handlers = {}
 local allowed_actions = {
@@ -65,6 +66,7 @@ function handlers.GrantEntitlement(msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.entitlement_key(msg.Subject, msg.Asset)
   state.entitlements[key] = msg.Policy
+  audit.append({ action = "GrantEntitlement", subject = msg.Subject, asset = msg.Asset, policy = msg.Policy })
   return codec.ok({
     subject = msg.Subject,
     asset = msg.Asset,
@@ -77,6 +79,7 @@ function handlers.RevokeEntitlement(msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.entitlement_key(msg.Subject, msg.Asset)
   state.entitlements[key] = nil
+  audit.append({ action = "RevokeEntitlement", subject = msg.Subject, asset = msg.Asset })
   return codec.ok({
     subject = msg.Subject,
     asset = msg.Asset,
@@ -88,6 +91,7 @@ function handlers.PutProtectedAssetRef(msg)
   local ok, missing = ensure({ "Asset", "Ref" }, msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   state.protected[msg.Asset] = { ref = msg.Ref, visibility = msg.Visibility or "protected" }
+  audit.append({ action = "PutProtectedAssetRef", asset = msg.Asset, ref = msg.Ref })
   return codec.ok({ asset = msg.Asset, ref = msg.Ref })
 end
 
