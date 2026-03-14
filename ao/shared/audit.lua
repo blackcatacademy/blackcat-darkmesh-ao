@@ -119,6 +119,11 @@ function Audit.log_path()
   return LOG_DIR and (LOG_DIR .. "/audit.log") or nil
 end
 
+function Audit.process_log_path(process)
+  if not LOG_DIR or not process then return nil end
+  return string.format("%s/audit-%s.log", LOG_DIR, process)
+end
+
 function Audit._clear()
   records = {}
 end
