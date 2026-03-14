@@ -115,6 +115,11 @@ do
   local first = site.route(req)
   local second = site.route(req)
   assert_eq(first.payload.manifestTx, second.payload.manifestTx, "idempotent publish manifest")
+
+  -- Conflicting publish payload (different drafts) same Request-Id keeps original
+  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-4", ["Page-Id"] = "extra", Content = { title = "Extra" }, ["Actor-Role"] = "editor", ["Request-Id"] = "rid-extra1" }))
+  local third = site.route(req)
+  assert_eq(third.payload.manifestTx, first.payload.manifestTx, "idempotent publish ignores new drafts")
 end
 
 -- Catalog tests
@@ -162,6 +167,11 @@ do
   local first = catalog.route(idem_req)
   local second = catalog.route(idem_req)
   assert_eq(first.payload.sku, second.payload.sku, "idempotent upsert sku")
+
+  -- Conflicting payload same Request-Id keeps original
+  local conflict = catalog.route({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-idem", Payload = { name = "changed" }, ["Actor-Role"] = "catalog-admin", ["Request-Id"] = "rid-upsert" })
+  assert_status(conflict, "OK", "idempotent conflict status")
+  assert_eq(conflict.payload.sku, first.payload.sku, "idempotent conflict ignores change")
 end
 
 -- Access tests
@@ -199,6 +209,10 @@ do
   local first = access.route(idem_req)
   local second = access.route(idem_req)
   assert_eq(first.payload.subject, second.payload.subject, "idempotent grant subject")
+
+  -- Conflicting payload with same Request-Id returns original
+  local conflict = access.route({ Action = "GrantEntitlement", Subject = "u3", Asset = "asset-3", Policy = "edit", ["Actor-Role"] = "admin", ["Request-Id"] = "idem-grant" })
+  assert_eq(conflict.payload.policy, first.payload.policy, "idempotent ignores new payload")
 end
 
 -- Unknown action test

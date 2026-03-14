@@ -4,20 +4,53 @@ local Audit = {}
 local records = {}
 local LOG_DIR = os.getenv("AUDIT_LOG_DIR") or "arweave/manifests"
 local MAX_IN_MEMORY = tonumber(os.getenv("AUDIT_MAX_RECORDS") or "1000")
+local FORMAT = os.getenv("AUDIT_FORMAT") or "line" -- line | ndjson
+local ROTATE_MAX = tonumber(os.getenv("AUDIT_ROTATE_MAX") or "1048576") -- bytes
 
 local function ensure_dir(path)
   os.execute(string.format('mkdir -p "%s"', path))
 end
 
-local function json_encode(obj)
-  if type(obj) == "table" then
-    local parts = {}
-    for k, v in pairs(obj) do
-      table.insert(parts, string.format("%q:%q", k, tostring(v)))
-    end
-    return "{" .. table.concat(parts, ",") .. "}"
+local function is_array(tbl)
+  local i = 0
+  for _ in pairs(tbl) do
+    i = i + 1
+    if tbl[i] == nil then return false end
   end
-  return tostring(obj)
+  return true
+end
+
+local function json_encode(value)
+  local t = type(value)
+  if t == "nil" then return "null" end
+  if t == "boolean" then return value and "true" or "false" end
+  if t == "number" then return tostring(value) end
+  if t == "string" then return string.format("%q", value) end
+  if t == "table" then
+    if is_array(value) then
+      local parts = {}
+      for _, v in ipairs(value) do table.insert(parts, json_encode(v)) end
+      return "[" .. table.concat(parts, ",") .. "]"
+    else
+      local parts = {}
+      for k, v in pairs(value) do
+        table.insert(parts, string.format("%q:%s", k, json_encode(v)))
+      end
+      return "{" .. table.concat(parts, ",") .. "}"
+    end
+  end
+  return "\"<unsupported>\""
+end
+
+local function rotate_if_needed(path)
+  local f = io.open(path, "r")
+  if not f then return end
+  local content = f:read("*a")
+  f:close()
+  if #content >= ROTATE_MAX then
+    local rotated = path .. "." .. os.date("!%Y%m%d%H%M%S")
+    os.rename(path, rotated)
+  end
 end
 
 function Audit.append(entry)
@@ -28,9 +61,14 @@ function Audit.append(entry)
   if LOG_DIR then
     ensure_dir(LOG_DIR)
     local path = string.format("%s/audit.log", LOG_DIR)
+    rotate_if_needed(path)
     local f = io.open(path, "a")
     if f then
-      f:write(json_encode(entry), "\n")
+      if FORMAT == "ndjson" then
+        f:write(json_encode(entry), "\n")
+      else
+        f:write(tostring(entry.action or "event"), " ", json_encode(entry), "\n")
+      end
       f:close()
     end
   end
