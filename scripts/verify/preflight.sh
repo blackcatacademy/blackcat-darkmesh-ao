@@ -49,4 +49,8 @@ echo "[verify] done"
 if command -v lua5.4 >/dev/null 2>&1; then
   echo "[verify] contract smoke tests"
   lua5.4 "$ROOT_DIR/scripts/verify/contracts.lua"
+  if [ "${RUN_FUZZ:-0}" -eq 1 ]; then
+    echo "[verify] fuzz/property tests"
+    lua5.4 "$ROOT_DIR/scripts/verify/fuzz.lua"
+  fi
 fi

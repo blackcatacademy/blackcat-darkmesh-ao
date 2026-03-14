@@ -77,8 +77,13 @@ tests/             # integration, message-contracts, snapshots, security
   - `REGISTRY_MAX_CONFIG_BYTES` (site config payload, default 16 KiB)
 - Idempotency cache: `IDEM_TTL_SECONDS` (default 300s) and `IDEM_MAX_ENTRIES` (default 1024) bound the in-memory Request-Id store.
 - Security hooks: nonce/signature optional enforcement (`AUTH_REQUIRE_NONCE`, `AUTH_REQUIRE_SIGNATURE`), nonce TTL (`AUTH_NONCE_TTL_SECONDS`), rate limit window (`AUTH_RATE_LIMIT_WINDOW_SECONDS`) and max (`AUTH_RATE_LIMIT_MAX_REQUESTS`).
+- Signature check uses HMAC-SHA256 over `Action|Site-Id|Request-Id` with `AUTH_SIGNATURE_SECRET` (requires `openssl` when enforcement is on).
+- Rate-limit state can persist to `AUTH_RATE_LIMIT_FILE`.
 - Metrics: set `METRICS_ENABLED=1` and `METRICS_LOG` path to emit NDJSON counters; see `ao/shared/metrics.lua`.
+- Prometheus export: set `METRICS_PROM_PATH` to write text exposition on flush.
 - Arweave HTTP: retries/backoff (`ARWEAVE_HTTP_RETRIES`, `ARWEAVE_HTTP_BACKOFF_MS`), manifest cap (`ARWEAVE_MAX_MANIFEST_BYTES`), signer hash logged when present.
+- Arweave dry-run: `ARWEAVE_HTTP_DRYRUN=1` skips curl; errors on HTTP >=400 return `http_error`.
+- Fuzz tests: set `RUN_FUZZ=1` to run `scripts/verify/fuzz.lua` during preflight.
 
 ## License
 Blackcat Darkmesh AO Proprietary License (see `LICENSE`). External contributions require written permission from Black Cat Academy s. r. o.

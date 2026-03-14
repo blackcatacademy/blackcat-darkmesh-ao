@@ -84,7 +84,8 @@ local function http_post(serialized, tx)
       end
     end
     if attempt < HTTP_RETRIES then
-      os.execute(string.format("sleep %.3f", HTTP_BACKOFF_MS / 1000))
+      local jitter = math.random() * 0.5 + 0.75 -- 0.75-1.25x
+      os.execute(string.format("sleep %.3f", (HTTP_BACKOFF_MS * jitter) / 1000))
     end
   end
   return status, response_path
@@ -205,7 +206,7 @@ if MODE == "http" then
     end
     local hash = sha256(serialized) or fallback_checksum(serialized)
     local httpStatus, response_path
-    if HTTP_REAL and ENDPOINT and has_curl() then
+    if HTTP_REAL and ENDPOINT and has_curl() and not (os.getenv("ARWEAVE_HTTP_DRYRUN") == "1") then
       if not signer_exists() then
         log_request(tx, {
           endpoint = ENDPOINT or "<missing-endpoint>",
@@ -221,6 +222,20 @@ if MODE == "http" then
       httpStatus, response_path = http_post(serialized, tx)
     end
     local signerHash = SIGNER and file_sha256(SIGNER) or nil
+    if httpStatus and httpStatus >= 400 then
+      log_request(tx, { error = "http_error", status = httpStatus })
+      return nil, "http_error"
+    end
+    if response_path then
+      local f = io.open(response_path, "r")
+      if f then
+        local body = f:read("*a") or ""
+        f:close()
+        if #body == 0 then
+          log_request(tx, { warning = "empty_response" })
+        end
+      end
+    end
     log_request(tx, {
       endpoint = ENDPOINT or "<missing-endpoint>",
       apiKey = API_KEY and "<redacted>",

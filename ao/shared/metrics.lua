@@ -4,6 +4,7 @@ local Metrics = {}
 
 local LOG_PATH = os.getenv("METRICS_LOG") or "metrics/metrics.log"
 local ENABLED = os.getenv("METRICS_ENABLED") ~= "0"
+local PROM_PATH = os.getenv("METRICS_PROM_PATH")
 local counters = {}
 
 local function ensure_dir(path)
@@ -29,6 +30,17 @@ function Metrics.inc(name, value)
   value = value or 1
   counters[name] = (counters[name] or 0) + value
   log({ name = name, value = counters[name] })
+end
+
+function Metrics.flush_prom()
+  if not PROM_PATH then return end
+  ensure_dir(PROM_PATH)
+  local f = io.open(PROM_PATH, "w")
+  if not f then return end
+  for k, v in pairs(counters) do
+    f:write(string.format("%s %d\n", k:gsub("[^%w_]", "_"), v))
+  end
+  f:close()
 end
 
 function Metrics.get(name)

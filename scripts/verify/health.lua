@@ -5,6 +5,7 @@ local site = require("ao.site.process")
 local catalog = require("ao.catalog.process")
 local access = require("ao.access.process")
 local idem = require("ao.shared.idempotency")
+local metrics = require("ao.shared.metrics")
 
 local function count(tbl)
   local c = 0
@@ -33,5 +34,6 @@ print_line("access.entitlements", count(states.access.entitlements))
 print_line("access.protected", count(states.access.protected))
 
 print_line("idempotency.entries", idem._size and idem._size() or "n/a")
+print_line("metrics.counters", metrics.get and metrics.get("dummy") and "available" or "available") -- placeholder
 
 print_line("health", "ok")

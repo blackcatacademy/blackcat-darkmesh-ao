@@ -10,6 +10,8 @@ local REQUIRE_NONCE = os.getenv("AUTH_REQUIRE_NONCE") == "1"
 local REQUIRE_SIGNATURE = os.getenv("AUTH_REQUIRE_SIGNATURE") == "1"
 local RL_WINDOW = tonumber(os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS") or "60")
 local RL_MAX = tonumber(os.getenv("AUTH_RATE_LIMIT_MAX_REQUESTS") or "200")
+local RL_STATE_FILE = os.getenv("AUTH_RATE_LIMIT_FILE")
+local SIG_SECRET = os.getenv("AUTH_SIGNATURE_SECRET")
 
 local nonce_store = {}
 local rate_store = {}
@@ -76,7 +78,21 @@ function Auth.require_signature(msg)
     end
     return true
   end
-  -- Placeholder: real signature verification should be delegated to gateway.
+  if not SIG_SECRET then
+    return not REQUIRE_SIGNATURE, REQUIRE_SIGNATURE and "missing_signature_secret" or nil
+  end
+  -- simple HMAC-SHA256 over Action|Site-Id|Request-Id
+  local target = (msg.Action or "") .. "|" .. (msg["Site-Id"] or "") .. "|" .. (msg["Request-Id"] or "")
+  local cmd = string.format("printf %%s %q | openssl dgst -sha256 -hmac %q 2>/dev/null", target, SIG_SECRET)
+  local h = io.popen(cmd, "r")
+  if not h then return false, "sig_verify_failed" end
+  local out = h:read("*a") or ""
+  h:close()
+  local computed = out:match("= (%w+)")
+  if not computed then return false, "sig_verify_failed" end
+  if computed:lower() ~= tostring(sig):lower() then
+    return false, "bad_signature"
+  end
   return true
 end
 
@@ -108,6 +124,13 @@ function Auth.check_rate_limit(msg)
   rate_store[key] = bucket
   if bucket.count > RL_MAX then
     return false, "rate_limited"
+  end
+  if RL_STATE_FILE then
+    local f = io.open(RL_STATE_FILE, "w")
+    if f then
+      f:write(string.format("%s,%d,%d\n", key, bucket.count, bucket.reset))
+      f:close()
+    end
   end
   return true
 end
