@@ -1,0 +1,16 @@
+format: weavedb-collection/v1
+name: shipments
+schema:
+  type: object
+  required: [id, site_id, order_id, status]
+  properties:
+    id:         { type: string }
+    site_id:    { type: string }
+    order_id:   { type: string }
+    carrier:    { type: string }
+    tracking:   { type: string }
+    status:     { type: string, enum: [pending, packed, shipped, delivered, lost, returned] }
+    shipped_at: { type: string, format: date-time }
+    delivered_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, order_id]

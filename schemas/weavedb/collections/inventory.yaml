@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: inventory
+schema:
+  type: object
+  required: [id, site_id, sku, qty]
+  properties:
+    id:      { type: string }
+    site_id: { type: string }
+    sku:     { type: string }
+    qty:     { type: integer }
+    reserved:{ type: integer }
+    updated_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, sku]

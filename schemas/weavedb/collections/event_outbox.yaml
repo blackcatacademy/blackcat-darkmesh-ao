@@ -1,0 +1,16 @@
+format: weavedb-collection/v1
+name: event_outbox
+schema:
+  type: object
+  required: [id, site_id, event_type, status, created_at]
+  properties:
+    id:         { type: string }
+    site_id:    { type: string }
+    event_type: { type: string }
+    status:     { type: string, enum: [pending, sent, failed] }
+    payload:    { type: object }
+    attempts:   { type: integer, minimum: 0 }
+    next_attempt_at: { type: string, format: date-time }
+    created_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, status]

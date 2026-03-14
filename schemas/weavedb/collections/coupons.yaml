@@ -1,0 +1,16 @@
+format: weavedb-collection/v1
+name: coupons
+schema:
+  type: object
+  required: [id, code, is_active]
+  properties:
+    id:        { type: string }
+    code:      { type: string }
+    is_active: { type: boolean }
+    starts_at: { type: string, format: date-time }
+    ends_at:   { type: string, format: date-time }
+    amount_off:{ type: number }
+    percent_off:{ type: number }
+    currency:  { type: string, minLength: 3, maxLength: 3 }
+indexes:
+  - fields: [code]

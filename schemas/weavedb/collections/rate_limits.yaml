@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: rate_limits
+schema:
+  type: object
+  required: [id, subject, window_sec, max_hits, hits, reset_at]
+  properties:
+    id:        { type: string }
+    subject:   { type: string }           # e.g., site:user or ip:xxx
+    window_sec: { type: integer, minimum: 1 }
+    max_hits:  { type: integer, minimum: 0 }
+    hits:      { type: integer, minimum: 0 }
+    reset_at:  { type: string, format: date-time }
+indexes:
+  - fields: [subject]

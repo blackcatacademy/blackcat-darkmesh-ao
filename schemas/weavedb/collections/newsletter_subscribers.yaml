@@ -1,0 +1,13 @@
+format: weavedb-collection/v1
+name: newsletter_subscribers
+schema:
+  type: object
+  required: [id, site_id, email_hash, subscribed_at]
+  properties:
+    id:            { type: string }
+    site_id:       { type: string }
+    email_hash:    { type: string }
+    subscribed_at: { type: string, format: date-time }
+    status:        { type: string, enum: [subscribed, unsubscribed, bounced] }
+indexes:
+  - fields: [site_id, email_hash]

@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: refunds
+schema:
+  type: object
+  required: [id, payment_id, status, amount, currency, created_at]
+  properties:
+    id:         { type: string }
+    payment_id: { type: string }
+    status:     { type: string, enum: [pending, processing, completed, failed] }
+    amount:     { type: number }
+    currency:   { type: string, minLength: 3, maxLength: 3 }
+    reason:     { type: string }
+    created_at: { type: string, format: date-time }
+indexes:
+  - fields: [payment_id, status]

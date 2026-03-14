@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: entitlements
+schema:
+  type: object
+  required: [id, site_id, user_id, resource_id, resource_type]
+  properties:
+    id:            { type: string }
+    site_id:       { type: string }
+    user_id:       { type: string }
+    resource_id:   { type: string }
+    resource_type: { type: string }
+    expires_at:    { type: string, format: date-time }
+indexes:
+  - fields: [site_id, user_id, resource_id]
