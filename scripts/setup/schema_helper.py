@@ -6,6 +6,7 @@ Commands:
   pick --presets core,commerce - generate subset manifest to stdout
   export --presets core,ebook --out bundle.tar.gz
   explain <collection>         - print JSON Schema + indexes
+  suggest --prompt "my use case" - offline heuristic preset suggestion
 """
 
 import argparse
@@ -119,6 +120,13 @@ PRESETS = {
     },
 }
 
+KEYWORDS = {
+    "commerce": ["shop", "store", "eshop", "cart", "order", "payment", "checkout"],
+    "ebook": ["ebook", "book", "reader", "reading", "epub", "pdf", "mobi"],
+    "subscriptions": ["subscription", "saas", "plan", "recurring", "invoice"],
+    "content": ["blog", "cms", "seo", "page", "content", "nav", "menu"],
+}
+
 
 def load_collections():
     cols = {}
@@ -219,6 +227,18 @@ def cmd_export(collections, presets, out_path: Path):
     print(f"{C.GREEN}✔{C.RESET} SHA256: {C.BOLD}{sha}{C.RESET}")
 
 
+def cmd_suggest(prompt: str):
+    prompt_lower = prompt.lower()
+    hits = set(["core"])  # always include core
+    for preset, words in KEYWORDS.items():
+        if any(w in prompt_lower for w in words):
+            hits.add(preset)
+    if not hits:
+        hits.add("core")
+    print(f"{C.BOLD}Suggested presets:{C.RESET} {', '.join(sorted(hits))}")
+    print("Use: schema_helper export --presets " + ",".join(sorted(hits)) + " --out dev/schema-bundles/custom.tar.gz")
+
+
 def main():
     collections = load_collections()
     PRESETS["full"]["collections"] = list(collections.keys())
@@ -238,6 +258,9 @@ def main():
     p_export.add_argument("--presets", required=True, help="Comma-separated presets")
     p_export.add_argument("--out", required=True, help="Output tar.gz path")
 
+    p_suggest = sub.add_parser("suggest", help="Suggest presets from a natural-language prompt")
+    p_suggest.add_argument("--prompt", required=True, help="Describe your project")
+
     args = parser.parse_args()
 
     if args.cmd == "list":
@@ -251,6 +274,8 @@ def main():
         presets = [p.strip() for p in args.presets.split(",") if p.strip()]
         out = Path(args.out)
         cmd_export(collections, presets, out)
+    elif args.cmd == "suggest":
+        cmd_suggest(args.prompt)
     else:
         parser.print_help()
 
