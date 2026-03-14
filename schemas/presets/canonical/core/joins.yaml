@@ -1,0 +1,879 @@
+Views:
+  rbac_conflicts:
+    create: |-
+      -- Users with conflicting allow/deny permissions
+      CREATE OR REPLACE VIEW vw_rbac_conflicts AS
+      WITH allowed AS (
+        SELECT user_id, permission_id, tenant_id, scope FROM rbac_user_permissions WHERE effect='allow'
+        UNION
+        SELECT ur.user_id, rp.permission_id, ur.tenant_id, ur.scope
+        FROM rbac_user_roles ur
+        JOIN rbac_role_permissions rp ON rp.role_id = ur.role_id AND rp.effect='allow'
+        WHERE ur.status='active' AND (ur.expires_at IS NULL OR ur.expires_at > now())
+      ),
+      denied AS (
+        SELECT user_id, permission_id, tenant_id, scope FROM rbac_user_permissions WHERE effect='deny'
+        UNION
+        SELECT ur.user_id, rp.permission_id, ur.tenant_id, ur.scope
+        FROM rbac_user_roles ur
+        JOIN rbac_role_permissions rp ON rp.role_id = ur.role_id AND rp.effect='deny'
+        WHERE ur.status='active' AND (ur.expires_at IS NULL OR ur.expires_at > now())
+      )
+      SELECT DISTINCT
+        a.user_id,
+        a.permission_id,
+        p.name AS permission_name,
+        a.tenant_id,
+        a.scope
+      FROM allowed a
+      JOIN denied d
+        ON d.user_id = a.user_id
+       AND d.permission_id = a.permission_id
+       AND COALESCE(d.tenant_id, -1) = COALESCE(a.tenant_id, -1)
+       AND COALESCE(d.scope, '') = COALESCE(a.scope, '')
+      JOIN permissions p ON p.id = a.permission_id;
+  rbac_effective_permissions:
+    create: |-
+      -- Effective permissions (deny overrides allow)
+      CREATE OR REPLACE VIEW vw_rbac_effective_permissions AS
+      WITH allows AS (
+        SELECT ur.user_id, rp.permission_id, ur.tenant_id, ur.scope
+        FROM rbac_user_roles ur
+        JOIN rbac_role_permissions rp ON rp.role_id = ur.role_id AND rp.effect = 'allow'
+        WHERE ur.status='active' AND (ur.expires_at IS NULL OR ur.expires_at > now())
+        UNION
+        SELECT up.user_id, up.permission_id, up.tenant_id, up.scope
+        FROM rbac_user_permissions up WHERE up.effect = 'allow'
+      ),
+      denies AS (
+        SELECT ur.user_id, rp.permission_id, ur.tenant_id, ur.scope
+        FROM rbac_user_roles ur
+        JOIN rbac_role_permissions rp ON rp.role_id = ur.role_id AND rp.effect = 'deny'
+        WHERE ur.status='active' AND (ur.expires_at IS NULL OR ur.expires_at > now())
+        UNION
+        SELECT up.user_id, up.permission_id, up.tenant_id, up.scope
+        FROM rbac_user_permissions up WHERE up.effect = 'deny'
+      )
+      SELECT a.user_id, a.permission_id, a.tenant_id, a.scope
+      FROM allows a
+      LEFT JOIN denies d
+        ON d.user_id = a.user_id
+       AND d.permission_id = a.permission_id
+       AND COALESCE(d.tenant_id, -1) = COALESCE(a.tenant_id, -1)
+       AND COALESCE(d.scope, '') = COALESCE(a.scope, '')
+      WHERE d.permission_id IS NULL;
+  invoices_with_items:
+    create: |-
+      -- Invoices with item count and summed lines
+      CREATE OR REPLACE VIEW vw_invoices_with_items AS
+      SELECT
+        i.id,
+        i.tenant_id,
+        i.order_id,
+        i.invoice_number,
+        i.total,
+        i.currency,
+        i.issue_date,
+        i.due_date,
+        COUNT(ii.id) AS items_count,
+        SUM(ii.line_total) AS items_total
+      FROM invoices i
+      LEFT JOIN invoice_items ii
+        ON ii.invoice_id = i.id AND ii.tenant_id = i.tenant_id
+      GROUP BY i.id, i.tenant_id, i.order_id, i.invoice_number, i.total, i.currency, i.issue_date, i.due_date;
+  orders_user_summary:
+    create: |-
+      -- User-level order summary
+      CREATE OR REPLACE VIEW vw_orders_user_summary AS
+      SELECT
+        u.id AS user_id,
+        COUNT(o.id) AS orders_count,
+        SUM(CASE WHEN o.status IN ($$paid$$,$$completed$$) THEN o.total ELSE 0 END) AS total_spent
+      FROM users u
+      LEFT JOIN orders o ON o.user_id = u.id
+      GROUP BY u.id;
+  payments_recent_failures:
+    create: |-
+      -- Recent failed payments (24h)
+      CREATE OR REPLACE VIEW vw_payments_recent_failures AS
+      SELECT
+        p.*,
+        EXTRACT(EPOCH FROM (now() - p.created_at)) AS age_sec
+      FROM payments p
+      WHERE p.status = $$failed$$
+        AND p.created_at > now() - interval $$24 hours$$
+      ORDER BY p.created_at DESC;
+  kms_health_latest:
+    create: |-
+      -- Latest health sample per provider/key
+      CREATE OR REPLACE VIEW vw_kms_health_latest AS
+      SELECT DISTINCT ON (COALESCE(kms_key_id,-1), COALESCE(provider_id,-1))
+        id, provider_id, kms_key_id, status, latency_ms, error, checked_at
+      FROM kms_health_checks
+      ORDER BY COALESCE(kms_key_id,-1), COALESCE(provider_id,-1), checked_at DESC;
+  login_hotspots_ip:
+    create: |-
+      -- Security: IPs with failed logins (last 24h)
+      CREATE OR REPLACE VIEW vw_login_hotspots_ip AS
+      SELECT
+        ip_hash,
+        UPPER(encode(ip_hash,$$hex$$)) AS ip_hash_hex,
+        COUNT(*) FILTER (WHERE attempted_at > now() - interval $$24 hours$$) AS total_24h,
+        COUNT(*) FILTER (WHERE success = false AND attempted_at > now() - interval $$24 hours$$) AS failed_24h,
+        MAX(attempted_at) AS last_attempt_at
+      FROM login_attempts
+      GROUP BY ip_hash
+      HAVING COUNT(*) FILTER (WHERE success = false AND attempted_at > now() - interval $$24 hours$$) > 0
+      ORDER BY failed_24h DESC, last_attempt_at DESC;
+  event_throughput_hourly:
+    create: |-
+      -- Hourly throughput for outbox/inbox
+      CREATE OR REPLACE VIEW vw_event_throughput_hourly AS
+      WITH o AS (
+        SELECT date_trunc('hour', created_at) AS ts, COUNT(*) AS outbox_cnt
+        FROM event_outbox GROUP BY 1
+      ),
+      i AS (
+        SELECT date_trunc('hour', received_at) AS ts, COUNT(*) AS inbox_cnt
+        FROM event_inbox GROUP BY 1
+      )
+      SELECT
+        COALESCE(o.ts, i.ts) AS hour_ts,
+        COALESCE(outbox_cnt,0) AS outbox_cnt,
+        COALESCE(inbox_cnt,0)  AS inbox_cnt
+      FROM o FULL JOIN i ON o.ts = i.ts
+      ORDER BY hour_ts DESC;
+  payments_status_summary:
+    create: |-
+      -- Payment status summary by gateway
+      CREATE OR REPLACE VIEW vw_payments_status_summary AS
+      SELECT
+        gateway,
+        status,
+        COUNT(*) AS total,
+        SUM(CASE WHEN status IN ($$authorized$$,$$paid$$,$$partially_refunded$$,$$refunded$$) THEN amount ELSE 0 END) AS sum_amount
+      FROM payments
+      GROUP BY gateway, status
+      ORDER BY gateway, status;
+  order_items_detailed:
+    create: |-
+      -- Order items with book/author/category context
+      CREATE OR REPLACE VIEW vw_order_items_detailed AS
+      SELECT
+        oi.id,
+        oi.order_id,
+        oi.tenant_id,
+        oi.book_id,
+        oi.title_snapshot    AS item_title,
+        oi.sku_snapshot      AS item_sku,
+        oi.quantity,
+        oi.unit_price,
+        oi.currency,
+        oi.tax_rate,
+        o.user_id,
+        o.status             AS order_status,
+        b.title              AS book_title,
+        a.name               AS author_name,
+        c.name               AS category_name
+      FROM order_items oi
+      LEFT JOIN orders o
+        ON o.tenant_id = oi.tenant_id AND o.id = oi.order_id
+      LEFT JOIN books b
+        ON b.tenant_id = oi.tenant_id AND b.id = oi.book_id
+      LEFT JOIN authors a
+        ON a.tenant_id = b.tenant_id AND a.id = b.author_id
+      LEFT JOIN categories c
+        ON c.tenant_id = b.tenant_id AND c.id = b.main_category_id;
+  notifications_due:
+    create: |-
+      -- Notifications due for sending (pending/processing and due_now)
+      CREATE OR REPLACE VIEW vw_notifications_due AS
+      SELECT
+        n.id,
+        n.channel,
+        n.status,
+        n.next_attempt_at,
+        n.last_attempt_at,
+        n.created_at,
+        EXTRACT(EPOCH FROM (now() - n.created_at)) AS age_sec,
+        EXTRACT(EPOCH FROM (now() - COALESCE(n.last_attempt_at, n.created_at))) AS idle_sec
+      FROM notifications n
+      WHERE n.status IN ($$pending$$,$$processing$$)
+        AND (n.next_attempt_at IS NULL OR n.next_attempt_at <= now());
+  merkle_latest:
+    create: |-
+      -- Latest Merkle roots per table
+      CREATE OR REPLACE VIEW vw_merkle_latest AS
+      SELECT DISTINCT ON (subject_table)
+        subject_table,
+        period_start,
+        period_end,
+        leaf_count,
+        UPPER(encode(root_hash,'hex')) AS root_hash_hex,
+        created_at
+      FROM merkle_roots
+      ORDER BY subject_table, created_at DESC;
+  deletion_jobs_status:
+    create: |-
+      -- Deletion jobs summary
+      CREATE OR REPLACE VIEW vw_deletion_jobs_status AS
+      SELECT
+        status,
+        COUNT(*) AS jobs,
+        MAX(finished_at) AS last_finished
+      FROM deletion_jobs
+      GROUP BY status
+      ORDER BY status;
+  book_assets_encryption_coverage:
+    create: |-
+      -- Encryption coverage per asset_type
+      CREATE OR REPLACE VIEW vw_book_assets_encryption_coverage AS
+      SELECT
+        asset_type,
+        COUNT(*)                                         AS total,
+        COUNT(*) FILTER (WHERE is_encrypted)             AS encrypted,
+        ROUND(100.0 * COUNT(*) FILTER (WHERE is_encrypted) / GREATEST(COUNT(*),1), 2) AS pct_encrypted
+      FROM book_assets
+      GROUP BY asset_type;
+  rate_limit_counters_hotspots:
+    create: |-
+      -- Hottest rate-limit subjects in the last hour
+      CREATE OR REPLACE VIEW vw_rate_limit_counters_hotspots AS
+      SELECT
+        subject_type,
+        subject_id,
+        name,
+        SUM(count) AS total_count
+      FROM rate_limit_counters
+      WHERE window_start > now() - interval $$1 hour$$
+      GROUP BY subject_type, subject_id, name
+      HAVING SUM(count) > 0
+      ORDER BY total_count DESC, subject_type, subject_id, name;
+  notifications_queue_metrics:
+    create: |-
+      -- Queue metrics for [notifications]
+      CREATE OR REPLACE VIEW vw_notifications_queue_metrics AS
+      SELECT
+        channel,
+        status,
+        COUNT(*) AS total,
+        COUNT(*) FILTER (WHERE status IN ('pending','processing') AND (next_attempt_at IS NULL OR next_attempt_at <= now())) AS due_now,
+        PERCENTILE_DISC(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (now() - COALESCE(last_attempt_at, created_at)))) AS p95_age_sec
+      FROM notifications
+      GROUP BY channel, status
+      ORDER BY channel, status;
+  orders_funnel:
+    create: |-
+      -- Global funnel of orders
+      CREATE OR REPLACE VIEW vw_orders_funnel AS
+      SELECT
+        COUNT(*) AS orders_total,
+        COUNT(*) FILTER (WHERE status = $$pending$$)   AS pending,
+        COUNT(*) FILTER (WHERE status = $$paid$$)      AS paid,
+        COUNT(*) FILTER (WHERE status = $$completed$$) AS completed,
+        COUNT(*) FILTER (WHERE status = $$failed$$)    AS failed,
+        COUNT(*) FILTER (WHERE status = $$cancelled$$) AS cancelled,
+        COUNT(*) FILTER (WHERE status = $$refunded$$)  AS refunded,
+        ROUND(
+          100.0 * COUNT(*) FILTER (WHERE status IN ($$paid$$,$$completed$$)) / GREATEST(COUNT(*),1),
+          2
+        ) AS payment_conversion_pct
+      FROM orders;
+  kms_keys_status_by_provider:
+    create: |-
+      -- KMS keys status per provider
+      CREATE OR REPLACE VIEW vw_kms_keys_status_by_provider AS
+      SELECT
+        p.provider,
+        p.name        AS provider_name,
+        COUNT(k.id)   AS total,
+        COUNT(k.id) FILTER (WHERE k.status='active')   AS active,
+        COUNT(k.id) FILTER (WHERE k.status='retired')  AS retired,
+        COUNT(k.id) FILTER (WHERE k.status='disabled') AS disabled
+      FROM kms_keys k
+      JOIN kms_providers p ON p.id = k.provider_id
+      GROUP BY p.provider, p.name
+      ORDER BY p.provider, p.name;
+  payments_with_logs:
+    create: |-
+      -- Payments with last log entry and log count
+      CREATE OR REPLACE VIEW vw_payments_with_logs AS
+      WITH ranked_logs AS (
+        SELECT
+          pl.*,
+          ROW_NUMBER() OVER (PARTITION BY pl.payment_id ORDER BY pl.log_at DESC, pl.id DESC) AS rn
+        FROM payment_logs pl
+      )
+      SELECT
+        p.*,
+        rl.message   AS last_log_message,
+        rl.log_at    AS last_log_at,
+        (SELECT COUNT(*) FROM payment_logs x WHERE x.payment_id = p.id) AS logs_count
+      FROM payments p
+      LEFT JOIN ranked_logs rl ON rl.payment_id = p.id AND rl.rn = 1;
+  schema_versions_latest:
+    create: |-
+      -- Latest version per system/component
+      CREATE OR REPLACE VIEW vw_schema_versions_latest AS
+      SELECT DISTINCT ON (system_name, component)
+        system_name,
+        component,
+        version,
+        checksum,
+        applied_at,
+        meta
+      FROM schema_registry
+      ORDER BY system_name, component, applied_at DESC;
+  login_hotspots_user:
+    create: |-
+      -- Security: users with failed logins (last 24h)
+      CREATE OR REPLACE VIEW vw_login_hotspots_user AS
+      SELECT
+        user_id,
+        COUNT(*) FILTER (WHERE attempted_at > now() - interval $$24 hours$$) AS total_24h,
+        COUNT(*) FILTER (WHERE success = false AND attempted_at > now() - interval $$24 hours$$) AS failed_24h,
+        MAX(attempted_at) AS last_attempt_at
+      FROM login_attempts
+      WHERE user_id IS NOT NULL
+      GROUP BY user_id
+      HAVING COUNT(*) FILTER (WHERE success = false AND attempted_at > now() - interval $$24 hours$$) > 0
+      ORDER BY failed_24h DESC, last_attempt_at DESC;
+  sessions_active_by_user:
+    create: |-
+      -- Active sessions per user
+      CREATE OR REPLACE VIEW vw_sessions_active_by_user AS
+      SELECT
+        user_id,
+        COUNT(*) AS active_sessions,
+        MIN(created_at) AS first_created_at,
+        MAX(last_seen_at) AS last_seen_at
+      FROM sessions
+      WHERE revoked = false AND (expires_at IS NULL OR expires_at > now())
+      GROUP BY user_id
+      ORDER BY active_sessions DESC;
+  sync_backlog_by_node:
+    create: |-
+      -- Pending outbox backlog per producer node/channel
+      CREATE OR REPLACE VIEW vw_sync_backlog_by_node AS
+      SELECT
+        COALESCE(producer_node, $$(unknown)$$) AS producer_node,
+        event_type,
+        COUNT(*) FILTER (WHERE status = $$pending$$) AS pending,
+        COUNT(*) FILTER (WHERE status = $$failed$$)  AS failed,
+        COUNT(*) AS total
+      FROM event_outbox
+      GROUP BY COALESCE(producer_node, $$(unknown)$$), event_type
+      ORDER BY pending DESC NULLS LAST, failed DESC;
+  crypto_keys_latest:
+    create: |-
+      -- Latest version per basename
+      CREATE OR REPLACE VIEW vw_crypto_keys_latest AS
+      SELECT DISTINCT ON (basename)
+        basename, id, version, status, algorithm, key_type, activated_at, retired_at
+      FROM crypto_keys
+      ORDER BY basename, version DESC;
+  global_id_map:
+    create: |-
+      -- Globalâ†’local id registry (legacy map alias)
+      CREATE OR REPLACE VIEW vw_global_id_map AS
+      SELECT
+        gid,
+        guid,
+        entity_table,
+        entity_pk,
+        created_at
+      FROM global_id_registry;
+  webhook_outbox_metrics:
+    create: |-
+      -- Metrics for [webhook_outbox]
+      CREATE OR REPLACE VIEW vw_webhook_outbox_metrics AS
+      SELECT
+        status,
+        COUNT(*) AS total,
+        COUNT(*) FILTER (WHERE status=$$pending$$ AND (next_attempt_at IS NULL OR next_attempt_at <= now())) AS due_now
+      FROM webhook_outbox
+      GROUP BY status;
+  sync_failures_recent:
+    create: |-
+      -- Recent sync failures (24h)
+      CREATE OR REPLACE VIEW vw_sync_failures_recent AS
+      SELECT
+        e.id,
+        e.source,
+        e.event_key,
+        e.peer_id,
+        e.error,
+        e.created_at
+      FROM sync_errors e
+      WHERE e.created_at > now() - interval $$24 hours$$
+      ORDER BY e.created_at DESC;
+  orders_payments_latest:
+    create: |-
+      -- Orders with latest payment snapshot
+      CREATE OR REPLACE VIEW vw_orders_payments_latest AS
+      SELECT
+        o.id          AS order_id,
+        o.tenant_id,
+        o.user_id,
+        o.status      AS order_status,
+        o.total       AS order_total,
+        o.currency    AS order_currency,
+        p.gateway     AS payment_gateway,
+        p.status      AS payment_status,
+        p.amount      AS payment_amount,
+        p.currency    AS payment_currency,
+        p.created_at  AS payment_created_at
+      FROM orders o
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM payments p
+        WHERE p.tenant_id = o.tenant_id AND p.order_id = o.id
+        ORDER BY p.created_at DESC, p.id DESC
+        LIMIT 1
+      ) p ON TRUE;
+  event_outbox_due:
+    create: |-
+      -- Pending/due outbox messages with lag
+      CREATE OR REPLACE VIEW vw_event_outbox_due AS
+      SELECT
+        eo.id,
+        eo.event_type,
+        eo.status,
+        eo.attempts,
+        eo.created_at,
+        eo.next_attempt_at,
+        EXTRACT(EPOCH FROM (now() - eo.created_at)) AS age_sec,
+        EXTRACT(EPOCH FROM (now() - COALESCE(eo.next_attempt_at, eo.created_at))) AS since_next_sec
+      FROM event_outbox eo
+      WHERE eo.status IN ($$pending$$,$$failed$$)
+        AND (eo.next_attempt_at IS NULL OR eo.next_attempt_at <= now());
+  event_outbox_metrics:
+    create: |-
+      -- Aggregated metrics for [event_outbox]
+      CREATE OR REPLACE VIEW vw_event_outbox_metrics AS
+      SELECT
+        event_type,
+        COUNT(*)                                AS total,
+        COUNT(*) FILTER (WHERE status='pending') AS pending,
+        COUNT(*) FILTER (WHERE status='sent')    AS sent,
+        COUNT(*) FILTER (WHERE status='failed')  AS failed,
+        AVG(EXTRACT(EPOCH FROM (now() - created_at))) AS avg_created_lag_sec,
+        PERCENTILE_DISC(0.50) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (now()-created_at))) AS p50_created_lag_sec,
+        PERCENTILE_DISC(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (now()-created_at))) AS p95_created_lag_sec,
+        AVG(attempts)                           AS avg_attempts,
+        MAX(attempts)                           AS max_attempts,
+        COUNT(*) FILTER (WHERE status IN ('pending','failed') AND (next_attempt_at IS NULL OR next_attempt_at <= now())) AS due_now
+      FROM event_outbox
+      GROUP BY event_type;
+  books_with_assets:
+    create: |-
+      -- Books with asset availability summary
+      CREATE OR REPLACE VIEW vw_books_with_assets AS
+      SELECT
+        b.id,
+        b.tenant_id,
+        b.title,
+        b.is_active,
+        b.is_available,
+        COUNT(*) FILTER (WHERE ba.asset_type = $$cover$$) AS cover_assets,
+        COUNT(*) FILTER (WHERE ba.asset_type IN ($$pdf$$,$$epub$$,$$mobi$$,$$sample$$,$$extra$$)) AS downloadable_assets
+      FROM books b
+      LEFT JOIN book_assets ba
+        ON ba.tenant_id = b.tenant_id AND ba.book_id = b.id
+      GROUP BY b.id, b.tenant_id, b.title, b.is_active, b.is_available;
+  cart_items_detailed:
+    create: |-
+      -- Cart items with cart/user/book context
+      CREATE OR REPLACE VIEW vw_cart_items_detailed AS
+      SELECT
+        ci.id,
+        ci.cart_id,
+        ci.tenant_id,
+        ci.book_id,
+        ci.quantity,
+        ci.unit_price,
+        ci.currency,
+        c.user_id,
+        b.title      AS book_title,
+        a.name       AS author_name
+      FROM cart_items ci
+      LEFT JOIN carts c
+        ON c.id = ci.cart_id AND c.tenant_id = ci.tenant_id
+      LEFT JOIN books b
+        ON b.id = ci.book_id AND b.tenant_id = ci.tenant_id
+      LEFT JOIN authors a
+        ON a.id = b.author_id AND a.tenant_id = b.tenant_id;
+  audit_chain_gaps:
+    create: |-
+      -- Audit rows missing chain entries
+      CREATE OR REPLACE VIEW vw_audit_chain_gaps AS
+      SELECT
+        al.id AS audit_id,
+        al.changed_at,
+        al.table_name,
+        al.record_id
+      FROM audit_log al
+      LEFT JOIN audit_chain ac ON ac.audit_id = al.id
+      WHERE ac.audit_id IS NULL
+      ORDER BY al.changed_at DESC;
+  retention_due:
+    create: |-
+      -- Policies and when they become due (relative)
+      CREATE OR REPLACE VIEW vw_retention_due AS
+      SELECT
+        id,
+        entity_table,
+        field_name,
+        action,
+        keep_for,
+        active,
+        now() + CAST(keep_for AS interval) AS due_from_now,
+        notes,
+        created_at
+      FROM data_retention_policies
+      WHERE active;
+  audit_activity_daily:
+    create: |-
+      -- Daily audit activity split by change type
+      CREATE OR REPLACE VIEW vw_audit_activity_daily AS
+      SELECT
+        date_trunc($$day$$, changed_at) AS day,
+        COUNT(*) AS total,
+        COUNT(*) FILTER (WHERE change_type=$$INSERT$$) AS inserts,
+        COUNT(*) FILTER (WHERE change_type=$$UPDATE$$) AS updates,
+        COUNT(*) FILTER (WHERE change_type=$$DELETE$$) AS deletes
+      FROM audit_log
+      GROUP BY 1
+      ORDER BY day DESC;
+  device_risk_recent:
+    create: |-
+      -- Devices with elevated risk seen in last 30 days
+      CREATE OR REPLACE VIEW vw_device_risk_recent AS
+      SELECT
+        d.id,
+        d.user_id,
+        d.risk_score,
+        d.first_seen,
+        d.last_seen,
+        UPPER(encode(d.fingerprint_hash,$$hex$$)) AS fingerprint_hash_hex
+      FROM device_fingerprints d
+      WHERE d.last_seen > now() - interval $$30 days$$
+        AND d.risk_score IS NOT NULL
+      ORDER BY d.risk_score DESC, d.last_seen DESC;
+  rate_limit_usage:
+    create: |-
+      -- Rate limit counters per subject/name (last hour window)
+      CREATE OR REPLACE VIEW vw_rate_limit_usage AS
+      SELECT
+        subject_type,
+        subject_id,
+        name,
+        SUM(count) AS total_count,
+        MIN(window_start) AS first_window,
+        MAX(window_start) AS last_window
+      FROM rate_limit_counters
+      WHERE window_start > now() - interval $$1 hour$$
+      GROUP BY subject_type, subject_id, name
+      ORDER BY total_count DESC;
+  revenue_daily:
+    create: |-
+      -- Daily revenue (orders) and counts; refunds reported separately
+      CREATE OR REPLACE VIEW vw_revenue_daily AS
+      SELECT
+        date_trunc($$day$$, created_at) AS day,
+        COUNT(*) FILTER (WHERE status IN ($$paid$$,$$completed$$)) AS paid_orders,
+        SUM(total) FILTER (WHERE status IN ($$paid$$,$$completed$$)) AS revenue_gross,
+        COUNT(*) FILTER (WHERE status IN ($$failed$$,$$cancelled$$)) AS lost_orders,
+        SUM(total) FILTER (WHERE status IN ($$failed$$,$$cancelled$$)) AS lost_total
+      FROM orders
+      GROUP BY 1
+      ORDER BY day DESC;
+  encryption_policy_bindings_current:
+    create: |-
+      -- Current policy per (entity, field)
+      CREATE OR REPLACE VIEW vw_encryption_policy_bindings_current AS
+      SELECT DISTINCT ON (entity_table, field_name)
+        entity_table, field_name, policy_id, effective_from
+      FROM encryption_policy_bindings
+      WHERE effective_from <= now()
+      ORDER BY entity_table, field_name, effective_from DESC;
+  refunds_daily:
+    create: |-
+      -- Daily refunds amount
+      CREATE OR REPLACE VIEW vw_refunds_daily AS
+      SELECT
+        date_trunc($$day$$, r.created_at) AS day,
+        SUM(r.amount) AS refunds_total,
+        COUNT(*)      AS refunds_count
+      FROM refunds r
+      GROUP BY 1
+      ORDER BY day DESC;
+  sync_batch_progress:
+    create: |-
+      -- Sync batch progress and success rate
+      CREATE OR REPLACE VIEW vw_sync_batch_progress AS
+      SELECT
+        b.id,
+        b.channel,
+        b.status,
+        b.items_total,
+        b.items_ok,
+        b.items_failed,
+        ROUND(100.0 * b.items_ok / GREATEST(b.items_total,1), 2) AS success_pct,
+        b.created_at,
+        b.started_at,
+        b.finished_at
+      FROM sync_batches b
+      ORDER BY b.created_at DESC;
+  system_errors_daily:
+    create: |-
+      -- System errors per day and level
+      CREATE OR REPLACE VIEW vw_system_errors_daily AS
+      SELECT
+        date_trunc($$day$$, created_at) AS day,
+        level,
+        COUNT(*) AS count
+      FROM system_errors
+      GROUP BY date_trunc($$day$$, created_at), level
+      ORDER BY day DESC, level;
+  tax_rates_current:
+    create: |-
+      -- Current (today) effective tax rates
+      CREATE OR REPLACE VIEW vw_tax_rates_current AS
+      SELECT
+        *
+      FROM tax_rates t
+      WHERE CURRENT_DATE >= t.valid_from
+        AND (t.valid_to IS NULL OR CURRENT_DATE <= t.valid_to);
+  privacy_requests_status:
+    create: |-
+      -- Privacy requests status
+      CREATE OR REPLACE VIEW vw_privacy_requests_status AS
+      SELECT
+        type,
+        status,
+        COUNT(*) AS total,
+        MAX(processed_at) AS last_processed
+      FROM privacy_requests
+      GROUP BY type, status
+      ORDER BY type, status;
+  event_inbox_metrics:
+    create: |-
+      -- Aggregated metrics for [event_inbox]
+      CREATE OR REPLACE VIEW vw_event_inbox_metrics AS
+      SELECT
+        source,
+        COUNT(*)                                AS total,
+        COUNT(*) FILTER (WHERE status='pending')   AS pending,
+        COUNT(*) FILTER (WHERE status='processed') AS processed,
+        COUNT(*) FILTER (WHERE status='failed')    AS failed,
+        AVG(attempts)                           AS avg_attempts,
+        PERCENTILE_DISC(0.95) WITHIN GROUP (ORDER BY attempts) AS p95_attempts
+      FROM event_inbox
+      GROUP BY source;
+  crypto_keys_inventory:
+    create: |-
+      -- Inventory of keys by type/status
+      CREATE OR REPLACE VIEW vw_crypto_keys_inventory AS
+      SELECT
+        key_type,
+        status,
+        COUNT(*) AS total
+      FROM crypto_keys
+      GROUP BY key_type, status
+      ORDER BY key_type, status;
+  orders_with_user:
+    create: |-
+      -- Orders with user info and item counts
+      CREATE OR REPLACE VIEW vw_orders_with_user AS
+      SELECT
+        o.id,
+        o.tenant_id,
+        o.user_id,
+        u.email_hash,
+        o.status,
+        o.total,
+        o.currency,
+        o.created_at,
+        (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS items_count
+      FROM orders o
+      LEFT JOIN users u ON u.id = o.user_id;
+  pq_migration_jobs_metrics:
+    create: |-
+      -- PQ migration progress by status
+      CREATE OR REPLACE VIEW vw_pq_migration_jobs_metrics AS
+      SELECT
+        status,
+        COUNT(*) AS jobs,
+        SUM(processed_count) AS processed_total
+      FROM pq_migration_jobs
+      GROUP BY status
+      ORDER BY status;
+  system_jobs_metrics:
+    create: |-
+      -- Metrics for [system_jobs]
+      CREATE OR REPLACE VIEW vw_system_jobs_metrics AS
+      SELECT
+        job_type,
+        status,
+        COUNT(*) AS total,
+        COUNT(*) FILTER (WHERE status=$$pending$$    AND (scheduled_at IS NULL OR scheduled_at <= now())) AS due_now,
+        COUNT(*) FILTER (WHERE status=$$processing$$) AS processing,
+        COUNT(*) FILTER (WHERE status=$$failed$$)     AS failed
+      FROM system_jobs
+      GROUP BY job_type, status
+      ORDER BY job_type, status;
+  kms_routing_matrix:
+    create: |-
+      -- Active KMS routing policies (ordered by priority)
+      CREATE OR REPLACE VIEW vw_kms_routing_matrix AS
+      SELECT
+        name,
+        priority,
+        strategy,
+        "match",
+        providers,
+        active,
+        created_at
+      FROM kms_routing_policies
+      WHERE active;
+  encrypted_fields_without_binding:
+    create: |-
+      -- Encrypted fields without explicit encryption_binding (for governance)
+      CREATE OR REPLACE VIEW vw_encrypted_fields_without_binding AS
+      SELECT
+        e.id,
+        e.entity_table,
+        e.entity_pk,
+        e.field_name,
+        e.created_at,
+        e.updated_at
+      FROM encrypted_fields e
+      LEFT JOIN encryption_bindings b
+        ON b.entity_table = e.entity_table
+       AND b.entity_pk    = e.entity_pk
+       AND (b.field_name  = e.field_name OR b.field_name IS NULL)
+      WHERE b.id IS NULL;
+  payments_anomalies:
+    create: |-
+      -- Potential anomalies in payments
+      CREATE OR REPLACE VIEW vw_payments_anomalies AS
+      SELECT
+        p.*
+      FROM payments p
+      WHERE
+        (status IN ($$paid$$,$$authorized$$) AND amount < 0)
+        OR (status = $$paid$$ AND (transaction_id IS NULL OR transaction_id = ''))
+        OR (status = $$failed$$ AND amount > 0);
+  refunds_by_day_and_gateway:
+    create: |-
+      -- Refunds aggregated by day and gateway
+      CREATE OR REPLACE VIEW vw_refunds_by_day_and_gateway AS
+      SELECT
+        date_trunc('day', r.created_at) AS day,
+        p.gateway,
+        SUM(r.amount) AS refunds_total,
+        COUNT(*)      AS refunds_count
+      FROM refunds r
+      JOIN payments p ON p.id = r.payment_id
+      GROUP BY 1,2
+      ORDER BY day DESC, gateway;
+  refunds_with_payments:
+    create: |-
+      -- Refunds joined to their payment
+      CREATE OR REPLACE VIEW vw_refunds_with_payments AS
+      SELECT
+        r.id           AS refund_id,
+        r.tenant_id,
+        r.payment_id,
+        r.amount,
+        r.currency,
+        r.status       AS refund_status,
+        r.created_at   AS refund_created_at,
+        p.gateway      AS payment_gateway,
+        p.status       AS payment_status,
+        p.amount       AS payment_amount,
+        p.created_at   AS payment_created_at
+      FROM refunds r
+      LEFT JOIN payments p
+        ON p.id = r.payment_id AND p.tenant_id = r.tenant_id;
+  books_inventory_status:
+    create: |-
+      -- Books with stock and reservation summary
+      CREATE OR REPLACE VIEW vw_books_inventory_status AS
+      SELECT
+        b.id,
+        b.tenant_id,
+        b.title,
+        b.stock_quantity,
+        COALESCE(SUM(ir.quantity), 0) AS reserved_quantity,
+        b.stock_quantity - COALESCE(SUM(ir.quantity), 0) AS available_quantity
+      FROM books b
+      LEFT JOIN inventory_reservations ir
+        ON ir.tenant_id = b.tenant_id AND ir.book_id = b.id
+      GROUP BY b.id, b.tenant_id, b.title, b.stock_quantity;
+  event_outbox_latency:
+    create: |-
+      -- Processing latency (created -> processed) by type
+      CREATE OR REPLACE VIEW vw_event_outbox_latency AS
+      SELECT DISTINCT ON (event_type)
+        event_type,
+        processed,
+        avg_latency_sec,
+        max_latency_sec
+      FROM (
+        SELECT
+          event_type,
+          COUNT(*) OVER (PARTITION BY event_type)                                        AS processed,
+          AVG(EXTRACT(EPOCH FROM (processed_at - created_at)))
+            OVER (PARTITION BY event_type)                                               AS avg_latency_sec,
+          MAX(EXTRACT(EPOCH FROM (processed_at - created_at)))
+            OVER (PARTITION BY event_type)                                               AS max_latency_sec,
+          ROW_NUMBER() OVER (PARTITION BY event_type ORDER BY event_type)                AS rn
+        FROM event_outbox
+        WHERE processed_at IS NOT NULL
+      ) ranked
+      WHERE rn = 1;
+  login_attempts_activity:
+    create: |-
+      -- Per-user recent login activity
+      CREATE OR REPLACE VIEW vw_login_attempts_activity AS
+      SELECT
+        u.id AS user_id,
+        MAX(l.attempted_at) AS last_attempt_at,
+        COUNT(*) FILTER (WHERE l.attempted_at > now() - interval $$24 hours$$) AS attempts_24h,
+        COUNT(*) FILTER (WHERE l.success = false AND l.attempted_at > now() - interval $$24 hours$$) AS failed_24h
+      FROM users u
+      LEFT JOIN login_attempts l ON l.user_id = u.id
+      GROUP BY u.id;
+  carts_with_items:
+    create: |-
+      -- Carts with item count and subtotal snapshot
+      CREATE OR REPLACE VIEW vw_carts_with_items AS
+      SELECT
+        c.id,
+        c.tenant_id,
+        c.user_id,
+        c.created_at,
+        COUNT(ci.id) AS items_count,
+        SUM(ci.price_snapshot * ci.quantity) AS subtotal,
+        MIN(ci.currency) AS currency
+      FROM carts c
+      LEFT JOIN cart_items ci ON ci.cart_id = c.id AND ci.tenant_id = c.tenant_id
+      GROUP BY c.id, c.tenant_id, c.user_id, c.created_at;
+  system_errors_top_fingerprints:
+    create: |-
+      -- Top fingerprints by total occurrences
+      CREATE OR REPLACE VIEW vw_system_errors_top_fingerprints AS
+      SELECT
+        fingerprint,
+        MAX(message) AS sample_message,
+        SUM(occurrences) AS occurrences,
+        MIN(created_at) AS first_seen,
+        MAX(last_seen)  AS last_seen,
+        MAX(CASE WHEN resolved THEN 1 ELSE 0 END) AS any_resolved,
+        COUNT(*) AS rows_count
+      FROM system_errors
+      GROUP BY fingerprint
+      ORDER BY occurrences DESC, last_seen DESC;
+FormatVersion: 1.1
