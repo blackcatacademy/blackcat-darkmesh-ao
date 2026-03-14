@@ -30,6 +30,7 @@ function Metrics.inc(name, value)
   value = value or 1
   counters[name] = (counters[name] or 0) + value
   log({ name = name, value = counters[name] })
+  Metrics.flush_prom()
 end
 
 function Metrics.flush_prom()

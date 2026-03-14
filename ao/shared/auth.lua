@@ -12,9 +12,25 @@ local RL_WINDOW = tonumber(os.getenv("AUTH_RATE_LIMIT_WINDOW_SECONDS") or "60")
 local RL_MAX = tonumber(os.getenv("AUTH_RATE_LIMIT_MAX_REQUESTS") or "200")
 local RL_STATE_FILE = os.getenv("AUTH_RATE_LIMIT_FILE")
 local SIG_SECRET = os.getenv("AUTH_SIGNATURE_SECRET")
+local SIG_PUBLIC = os.getenv("AUTH_SIGNATURE_PUBLIC")
+local SIG_TYPE = os.getenv("AUTH_SIGNATURE_TYPE") or "hmac" -- hmac | ed25519
 
 local nonce_store = {}
 local rate_store = {}
+
+-- load persisted rate store (simple CSV key,count,reset)
+if RL_STATE_FILE then
+  local f = io.open(RL_STATE_FILE, "r")
+  if f then
+    for line in f:lines() do
+      local key, count, reset = line:match("^([^,]+),(%d+),(%d+)")
+      if key and count and reset then
+        rate_store[key] = { count = tonumber(count), reset = tonumber(reset) }
+      end
+    end
+    f:close()
+  end
+end
 
 local function contains(list, value)
   for _, v in ipairs(list) do
@@ -78,22 +94,37 @@ function Auth.require_signature(msg)
     end
     return true
   end
-  if not SIG_SECRET then
-    return not REQUIRE_SIGNATURE, REQUIRE_SIGNATURE and "missing_signature_secret" or nil
-  end
-  -- simple HMAC-SHA256 over Action|Site-Id|Request-Id
   local target = (msg.Action or "") .. "|" .. (msg["Site-Id"] or "") .. "|" .. (msg["Request-Id"] or "")
-  local cmd = string.format("printf %%s %q | openssl dgst -sha256 -hmac %q 2>/dev/null", target, SIG_SECRET)
-  local h = io.popen(cmd, "r")
-  if not h then return false, "sig_verify_failed" end
-  local out = h:read("*a") or ""
-  h:close()
-  local computed = out:match("= (%w+)")
-  if not computed then return false, "sig_verify_failed" end
-  if computed:lower() ~= tostring(sig):lower() then
+  if SIG_TYPE == "ed25519" and SIG_PUBLIC then
+    local tmp = os.tmpname()
+    local f = io.open(tmp, "w"); if f then f:write(target); f:close() end
+    local cmd = string.format("openssl pkeyutl -verify -pubin -inkey %q -rawin -in %q -sigfile %q 2>/dev/null", SIG_PUBLIC, tmp, tmp .. ".sig")
+    -- write signature bytes (assume hex)
+    local sf = io.open(tmp .. ".sig", "w")
+    if sf then
+      sf:write(sig)
+      sf:close()
+    end
+    local ok = os.execute(cmd)
+    os.remove(tmp); os.remove(tmp .. ".sig")
+    if ok == true or ok == 0 then return true end
     return false, "bad_signature"
+  else
+    if not SIG_SECRET then
+      return not REQUIRE_SIGNATURE, REQUIRE_SIGNATURE and "missing_signature_secret" or nil
+    end
+    local cmd = string.format("printf %%s %q | openssl dgst -sha256 -hmac %q 2>/dev/null", target, SIG_SECRET)
+    local h = io.popen(cmd, "r")
+    if not h then return false, "sig_verify_failed" end
+    local out = h:read("*a") or ""
+    h:close()
+    local computed = out:match("= (%w+)")
+    if not computed then return false, "sig_verify_failed" end
+    if computed:lower() ~= tostring(sig):lower() then
+      return false, "bad_signature"
+    end
+    return true
   end
-  return true
 end
 
 local function rate_key(msg)
@@ -128,7 +159,9 @@ function Auth.check_rate_limit(msg)
   if RL_STATE_FILE then
     local f = io.open(RL_STATE_FILE, "w")
     if f then
-      f:write(string.format("%s,%d,%d\n", key, bucket.count, bucket.reset))
+      for rk, rv in pairs(rate_store) do
+        f:write(string.format("%s,%d,%d\n", rk, rv.count, rv.reset))
+      end
       f:close()
     end
   end

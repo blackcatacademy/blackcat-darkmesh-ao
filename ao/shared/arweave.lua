@@ -233,6 +233,13 @@ if MODE == "http" then
         f:close()
         if #body == 0 then
           log_request(tx, { warning = "empty_response" })
+        else
+          local resp_hash = sha256(body)
+          if not resp_hash then
+            log_request(tx, { warning = "response_hash_failed" })
+          else
+            log_request(tx, { responseHash = resp_hash })
+          end
         end
       end
     end
