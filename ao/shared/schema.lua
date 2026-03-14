@@ -1,8 +1,9 @@
--- Minimal JSON Schema validator (draft-07 subset) for local use.
--- Supports: type (string, number, object, array), required, properties,
--- enums, pattern, minItems, minLength, maxLength, items.type, format=date-time (basic).
+-- Minimal JSON Schema validator with optional python/jsonschema backend.
+-- If SCHEMA_VALIDATOR=python and python3+jsonschema are available,
+-- uses that; otherwise falls back to the embedded validator below.
 
 local Schema = {}
+local USE_PY = os.getenv("SCHEMA_VALIDATOR") == "python"
 
 -- Schemas embedded as Lua tables (converted from schemas/*.json)
 local SCHEMAS = {
@@ -148,6 +149,10 @@ local function validate_against(schema, value, path, errors)
 end
 
 function Schema.validate(schema_name, value)
+  if USE_PY then
+    local ok, err = Schema.validate_python(schema_name, value)
+    if ok ~= nil then return ok, err end -- nil means fallback to embedded
+  end
   local schema = SCHEMAS[schema_name]
   if not schema then
     return true
@@ -158,6 +163,51 @@ function Schema.validate(schema_name, value)
     return false, errors
   end
   return true
+end
+
+-- Python/jsonschema validator (optional). Returns nil if not usable.
+function Schema.validate_python(schema_name, value)
+  local schema_path = "schemas/" .. schema_name .. ".schema.json"
+  local f = io.open(schema_path, "r")
+  if not f then return nil, "schema_not_found" end
+  f:close()
+  local tmp = os.tmpname() .. ".json"
+  local jf = io.open(tmp, "w")
+  if not jf then return nil, "tmp_write_failed" end
+  local function json_encode(v)
+    local t = type(v)
+    if t == "nil" then return "null" end
+    if t == "boolean" then return v and "true" or "false" end
+    if t == "number" then return tostring(v) end
+    if t == "string" then return string.format("%q", v) end
+    if t == "table" then
+      local is_array = true
+      local i = 0
+      for k, _ in pairs(v) do
+        i = i + 1
+        if v[i] == nil then is_array = false end
+      end
+      local parts = {}
+      if is_array then
+        for _, item in ipairs(v) do table.insert(parts, json_encode(item)) end
+        return "[" .. table.concat(parts, ",") .. "]"
+      else
+        for k, item in pairs(v) do
+          table.insert(parts, string.format("%q:%s", tostring(k), json_encode(item)))
+        end
+        return "{" .. table.concat(parts, ",") .. "}"
+      end
+    end
+    return "\"<unsupported>\""
+  end
+  jf:write(json_encode(value))
+  jf:close()
+  local cmd = string.format("python3 - <<'PY'\nimport json,sys\ntry:\n import jsonschema\nexcept ImportError:\n sys.exit(2)\nwith open(%q) as f: schema=json.load(f)\nwith open(%q) as f: inst=json.load(f)\ntry:\n jsonschema.validate(inst, schema)\n sys.exit(0)\nexcept jsonschema.ValidationError as e:\n print(e.message)\n sys.exit(1)\nPY", schema_path, tmp)
+  local ok = os.execute(cmd)
+  os.remove(tmp)
+  if ok == 0 then return true end
+  if ok == 2 then return nil, "python_jsonschema_missing" end
+  return false, { "python_validator_failed" }
 end
 
 return Schema
