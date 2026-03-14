@@ -110,6 +110,11 @@ do
   assert_status(archived, "ERROR", "archived page status")
   assert_code(archived, "NOT_FOUND", "archived page code")
 
+  -- Unexpected field
+  local extra = site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-1", ["Page-Id"] = "x", Content = { title = "X" }, Foo = "bar", ["Actor-Role"] = "editor" }))
+  assert_status(extra, "ERROR", "putdraft extra status")
+  assert_code(extra, "UNSUPPORTED_FIELD", "putdraft extra code")
+
   -- Forbidden publish
   local denied = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-3", Version = "v1", ["Actor-Role"] = "viewer" }))
   assert_status(denied, "ERROR", "publish forbidden status")
@@ -188,6 +193,11 @@ do
   local publish_conflict = catalog.route(with_req({ Action = "PublishCatalogVersion", ["Site-Id"] = "site-1", Version = "cat-v2", ExpectedVersion = "different", ["Actor-Role"] = "catalog-admin" }))
   assert_status(publish_conflict, "ERROR", "catalog publish conflict status")
   assert_code(publish_conflict, "VERSION_CONFLICT", "catalog publish conflict code")
+
+  -- Unexpected field in upsert
+  local extra = catalog.route(with_req({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-extra", Payload = {}, Extra = true, ["Actor-Role"] = "catalog-admin" }))
+  assert_status(extra, "ERROR", "upsert extra status")
+  assert_code(extra, "UNSUPPORTED_FIELD", "upsert extra code")
 end
 
 -- Access tests
@@ -229,6 +239,11 @@ do
   -- Conflicting payload with same Request-Id returns original
   local conflict = access.route({ Action = "GrantEntitlement", Subject = "u3", Asset = "asset-3", Policy = "edit", ["Actor-Role"] = "admin", ["Request-Id"] = "idem-grant" })
   assert_eq(conflict.payload.policy, first.payload.policy, "idempotent ignores new payload")
+
+  -- Unexpected field in grant
+  local extra = access.route(with_req({ Action = "GrantEntitlement", Subject = "u4", Asset = "asset-4", Policy = "view", Foo = "bar", ["Actor-Role"] = "admin" }))
+  assert_status(extra, "ERROR", "grant extra status")
+  assert_code(extra, "UNSUPPORTED_FIELD", "grant extra code")
 end
 
 -- Unknown action test

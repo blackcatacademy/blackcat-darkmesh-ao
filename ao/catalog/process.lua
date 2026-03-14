@@ -104,6 +104,8 @@ end
 function handlers.UpsertProduct(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Sku", "Payload" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Sku", "Payload", "Version", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local key = ids.product_key(msg["Site-Id"], msg.Sku)
   state.products[key] = { payload = msg.Payload, version = msg.Version }
   audit.record("catalog", "UpsertProduct", msg, nil, { sku = msg.Sku })

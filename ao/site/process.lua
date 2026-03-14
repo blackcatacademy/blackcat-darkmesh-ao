@@ -107,6 +107,8 @@ end
 function handlers.PutDraft(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Page-Id", "Content" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Page-Id", "Content", "Actor-Role", "Schema-Version", "ExpectedVersion" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], "draft")
   state.drafts[key] = { content = msg.Content, updatedAt = os.date("!%Y-%m-%dT%H:%M:%SZ") }
   return codec.ok({ draftId = key })
@@ -115,6 +117,8 @@ end
 function handlers.UpsertRoute(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Path", "Page-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Path", "Page-Id", "Layout-Id", "Type", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local key = ids.route_key(msg["Site-Id"], msg.Path)
   state.routes[key] = {
     pageId = msg["Page-Id"],

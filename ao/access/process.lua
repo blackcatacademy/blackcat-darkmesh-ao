@@ -57,6 +57,8 @@ end
 function handlers.GrantEntitlement(msg)
   local ok, missing = validation.require_fields(msg, { "Subject", "Asset", "Policy" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Subject", "Asset", "Policy", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local key = ids.entitlement_key(msg.Subject, msg.Asset)
   state.entitlements[key] = msg.Policy
   audit.record("access", "GrantEntitlement", msg, nil, { subject = msg.Subject, asset = msg.Asset, policy = msg.Policy })

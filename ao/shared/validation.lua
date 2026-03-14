@@ -63,6 +63,25 @@ function Validation.require_fields(tbl, fields)
   return true
 end
 
+-- Validate that no unexpected fields are present (shallow).
+function Validation.require_no_extras(tbl, allowed_fields)
+  if not allowed_fields then return true end
+  local allowed = {}
+  for _, f in ipairs(allowed_fields) do
+    allowed[f] = true
+  end
+  local extras = {}
+  for k, _ in pairs(tbl) do
+    if not allowed[k] then
+      table.insert(extras, k)
+    end
+  end
+  if #extras > 0 then
+    return false, extras
+  end
+  return true
+end
+
 -- Optional payload size guard (bytes when serialized length provided).
 function Validation.check_size(len, max_bytes)
   if not max_bytes or max_bytes <= 0 then return true end
