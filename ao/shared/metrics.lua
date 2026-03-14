@@ -6,8 +6,10 @@ local LOG_PATH = os.getenv("METRICS_LOG") or "metrics/metrics.log"
 local ENABLED = os.getenv("METRICS_ENABLED") ~= "0"
 local PROM_PATH = os.getenv("METRICS_PROM_PATH")
 local FLUSH_EVERY = tonumber(os.getenv("METRICS_FLUSH_EVERY") or "0")
+local FLUSH_INTERVAL = tonumber(os.getenv("METRICS_FLUSH_INTERVAL_SEC") or "0")
 local counters = {}
 local since_flush = 0
+local last_flush = os.time()
 
 local function ensure_dir(path)
   local dir = path:match("(.+)/[^/]+$")
@@ -38,6 +40,14 @@ function Metrics.inc(name, value)
     since_flush = 0
   elseif FLUSH_EVERY == 0 then
     Metrics.flush_prom()
+  end
+end
+
+function Metrics.tick()
+  if FLUSH_INTERVAL > 0 and (os.time() - last_flush) >= FLUSH_INTERVAL then
+    Metrics.flush_prom()
+    last_flush = os.time()
+    since_flush = 0
   end
 end
 

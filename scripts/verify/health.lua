@@ -27,6 +27,17 @@ local function dir_size(path)
   return total
 end
 
+local function rotated_count(path)
+  if not lfs_ok then return "n/a" end
+  local count = 0
+  for file in lfs.dir(path) do
+    if file:match("^audit.*%.log%.") then
+      count = count + 1
+    end
+  end
+  return count
+end
+
 local function print_line(label, value)
   io.stdout:write(label .. ": " .. tostring(value) .. "\n")
 end
@@ -52,5 +63,6 @@ print_line("metrics.flush_mode", os.getenv("METRICS_FLUSH_EVERY") or "immediate"
 local audit_dir = os.getenv("AUDIT_LOG_DIR") or "arweave/manifests"
 print_line("audit.dir.size", dir_size(audit_dir))
 print_line("audit.dir.path", audit_dir)
+print_line("audit.rotated.count", rotated_count(audit_dir))
 
 print_line("health", "ok")
