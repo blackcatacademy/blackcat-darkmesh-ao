@@ -1,0 +1,13 @@
+format: weavedb-collection/v1
+name: wishlists
+schema:
+  type: object
+  required: [id, site_id, user_id]
+  properties:
+    id:      { type: string }
+    site_id: { type: string }
+    user_id: { type: string }
+    items:   { type: array, items: { type: string } }
+    updated_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, user_id]

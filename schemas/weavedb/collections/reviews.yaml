@@ -1,0 +1,16 @@
+format: weavedb-collection/v1
+name: reviews
+schema:
+  type: object
+  required: [id, site_id, product_id, user_id, rating, created_at]
+  properties:
+    id:         { type: string }
+    site_id:    { type: string }
+    product_id: { type: string }
+    user_id:    { type: string }
+    rating:     { type: number, minimum: 1, maximum: 5 }
+    title:      { type: string }
+    body:       { type: string }
+    created_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, product_id]

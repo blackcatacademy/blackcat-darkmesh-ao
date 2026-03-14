@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: support_tickets
+schema:
+  type: object
+  required: [id, site_id, user_id, status, subject, created_at]
+  properties:
+    id:         { type: string }
+    site_id:    { type: string }
+    user_id:    { type: string }
+    status:     { type: string, enum: [open, pending, solved, closed] }
+    subject:    { type: string }
+    message:    { type: string }
+    created_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, status]

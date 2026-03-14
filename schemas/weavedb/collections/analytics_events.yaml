@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: analytics_events
+schema:
+  type: object
+  required: [id, site_id, event_name, ts]
+  properties:
+    id:         { type: string }
+    site_id:    { type: string }
+    user_id:    { type: string }
+    session_id: { type: string }
+    event_name: { type: string }
+    payload:    { type: object }
+    ts:         { type: string, format: date-time }
+indexes:
+  - fields: [site_id, event_name]

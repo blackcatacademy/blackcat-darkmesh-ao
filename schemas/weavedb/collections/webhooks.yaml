@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: webhooks
+schema:
+  type: object
+  required: [id, site_id, url, status]
+  properties:
+    id:       { type: string }
+    site_id:  { type: string }
+    url:      { type: string }
+    status:   { type: string, enum: [active, paused] }
+    secret:   { type: string }
+    events:   { type: array, items: { type: string } }
+indexes:
+  - fields: [site_id, status]

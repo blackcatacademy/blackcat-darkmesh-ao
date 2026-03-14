@@ -1,0 +1,13 @@
+format: weavedb-collection/v1
+name: returns
+schema:
+  type: object
+  required: [id, order_id, status, created_at]
+  properties:
+    id:         { type: string }
+    order_id:   { type: string }
+    status:     { type: string, enum: [requested, approved, rejected, received, refunded, closed] }
+    reason:     { type: string }
+    created_at: { type: string, format: date-time }
+indexes:
+  - fields: [order_id, status]
