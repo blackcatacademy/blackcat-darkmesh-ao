@@ -56,6 +56,10 @@ tests/             # integration, message-contracts, snapshots, security
 - Branches: `main` (releasable), `develop` (integration), `feature/*`, `adr/*`, `release/*`.
 - Message contracts and schemas are treated as public API; prefer additive changes over breaking ones.
 - Role policy: write actions are gated by actor roles (registry/site/catalog/access); provide `Actor-Role` tag in messages to pass policy checks.
+- Arweave config (mock-safe by default):
+  - `ARWEAVE_MODE` (`mock`|`http`) — mock persists snapshots locally; http logs intended requests only.
+  - `ARWEAVE_HTTP_ENDPOINT`, `ARWEAVE_HTTP_API_KEY`, `ARWEAVE_HTTP_SIGNER` — only logged in http mode.
+- Audit config: `AUDIT_LOG_DIR` (default `arweave/manifests`), `AUDIT_MAX_RECORDS` (default 1000 in-memory).
 
 ## License
 Blackcat Darkmesh AO Proprietary License (see `LICENSE`). External contributions require written permission from Black Cat Academy s. r. o.

@@ -12,6 +12,7 @@ local SNAPSHOT_DIR = os.getenv("ARWEAVE_STORAGE_DIR") or "arweave/snapshots"
 local REQUEST_LOG = os.getenv("ARWEAVE_REQUEST_LOG") or "arweave/manifests"
 local ENDPOINT = os.getenv("ARWEAVE_HTTP_ENDPOINT")
 local API_KEY = os.getenv("ARWEAVE_HTTP_API_KEY")
+local SIGNER = os.getenv("ARWEAVE_HTTP_SIGNER") -- path to key or wallet JSON
 
 local function next_tx()
   counter = counter + 1
@@ -139,7 +140,7 @@ if MODE == "http" then
     local tx = next_tx()
     local serialized = json_encode(payload)
     local hash = sha256(serialized) or fallback_checksum(serialized)
-    log_request(tx, { endpoint = ENDPOINT, apiKey = API_KEY and "<redacted>", body = payload }, hash)
+    log_request(tx, { endpoint = ENDPOINT, apiKey = API_KEY and "<redacted>", signer = SIGNER and "<redacted>", body = payload }, hash)
     return tx, hash
   end
 end

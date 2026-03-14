@@ -3,6 +3,7 @@
 local Audit = {}
 local records = {}
 local LOG_DIR = os.getenv("AUDIT_LOG_DIR") or "arweave/manifests"
+local MAX_IN_MEMORY = tonumber(os.getenv("AUDIT_MAX_RECORDS") or "1000")
 
 local function ensure_dir(path)
   os.execute(string.format('mkdir -p "%s"', path))
@@ -21,6 +22,9 @@ end
 
 function Audit.append(entry)
   table.insert(records, entry)
+  if #records > MAX_IN_MEMORY then
+    table.remove(records, 1)
+  end
   if LOG_DIR then
     ensure_dir(LOG_DIR)
     local path = string.format("%s/audit.log", LOG_DIR)
