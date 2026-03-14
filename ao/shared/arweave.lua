@@ -122,6 +122,17 @@ local function is_array(tbl)
   return true
 end
 
+local function sorted_keys(tbl)
+  local keys = {}
+  for k in pairs(tbl) do
+    table.insert(keys, k)
+  end
+  table.sort(keys, function(a, b)
+    return tostring(a) < tostring(b)
+  end)
+  return keys
+end
+
 local function json_encode(value)
   local t = type(value)
   if t == "nil" then return "null" end
@@ -139,7 +150,8 @@ local function json_encode(value)
       return "[" .. table.concat(parts, ",") .. "]"
     else
       local parts = {}
-      for k, v in pairs(value) do
+      for _, k in ipairs(sorted_keys(value)) do
+        local v = value[k]
         table.insert(parts, string.format("%q:%s", k, json_encode(v)))
       end
       return "{" .. table.concat(parts, ",") .. "}"
