@@ -18,6 +18,7 @@ local SIG_TYPE = os.getenv("AUTH_SIGNATURE_TYPE") or "hmac" -- hmac | ed25519
 local openssl_ok, openssl = pcall(require, "openssl")
 local sodium_ok, sodium = pcall(require, "sodium")
 local sqlite_ok, sqlite = pcall(require, "lsqlite3")
+local SHELL_FALLBACK = os.getenv("AUTH_ALLOW_SHELL_FALLBACK") ~= "0"
 
 local nonce_store = {}
 local rate_store = {}
@@ -115,6 +116,9 @@ function Auth.require_signature(msg)
       local raw_sig = openssl.hex(sig)
       local ok, _ = pkey:verify(raw_sig, target, "NONE")
       if ok then return true end
+    end
+    if not SHELL_FALLBACK then
+      return false, "bad_signature"
     end
     -- Fallback shell
     local tmp = os.tmpname()

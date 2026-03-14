@@ -133,6 +133,15 @@ do
   local count = p and p:read("*n") or 0
   if p then p:close() end
   if count > 3 then error("audit rotation retained too many files: " .. tostring(count)) end
+
+  -- heavier prune scenario
+  for i = 51, 400 do
+    audit2.record("fuzz", "Test", { ["Request-Id"] = tostring(i) }, { status = "OK" })
+  end
+  local p2 = io.popen("ls -1 /tmp/ao-audit-fuzz | wc -l", "r")
+  local count2 = p2 and p2:read("*n") or 0
+  if p2 then p2:close() end
+  if count2 > 3 then error("audit rotation retained too many files after heavy write: " .. tostring(count2)) end
 end
 
 print("fuzz tests passed")
