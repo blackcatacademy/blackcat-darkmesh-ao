@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: inventory_reservations
+schema:
+  type: object
+  required: [id, inventory_id, location_id, qty, reason]
+  properties:
+    id:           { type: string }
+    inventory_id: { type: string }
+    location_id:  { type: string }
+    qty:          { type: integer }
+    reason:       { type: string }
+    order_id:     { type: string }
+    expires_at:   { type: string, format: date-time }
+indexes:
+  - fields: [inventory_id, location_id]

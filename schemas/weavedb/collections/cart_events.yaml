@@ -1,0 +1,13 @@
+format: weavedb-collection/v1
+name: cart_events
+schema:
+  type: object
+  required: [id, cart_id, event, ts]
+  properties:
+    id:      { type: string }
+    cart_id: { type: string }
+    event:   { type: string, enum: [created, updated, abandoned, recovered, checked_out] }
+    ts:      { type: string, format: date-time }
+    meta:    { type: object }
+indexes:
+  - fields: [cart_id, event]

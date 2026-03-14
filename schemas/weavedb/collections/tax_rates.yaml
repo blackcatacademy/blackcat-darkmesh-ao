@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: tax_rates
+schema:
+  type: object
+  required: [id, country, rate]
+  properties:
+    id:       { type: string }
+    country:  { type: string, minLength: 2, maxLength: 2 }
+    region:   { type: string }
+    rate:     { type: number }
+    category: { type: string }
+    starts_at: { type: string, format: date-time }
+    ends_at:  { type: string, format: date-time }
+indexes:
+  - fields: [country, region]

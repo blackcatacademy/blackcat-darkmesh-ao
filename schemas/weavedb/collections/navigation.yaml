@@ -1,0 +1,16 @@
+format: weavedb-collection/v1
+name: navigation
+schema:
+  type: object
+  required: [id, site_id, label, order]
+  properties:
+    id:       { type: string }
+    site_id:  { type: string }
+    parent:   { type: string }
+    label:    { type: string }
+    target:   { type: string }         # page/product/category/external
+    target_id:{ type: string }
+    order:    { type: integer }
+    locale:   { type: string }
+indexes:
+  - fields: [site_id, parent, order]

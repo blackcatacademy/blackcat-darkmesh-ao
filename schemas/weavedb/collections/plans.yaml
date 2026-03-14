@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: plans
+schema:
+  type: object
+  required: [id, name, amount, currency, interval]
+  properties:
+    id:       { type: string }
+    name:     { type: string }
+    amount:   { type: number }
+    currency: { type: string, minLength: 3, maxLength: 3 }
+    interval: { type: string, enum: [monthly, yearly] }
+    metadata: { type: object }
+indexes:
+  - fields: [interval]

@@ -1,0 +1,16 @@
+format: weavedb-collection/v1
+name: invoices
+schema:
+  type: object
+  required: [id, user_id, amount, currency, status, issued_at]
+  properties:
+    id:        { type: string }
+    user_id:   { type: string }
+    subscription_id: { type: string }
+    amount:    { type: number }
+    currency:  { type: string, minLength: 3, maxLength: 3 }
+    status:    { type: string, enum: [open, paid, failed, void] }
+    issued_at: { type: string, format: date-time }
+    due_at:    { type: string, format: date-time }
+indexes:
+  - fields: [user_id, status]

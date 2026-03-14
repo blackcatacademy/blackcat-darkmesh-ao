@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: shipping_methods
+schema:
+  type: object
+  required: [id, site_id, name, active]
+  properties:
+    id:       { type: string }
+    site_id:  { type: string }
+    name:     { type: string }
+    active:   { type: boolean }
+    regions:  { type: array, items: { type: string } }
+    config:   { type: object }
+indexes:
+  - fields: [site_id, active]

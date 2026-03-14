@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: product_media
+schema:
+  type: object
+  required: [id, product_id, kind, uri]
+  properties:
+    id:         { type: string }
+    product_id: { type: string }
+    variant_id: { type: string }
+    kind:       { type: string, enum: [image, video, doc, other] }
+    uri:        { type: string }
+    hash:       { type: string }
+    order:      { type: integer }
+indexes:
+  - fields: [product_id, kind]

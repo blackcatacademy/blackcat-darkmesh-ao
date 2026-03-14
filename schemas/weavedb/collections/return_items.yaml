@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: return_items
+schema:
+  type: object
+  required: [id, return_id, order_id, product_id, qty]
+  properties:
+    id:         { type: string }
+    return_id:  { type: string }
+    order_id:   { type: string }
+    product_id: { type: string }
+    variant_id: { type: string }
+    qty:        { type: integer }
+    reason:     { type: string }
+indexes:
+  - fields: [return_id, product_id]

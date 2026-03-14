@@ -1,0 +1,16 @@
+format: weavedb-collection/v1
+name: risk_events
+schema:
+  type: object
+  required: [id, site_id, score, ts]
+  properties:
+    id:       { type: string }
+    site_id:  { type: string }
+    user_id:  { type: string }
+    ip_hash:  { type: string }
+    device_id:{ type: string }
+    score:    { type: number }
+    reason:   { type: string }
+    ts:       { type: string, format: date-time }
+indexes:
+  - fields: [site_id, score]

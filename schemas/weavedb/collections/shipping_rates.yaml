@@ -1,0 +1,16 @@
+format: weavedb-collection/v1
+name: shipping_rates
+schema:
+  type: object
+  required: [id, method_id, country, price]
+  properties:
+    id:        { type: string }
+    method_id: { type: string }
+    country:   { type: string, minLength: 2, maxLength: 2 }
+    region:    { type: string }
+    min_weight:{ type: number }
+    max_weight:{ type: number }
+    price:     { type: number }
+    currency:  { type: string, minLength: 3, maxLength: 3 }
+indexes:
+  - fields: [method_id, country]

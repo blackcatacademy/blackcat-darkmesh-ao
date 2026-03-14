@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: message_templates
+schema:
+  type: object
+  required: [id, site_id, type, locale]
+  properties:
+    id:      { type: string }
+    site_id: { type: string }
+    type:    { type: string }   # order_paid, refund_issued, support_reply, etc.
+    locale:  { type: string }
+    subject: { type: string }
+    body:    { type: string }
+indexes:
+  - fields: [site_id, type, locale]
