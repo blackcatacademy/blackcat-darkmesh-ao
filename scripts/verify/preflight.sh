@@ -44,3 +44,9 @@ fi
 find "$ROOT_DIR/ao" -name '*.lua' -print -exec "${lua_runner[@]}" {} \;
 
 echo "[verify] done"
+
+# optional contract smoke tests
+if command -v lua5.4 >/dev/null 2>&1; then
+  echo "[verify] contract smoke tests"
+  lua5.4 "$ROOT_DIR/scripts/verify/contracts.lua"
+fi

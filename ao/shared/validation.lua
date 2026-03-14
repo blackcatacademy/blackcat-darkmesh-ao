@@ -7,8 +7,6 @@ local Validation = {}
 Validation.required_tags = {
   "Action",
   "Request-Id",
-  "Site-Id",
-  "Schema-Version",
 }
 
 local function contains(list, value)

@@ -127,8 +127,9 @@ function handlers.PublishVersion(msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local site = msg["Site-Id"]
   -- promote drafts to versioned pages for this site
+  local prefix = "page:" .. site .. ":"
   for key, draft in pairs(state.drafts) do
-    if key:find("page:" .. site .. ":") == 1 then
+    if key:sub(1, #prefix) == prefix then
       local parts = {}
       for part in key:gmatch("[^:]+") do table.insert(parts, part) end
       local page_id = parts[3]

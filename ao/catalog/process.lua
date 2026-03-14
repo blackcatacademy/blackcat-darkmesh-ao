@@ -78,8 +78,9 @@ function handlers.SearchCatalog(msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local q = msg.Query and msg.Query:lower() or ""
   local results = {}
+  local prefix = "product:" .. msg["Site-Id"] .. ":"
   for key, product in pairs(state.products) do
-    if key:find("product:" .. msg["Site-Id"] .. ":") == 1 then
+    if key:sub(1, #prefix) == prefix then
       local sku = key:match("product:[^:]+:(.+)")
       local text = (product.payload.name or ""):lower() .. " " .. (product.payload.description or ""):lower()
       if q == "" or text:find(q, 1, true) then
