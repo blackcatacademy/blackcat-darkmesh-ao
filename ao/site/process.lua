@@ -3,6 +3,7 @@
 local codec = require("ao.shared.codec")
 local validation = require("ao.shared.validation")
 local ids = require("ao.shared.ids")
+local ar = require("ao.shared.arweave")
 
 local handlers = {}
 local allowed_actions = {
@@ -19,7 +20,7 @@ local allowed_actions = {
 -- pseudo-state for scaffolding
 local state = {
   routes = {},        -- route:<site>:<path> -> { pageId, layoutId, type }
-  pages = {},         -- page:<site>:<page>:<version> -> { content, archived }
+  pages = {},         -- page:<site>:<page>:<version> -> { content, manifestTx, archived }
   layouts = {},       -- layout:<id>:<version> -> { content }
   menus = {},         -- menu:<site>:<menu>:<version> -> { items }
   drafts = {},        -- page:<site>:<page>:draft -> { content }
@@ -126,7 +127,8 @@ function handlers.PublishVersion(msg)
   local ok, missing = ensure({ "Site-Id", "Version" }, msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local site = msg["Site-Id"]
-  -- promote drafts to versioned pages for this site
+  local snapshots = {}
+  -- promote drafts to versioned pages for this site and bundle snapshot
   local prefix = "page:" .. site .. ":"
   for key, draft in pairs(state.drafts) do
     if key:sub(1, #prefix) == prefix then
@@ -135,10 +137,17 @@ function handlers.PublishVersion(msg)
       local page_id = parts[3]
       local target_key = ids.page_key(site, page_id, msg.Version)
       state.pages[target_key] = { content = draft.content }
+      table.insert(snapshots, { pageId = page_id, content = draft.content })
     end
   end
+
+  local manifestTx
+  if #snapshots > 0 then
+    manifestTx = ar.put_snapshot({ siteId = site, version = msg.Version, pages = snapshots })
+  end
+
   state.active_versions[site] = msg.Version
-  return codec.ok({ siteId = site, activeVersion = msg.Version })
+  return codec.ok({ siteId = site, activeVersion = msg.Version, manifestTx = manifestTx })
 end
 
 function handlers.ArchivePage(msg)
