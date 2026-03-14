@@ -1,0 +1,12 @@
+format: weavedb-collection/v1
+name: loyalty_points
+schema:
+  type: object
+  required: [id, user_id, balance]
+  properties:
+    id:       { type: string }
+    user_id:  { type: string }
+    balance:  { type: number }
+    updated_at: { type: string, format: date-time }
+indexes:
+  - fields: [user_id]

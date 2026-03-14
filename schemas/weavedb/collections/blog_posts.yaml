@@ -1,0 +1,16 @@
+format: weavedb-collection/v1
+name: blog_posts
+schema:
+  type: object
+  required: [id, site_id, slug, title, content, published_at]
+  properties:
+    id:          { type: string }
+    site_id:     { type: string }
+    slug:        { type: string }
+    title:       { type: string }
+    content:     { type: object }
+    tags:        { type: array, items: { type: string } }
+    author:      { type: string }
+    published_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, slug]

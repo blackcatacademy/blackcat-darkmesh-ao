@@ -1,0 +1,13 @@
+format: weavedb-collection/v1
+name: gift_cards
+schema:
+  type: object
+  required: [id, code, balance, currency]
+  properties:
+    id:       { type: string }
+    code:     { type: string }
+    balance:  { type: number }
+    currency: { type: string, minLength: 3, maxLength: 3 }
+    expires_at: { type: string, format: date-time }
+indexes:
+  - fields: [code]

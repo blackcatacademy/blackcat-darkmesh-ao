@@ -1,0 +1,17 @@
+format: weavedb-collection/v1
+name: product_variants
+schema:
+  type: object
+  required: [id, product_id, sku, price, currency]
+  properties:
+    id:         { type: string }
+    product_id: { type: string }
+    sku:        { type: string }
+    title:      { type: string }
+    price:      { type: number }
+    currency:   { type: string, minLength: 3, maxLength: 3 }
+    options:    { type: object }
+    inventory_id: { type: string }
+    updated_at: { type: string, format: date-time }
+indexes:
+  - fields: [product_id, sku]

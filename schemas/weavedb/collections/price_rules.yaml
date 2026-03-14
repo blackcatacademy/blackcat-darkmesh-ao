@@ -1,0 +1,16 @@
+format: weavedb-collection/v1
+name: price_rules
+schema:
+  type: object
+  required: [id, site_id, type, active]
+  properties:
+    id:      { type: string }
+    site_id: { type: string }
+    type:    { type: string, enum: [bogo, fixed, percent, free_shipping] }
+    active:  { type: boolean }
+    starts_at: { type: string, format: date-time }
+    ends_at:   { type: string, format: date-time }
+    conditions: { type: object }
+    actions:    { type: object }
+indexes:
+  - fields: [site_id, active]

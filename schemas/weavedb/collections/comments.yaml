@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: comments
+schema:
+  type: object
+  required: [id, site_id, parent_id, user_id, content, created_at]
+  properties:
+    id:         { type: string }
+    site_id:    { type: string }
+    parent_id:  { type: string }   # post/product/etc
+    user_id:    { type: string }
+    content:    { type: string }
+    created_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, parent_id]
