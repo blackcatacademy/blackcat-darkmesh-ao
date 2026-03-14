@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: reading_progress
+schema:
+  type: object
+  required: [id, user_id, product_id, progress, updated_at]
+  properties:
+    id:         { type: string }
+    user_id:    { type: string }
+    product_id: { type: string }
+    location:   { type: string }
+    progress:   { type: number, minimum: 0, maximum: 1 }
+    updated_at: { type: string, format: date-time }
+indexes:
+  - fields: [user_id, product_id]

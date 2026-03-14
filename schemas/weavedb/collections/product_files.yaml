@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: product_files
+schema:
+  type: object
+  required: [id, product_id, format, uri]
+  properties:
+    id:         { type: string }
+    product_id: { type: string }
+    variant_id: { type: string }
+    format:     { type: string, enum: [epub, pdf, mobi, audio, other] }
+    uri:        { type: string }
+    hash:       { type: string }
+    size_bytes: { type: integer }
+indexes:
+  - fields: [product_id, format]

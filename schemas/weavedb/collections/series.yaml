@@ -1,0 +1,11 @@
+format: weavedb-collection/v1
+name: series
+schema:
+  type: object
+  required: [id, title]
+  properties:
+    id:    { type: string }
+    title: { type: string }
+    description: { type: string }
+indexes:
+  - fields: [title]

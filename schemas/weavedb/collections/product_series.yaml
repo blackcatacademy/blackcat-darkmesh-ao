@@ -1,0 +1,12 @@
+format: weavedb-collection/v1
+name: product_series
+schema:
+  type: object
+  required: [id, product_id, series_id, order]
+  properties:
+    id:         { type: string }
+    product_id: { type: string }
+    series_id:  { type: string }
+    order:      { type: integer }
+indexes:
+  - fields: [series_id, order]

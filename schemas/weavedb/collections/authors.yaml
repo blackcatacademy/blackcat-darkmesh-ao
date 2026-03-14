@@ -1,0 +1,12 @@
+format: weavedb-collection/v1
+name: authors
+schema:
+  type: object
+  required: [id, name]
+  properties:
+    id:    { type: string }
+    name:  { type: string }
+    bio:   { type: string }
+    links: { type: array, items: { type: string } }
+indexes:
+  - fields: [name]

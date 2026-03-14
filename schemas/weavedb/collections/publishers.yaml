@@ -1,0 +1,11 @@
+format: weavedb-collection/v1
+name: publishers
+schema:
+  type: object
+  required: [id, name]
+  properties:
+    id:   { type: string }
+    name: { type: string }
+    site: { type: string }
+indexes:
+  - fields: [name]
