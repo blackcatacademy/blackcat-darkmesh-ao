@@ -113,7 +113,7 @@ function handlers.UpsertProduct(msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.product_key(msg["Site-Id"], msg.Sku)
   state.products[key] = { payload = msg.Payload, version = msg.Version }
-  audit.append({ action = "UpsertProduct", site = msg["Site-Id"], sku = msg.Sku })
+  audit.record("catalog", "UpsertProduct", msg, nil, { sku = msg.Sku })
   return codec.ok({ sku = msg.Sku })
 end
 
@@ -136,7 +136,9 @@ function handlers.PublishCatalogVersion(msg)
     return codec.error("VERSION_CONFLICT", "ExpectedVersion mismatch", { expected = msg.ExpectedVersion, current = current })
   end
   state.active_versions[msg["Site-Id"]] = msg.Version
-  return codec.ok({ siteId = msg["Site-Id"], activeVersion = msg.Version })
+  local resp = codec.ok({ siteId = msg["Site-Id"], activeVersion = msg.Version })
+  audit.record("catalog", "PublishCatalogVersion", msg, resp)
+  return resp
 end
 
 local function route(msg)

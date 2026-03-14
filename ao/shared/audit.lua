@@ -54,6 +54,9 @@ local function rotate_if_needed(path)
 end
 
 function Audit.append(entry)
+  if not entry.ts then
+    entry.ts = os.date("!%Y-%m-%dT%H:%M:%SZ")
+  end
   table.insert(records, entry)
   if #records > MAX_IN_MEMORY then
     table.remove(records, 1)
@@ -72,6 +75,25 @@ function Audit.append(entry)
       f:close()
     end
   end
+end
+
+-- Helper to record a normalized event
+-- fields: process, action, requestId, actorRole, siteId, resultCode
+function Audit.record(process, action, msg, resp, extra)
+  local entry = {
+    process = process,
+    action = action,
+    requestId = msg and msg["Request-Id"],
+    actorRole = msg and (msg["Actor-Role"] or msg.actorRole),
+    siteId = msg and (msg["Site-Id"] or msg.siteId),
+    resultCode = resp and resp.code or resp and resp.status,
+  }
+  if extra then
+    for k, v in pairs(extra) do
+      entry[k] = v
+    end
+  end
+  Audit.append(entry)
 end
 
 function Audit.all()

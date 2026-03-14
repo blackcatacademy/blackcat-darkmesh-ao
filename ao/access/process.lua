@@ -66,7 +66,7 @@ function handlers.GrantEntitlement(msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.entitlement_key(msg.Subject, msg.Asset)
   state.entitlements[key] = msg.Policy
-  audit.append({ action = "GrantEntitlement", subject = msg.Subject, asset = msg.Asset, policy = msg.Policy })
+  audit.record("access", "GrantEntitlement", msg, nil, { subject = msg.Subject, asset = msg.Asset, policy = msg.Policy })
   return codec.ok({
     subject = msg.Subject,
     asset = msg.Asset,
@@ -79,7 +79,7 @@ function handlers.RevokeEntitlement(msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.entitlement_key(msg.Subject, msg.Asset)
   state.entitlements[key] = nil
-  audit.append({ action = "RevokeEntitlement", subject = msg.Subject, asset = msg.Asset })
+  audit.record("access", "RevokeEntitlement", msg, nil, { subject = msg.Subject, asset = msg.Asset })
   return codec.ok({
     subject = msg.Subject,
     asset = msg.Asset,
@@ -91,7 +91,7 @@ function handlers.PutProtectedAssetRef(msg)
   local ok, missing = ensure({ "Asset", "Ref" }, msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   state.protected[msg.Asset] = { ref = msg.Ref, visibility = msg.Visibility or "protected" }
-  audit.append({ action = "PutProtectedAssetRef", asset = msg.Asset, ref = msg.Ref })
+  audit.record("access", "PutProtectedAssetRef", msg, nil, { asset = msg.Asset, ref = msg.Ref })
   return codec.ok({ asset = msg.Asset, ref = msg.Ref })
 end
 

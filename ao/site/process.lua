@@ -163,7 +163,7 @@ function handlers.PublishVersion(msg)
 
   state.active_versions[site] = msg.Version
   local resp = codec.ok({ siteId = site, activeVersion = msg.Version, manifestTx = manifestTx, manifestHash = manifestHash })
-  audit.append({ action = "PublishVersion", site = site, version = msg.Version, manifestTx = manifestTx })
+  audit.record("site", "PublishVersion", msg, resp, { manifestTx = manifestTx })
   return resp
 end
 
