@@ -2,6 +2,7 @@
 
 local codec = require("ao.shared.codec")
 local validation = require("ao.shared.validation")
+local ids = require("ao.shared.ids")
 
 local handlers = {}
 local allowed_actions = {
@@ -11,20 +12,67 @@ local allowed_actions = {
   "RevokeEntitlement",
 }
 
+local state = {
+  entitlements = {},   -- entitlement:<subject>:<asset> -> policy
+  protected = {},      -- asset:<id> -> { ref, visibility }
+}
+
+local function ensure(fields, msg)
+  for _, f in ipairs(fields) do
+    if msg[f] == nil then return false, f end
+  end
+  return true
+end
+
 function handlers.HasEntitlement(msg)
-  return codec.not_implemented("HasEntitlement")
+  local ok, missing = ensure({ "Subject", "Asset" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local key = ids.entitlement_key(msg.Subject, msg.Asset)
+  local policy = state.entitlements[key]
+  return codec.ok({
+    subject = msg.Subject,
+    asset = msg.Asset,
+    hasEntitlement = policy ~= nil,
+    policy = policy,
+  })
 end
 
 function handlers.GetProtectedAssetRef(msg)
-  return codec.not_implemented("GetProtectedAssetRef")
+  local ok, missing = ensure({ "Asset" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local asset = state.protected[msg.Asset]
+  if not asset then
+    return codec.error("NOT_FOUND", "Asset ref not found", { asset = msg.Asset })
+  end
+  return codec.ok({
+    asset = msg.Asset,
+    ref = asset.ref,
+    visibility = asset.visibility or "protected",
+  })
 end
 
 function handlers.GrantEntitlement(msg)
-  return codec.not_implemented("GrantEntitlement")
+  local ok, missing = ensure({ "Subject", "Asset", "Policy" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local key = ids.entitlement_key(msg.Subject, msg.Asset)
+  state.entitlements[key] = msg.Policy
+  return codec.ok({
+    subject = msg.Subject,
+    asset = msg.Asset,
+    policy = msg.Policy,
+  })
 end
 
 function handlers.RevokeEntitlement(msg)
-  return codec.not_implemented("RevokeEntitlement")
+  local ok, missing = ensure({ "Subject", "Asset" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local key = ids.entitlement_key(msg.Subject, msg.Asset)
+  state.entitlements[key] = nil
+  return codec.ok({
+    subject = msg.Subject,
+    asset = msg.Asset,
+    revoked = true,
+  })
 end
 
 local function route(msg)
@@ -51,4 +99,5 @@ end
 
 return {
   route = route,
+  _state = state,
 }

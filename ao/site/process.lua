@@ -2,6 +2,7 @@
 
 local codec = require("ao.shared.codec")
 local validation = require("ao.shared.validation")
+local ids = require("ao.shared.ids")
 
 local handlers = {}
 local allowed_actions = {
@@ -15,36 +16,139 @@ local allowed_actions = {
   "ArchivePage",
 }
 
+-- pseudo-state for scaffolding
+local state = {
+  routes = {},        -- route:<site>:<path> -> { pageId, layoutId, type }
+  pages = {},         -- page:<site>:<page>:<version> -> { content, archived }
+  layouts = {},       -- layout:<id>:<version> -> { content }
+  menus = {},         -- menu:<site>:<menu>:<version> -> { items }
+  drafts = {},        -- page:<site>:<page>:draft -> { content }
+  active_versions = {} -- siteId -> versionId
+}
+
+local function ensure(fields, msg)
+  for _, f in ipairs(fields) do
+    if msg[f] == nil then
+      return false, f
+    end
+  end
+  return true
+end
+
 function handlers.ResolveRoute(msg)
-  return codec.not_implemented("ResolveRoute")
+  local ok, missing = ensure({ "Site-Id", "Path" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local key = ids.route_key(msg["Site-Id"], msg.Path)
+  local route = state.routes[key]
+  if not route then
+    return codec.error("NOT_FOUND", "Route not found", { path = msg.Path })
+  end
+  return codec.ok({
+    siteId = msg["Site-Id"],
+    path = msg.Path,
+    pageId = route.pageId,
+    layoutId = route.layoutId,
+    type = route.type or "page",
+  })
 end
 
 function handlers.GetPage(msg)
-  return codec.not_implemented("GetPage")
+  local ok, missing = ensure({ "Site-Id", "Page-Id" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local version = msg.Version or state.active_versions[msg["Site-Id"]] or "active"
+  local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], version)
+  local page = state.pages[key]
+  if not page or page.archived then
+    return codec.error("NOT_FOUND", "Page not found", { pageId = msg["Page-Id"], version = version })
+  end
+  return codec.ok({
+    siteId = msg["Site-Id"],
+    pageId = msg["Page-Id"],
+    version = version,
+    content = page.content,
+  })
 end
 
 function handlers.GetLayout(msg)
-  return codec.not_implemented("GetLayout")
+  local ok, missing = ensure({ "Layout-Id" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local version = msg.Version or "active"
+  local key = ids.layout_key(msg["Layout-Id"], version)
+  local layout = state.layouts[key]
+  if not layout then
+    return codec.error("NOT_FOUND", "Layout not found", { layoutId = msg["Layout-Id"], version = version })
+  end
+  return codec.ok({
+    layoutId = msg["Layout-Id"],
+    version = version,
+    content = layout.content,
+  })
 end
 
 function handlers.GetNavigation(msg)
-  return codec.not_implemented("GetNavigation")
+  local ok, missing = ensure({ "Site-Id", "Menu-Id" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local version = msg.Version or state.active_versions[msg["Site-Id"]] or "active"
+  local key = ids.menu_key(msg["Site-Id"], msg["Menu-Id"], version)
+  local menu = state.menus[key]
+  if not menu then
+    return codec.error("NOT_FOUND", "Navigation not found", { menuId = msg["Menu-Id"], version = version })
+  end
+  return codec.ok({
+    siteId = msg["Site-Id"],
+    menuId = msg["Menu-Id"],
+    version = version,
+    items = menu.items,
+  })
 end
 
 function handlers.PutDraft(msg)
-  return codec.not_implemented("PutDraft")
+  local ok, missing = ensure({ "Site-Id", "Page-Id", "Content" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], "draft")
+  state.drafts[key] = { content = msg.Content, updatedAt = os.date("!%Y-%m-%dT%H:%M:%SZ") }
+  return codec.ok({ draftId = key })
 end
 
 function handlers.UpsertRoute(msg)
-  return codec.not_implemented("UpsertRoute")
+  local ok, missing = ensure({ "Site-Id", "Path", "Page-Id" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local key = ids.route_key(msg["Site-Id"], msg.Path)
+  state.routes[key] = {
+    pageId = msg["Page-Id"],
+    layoutId = msg["Layout-Id"],
+    type = msg.Type or "page",
+  }
+  return codec.ok({ path = msg.Path, pageId = msg["Page-Id"] })
 end
 
 function handlers.PublishVersion(msg)
-  return codec.not_implemented("PublishVersion")
+  local ok, missing = ensure({ "Site-Id", "Version" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local site = msg["Site-Id"]
+  -- promote drafts to versioned pages for this site
+  for key, draft in pairs(state.drafts) do
+    if key:find("page:" .. site .. ":") == 1 then
+      local parts = {}
+      for part in key:gmatch("[^:]+") do table.insert(parts, part) end
+      local page_id = parts[3]
+      local target_key = ids.page_key(site, page_id, msg.Version)
+      state.pages[target_key] = { content = draft.content }
+    end
+  end
+  state.active_versions[site] = msg.Version
+  return codec.ok({ siteId = site, activeVersion = msg.Version })
 end
 
 function handlers.ArchivePage(msg)
-  return codec.not_implemented("ArchivePage")
+  local ok, missing = ensure({ "Site-Id", "Page-Id" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local version = msg.Version or state.active_versions[msg["Site-Id"]] or "active"
+  local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], version)
+  if state.pages[key] then
+    state.pages[key].archived = true
+  end
+  return codec.ok({ pageId = msg["Page-Id"], version = version, archived = true })
 end
 
 local function route(msg)
@@ -71,4 +175,5 @@ end
 
 return {
   route = route,
+  _state = state, -- exposed for tests
 }
