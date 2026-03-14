@@ -31,6 +31,8 @@ class C:
     YELLOW = "\033[93m" if USE_COLOR else ""
     GREEN = "\033[92m" if USE_COLOR else ""
     BLUE = "\033[94m" if USE_COLOR else ""
+    ORANGE = "\033[38;5;208m" if USE_COLOR else ""
+    PINK = "\033[38;5;213m" if USE_COLOR else ""
 
 
 def banner():
@@ -38,13 +40,23 @@ def banner():
         print("=== WeaveDB Schema Helper ===")
         return
     art = [
-        "╔═══════════════════════════════════════╗",
-        "║  WEAVEDB SCHEMA HELPER  ·  v3 bundles ║",
-        "╚═══════════════════════════════════════╝",
+        "╔═══════════════════════════════════════════╗",
+        "║   ◉  WEAVEDB SCHEMA HELPER  ·  v3 bundles ║",
+        "╚═══════════════════════════════════════════╝",
     ]
-    colors = [C.CYAN, C.MAGENTA, C.BLUE]
+    colors = [C.PINK, C.CYAN, C.BLUE]
     for i, line in enumerate(art):
         print(colors[i % len(colors)] + line + C.RESET)
+
+
+def accent(text):
+    palette = [C.CYAN, C.MAGENTA, C.PINK, C.ORANGE, C.GREEN]
+    if not USE_COLOR:
+        return text
+    out = []
+    for i, ch in enumerate(text):
+        out.append(palette[i % len(palette)] + ch)
+    return "".join(out) + C.RESET
 
 ROOT = Path(__file__).resolve().parents[2]
 COLL_DIR = ROOT / "schemas" / "weavedb" / "collections"
@@ -136,18 +148,20 @@ def build_manifest_subset(collections: dict, chosen: set) -> dict:
 def cmd_list(collections):
     banner()
     all_names = sorted(collections)
-    print(f"{C.BOLD}Collections ({len(all_names)} total){C.RESET}")
+    print(f"{C.BOLD}{accent('Collections')} ({len(all_names)} total){C.RESET}")
     for name in all_names:
-        print(f"  {C.CYAN}•{C.RESET} {name}")
-    print(f"\n{C.BOLD}Presets{C.RESET}")
+        print(f"  {C.CYAN}●{C.RESET} {name}")
+    print(f"\n{C.BOLD}{accent('Presets')}{C.RESET}")
     for pid, meta in PRESETS.items():
-        print(f"  {C.MAGENTA}{pid:12s}{C.RESET} {meta['description']}")
+        color = C.MAGENTA if pid != "full" else C.ORANGE
+        print(f"  {color}{pid:12s}{C.RESET} {meta['description']}")
 
 
 def cmd_explain(collections, name):
     if name not in collections:
-        print(f"Collection '{name}' not found.")
+        print(f"{C.YELLOW}!{C.RESET} Collection '{name}' not found.")
         return
+    print(f"{C.BOLD}{accent(name)}{C.RESET}")
     print(json.dumps(collections[name], indent=2))
 
 
