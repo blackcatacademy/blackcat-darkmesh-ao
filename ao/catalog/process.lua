@@ -6,6 +6,9 @@ local ids = require("ao.shared.ids")
 local auth = require("ao.shared.auth")
 local idem = require("ao.shared.idempotency")
 local audit = require("ao.shared.audit")
+local schema = require("ao.shared.schema")
+local metrics = require("ao.shared.metrics")
+local metrics = require("ao.shared.metrics")
 
 local handlers = {}
 local allowed_actions = {
@@ -138,6 +141,12 @@ function handlers.UpsertProduct(msg)
   end
   local ok_type_payload, err_type_payload = validation.assert_type(msg.Payload, "table", "Payload")
   if not ok_type_payload then return codec.error("INVALID_INPUT", err_type_payload, { field = "Payload" }) end
+  if not msg.Payload.sku then msg.Payload.sku = msg.Sku end
+  if msg.Payload.sku ~= msg.Sku then
+    return codec.error("INVALID_INPUT", "Payload sku must match Sku field", { field = "Sku" })
+  end
+  local ok_schema, schema_err = schema.validate("product", msg.Payload)
+  if not ok_schema then return codec.error("INVALID_INPUT", "Payload failed schema", { errors = schema_err }) end
   local payload_len = validation.estimate_json_length(msg.Payload)
   local ok_size, err_size = validation.check_size(payload_len, MAX_PAYLOAD_BYTES, "Payload")
   if not ok_size then return codec.error("INVALID_INPUT", err_size, { field = "Payload" }) end
@@ -204,6 +213,11 @@ local function route(msg)
     return codec.missing_tags(missing)
   end
 
+  local ok_sec, sec_err = auth.enforce(msg)
+  if not ok_sec then
+    return codec.error("FORBIDDEN", sec_err)
+  end
+
   local seen = idem.check(msg["Request-Id"])
   if seen then return seen end
 
@@ -226,6 +240,7 @@ local function route(msg)
   end
 
   local resp = handler(msg)
+  metrics.inc("catalog." .. msg.Action .. ".count")
   idem.record(msg["Request-Id"], resp)
   return resp
 end

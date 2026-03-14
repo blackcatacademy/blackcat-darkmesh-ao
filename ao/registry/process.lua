@@ -7,6 +7,7 @@ local auth = require("ao.shared.auth")
 local idem = require("ao.shared.idempotency")
 local ids = require("ao.shared.ids")
 local audit = require("ao.shared.audit")
+local metrics = require("ao.shared.metrics")
 
 local handlers = {}
 local allowed_actions = {
@@ -207,6 +208,11 @@ local function route(msg)
     return codec.missing_tags(missing)
   end
 
+  local ok_sec, sec_err = auth.enforce(msg)
+  if not ok_sec then
+    return codec.error("FORBIDDEN", sec_err)
+  end
+
   local seen = idem.check(msg["Request-Id"])
   if seen then return seen end
 
@@ -229,6 +235,7 @@ local function route(msg)
   end
 
   local resp = handler(msg)
+  metrics.inc("registry." .. msg.Action .. ".count")
   idem.record(msg["Request-Id"], resp)
   return resp
 end

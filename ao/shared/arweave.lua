@@ -16,6 +16,9 @@ local SIGNER = os.getenv("ARWEAVE_HTTP_SIGNER") -- path to key or wallet JSON
 local HTTP_TIMEOUT = tonumber(os.getenv("ARWEAVE_HTTP_TIMEOUT") or "10")
 local HTTP_REAL = os.getenv("ARWEAVE_HTTP_REAL") == "1"
 local HTTP_SIGNER_HEADER = os.getenv("ARWEAVE_HTTP_SIGNER_HEADER") or "X-Arweave-Signer"
+local HTTP_RETRIES = tonumber(os.getenv("ARWEAVE_HTTP_RETRIES") or "3")
+local HTTP_BACKOFF_MS = tonumber(os.getenv("ARWEAVE_HTTP_BACKOFF_MS") or "200")
+local MAX_MANIFEST_BYTES = tonumber(os.getenv("ARWEAVE_MAX_MANIFEST_BYTES") or "262144") -- 256 KiB
 
 local function next_tx()
   counter = counter + 1
@@ -43,6 +46,14 @@ local function sha256(str)
   return nil
 end
 
+local function file_sha256(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local content = f:read("*a")
+  f:close()
+  return sha256(content)
+end
+
 local function has_curl()
   local ok = os.execute("command -v curl >/dev/null 2>&1")
   return ok == true or ok == 0
@@ -53,19 +64,29 @@ local function http_post(serialized, tx)
   local response_path = string.format("%s/%s-response.json", REQUEST_LOG, tx)
   local auth_header = API_KEY and (" -H \"Authorization: Bearer " .. API_KEY .. "\"") or ""
   local signer_header = SIGNER and (" -H \"" .. HTTP_SIGNER_HEADER .. ": " .. SIGNER .. "\"") or ""
-  local cmd = string.format("echo %q | curl -s -o \"%s\" -w \"%%{http_code}\" -H \"Content-Type: application/json\"%s%s --max-time %d -X POST \"%s\" --data-binary @-",
-    serialized,
-    response_path,
-    auth_header,
-    signer_header,
-    HTTP_TIMEOUT,
-    ENDPOINT or "")
-  local pipe = io.popen(cmd, "r")
-  if not pipe then return nil, "curl_failed" end
-  local status = pipe:read("*a")
-  pipe:close()
-  status = status and status:match("(%d+)")
-  if status then status = tonumber(status) end
+  local status
+  for attempt = 1, HTTP_RETRIES do
+    local cmd = string.format("echo %q | curl -s -o \"%s\" -w \"%%{http_code}\" -H \"Content-Type: application/json\"%s%s --max-time %d -X POST \"%s\" --data-binary @-",
+      serialized,
+      response_path,
+      auth_header,
+      signer_header,
+      HTTP_TIMEOUT,
+      ENDPOINT or "")
+    local pipe = io.popen(cmd, "r")
+    if pipe then
+      status = pipe:read("*a")
+      pipe:close()
+      status = status and status:match("(%d+)")
+      if status then status = tonumber(status) end
+      if status and status < 500 then
+        break
+      end
+    end
+    if attempt < HTTP_RETRIES then
+      os.execute(string.format("sleep %.3f", HTTP_BACKOFF_MS / 1000))
+    end
+  end
   return status, response_path
 end
 
@@ -133,6 +154,9 @@ end
 function Ar.put_snapshot(payload)
   local tx = next_tx()
   local serialized = json_encode(payload)
+  if MAX_MANIFEST_BYTES and #serialized > MAX_MANIFEST_BYTES then
+    return nil, "too_large"
+  end
   local hash = sha256(serialized) or fallback_checksum(serialized)
 
   manifests[tx] = {
@@ -176,6 +200,9 @@ if MODE == "http" then
   function Ar.put_snapshot(payload)
     local tx = next_tx()
     local serialized = json_encode(payload)
+    if MAX_MANIFEST_BYTES and #serialized > MAX_MANIFEST_BYTES then
+      return nil, "too_large"
+    end
     local hash = sha256(serialized) or fallback_checksum(serialized)
     local httpStatus, response_path
     if HTTP_REAL and ENDPOINT and has_curl() then
@@ -193,10 +220,12 @@ if MODE == "http" then
       end
       httpStatus, response_path = http_post(serialized, tx)
     end
+    local signerHash = SIGNER and file_sha256(SIGNER) or nil
     log_request(tx, {
       endpoint = ENDPOINT or "<missing-endpoint>",
       apiKey = API_KEY and "<redacted>",
       signer = SIGNER and "<redacted>",
+      signerHash = signerHash,
       timeout = HTTP_TIMEOUT,
       body = payload,
       simulated = not HTTP_REAL,

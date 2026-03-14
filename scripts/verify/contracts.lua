@@ -153,6 +153,14 @@ do
   assert_status(conflict, "ERROR", "publish expected version conflict")
   assert_code(conflict, "VERSION_CONFLICT", "publish conflict code")
 
+  -- concurrent-like publish attempts (simulate sequence)
+  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-conc", ["Page-Id"] = "p1", Content = { title = "A" }, ["Actor-Role"] = "editor" }))
+  local p1 = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-conc", Version = "v1", ["Actor-Role"] = "publisher" }))
+  assert_status(p1, "OK", "publish v1 status")
+  local p2 = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-conc", Version = "v2", ExpectedVersion = "v0", ["Actor-Role"] = "publisher" }))
+  assert_status(p2, "ERROR", "publish v2 conflict status")
+  assert_code(p2, "VERSION_CONFLICT", "publish v2 conflict code")
+
   -- Path length guard
   local long_path = "/" .. string.rep("p", 2050)
   local long_path_resp = site.route(with_req({ Action = "ResolveRoute", ["Site-Id"] = "site-1", Path = long_path }))
@@ -206,6 +214,17 @@ do
   assert_status(oversize_payload, "ERROR", "upsert payload oversize status")
   assert_code(oversize_payload, "INVALID_INPUT", "upsert payload oversize code")
 
+  -- pagination property-ish test (monotone total, no duplication across pages)
+  local seen = {}
+  for page = 1, 5 do
+    local resp = catalog.route(with_req({ Action = "ListCategoryProducts", ["Site-Id"] = "site-1", ["Category-Id"] = "cat-1", Page = page, PageSize = 2 }))
+    assert_status(resp, "OK", "pagination status page " .. page)
+    for _, item in ipairs(resp.payload.items) do
+      assert_falsy(seen[item.sku], "pagination duplicate sku")
+      seen[item.sku] = true
+    end
+  end
+
   -- search miss
   local search_miss = catalog.route(with_req({ Action = "SearchCatalog", ["Site-Id"] = "site-1", Query = "zzz" }))
   assert_eq(search_miss.payload.total, 0, "search miss total")
@@ -216,7 +235,7 @@ do
   assert_code(denied, "FORBIDDEN", "catalog forbidden code")
 
   -- Idempotent upsert
-  local idem_req = { Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-idem", Payload = {}, ["Actor-Role"] = "catalog-admin", ["Request-Id"] = "rid-upsert" }
+  local idem_req = { Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-idem", Payload = { name = "Idem" }, ["Actor-Role"] = "catalog-admin", ["Request-Id"] = "rid-upsert" }
   local first = catalog.route(idem_req)
   local second = catalog.route(idem_req)
   assert_eq(first.payload.sku, second.payload.sku, "idempotent upsert sku")

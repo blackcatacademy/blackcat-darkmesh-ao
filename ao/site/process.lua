@@ -7,6 +7,8 @@ local ar = require("ao.shared.arweave")
 local auth = require("ao.shared.auth")
 local idem = require("ao.shared.idempotency")
 local audit = require("ao.shared.audit")
+local metrics = require("ao.shared.metrics")
+local schema = require("ao.shared.schema")
 
 local handlers = {}
 local allowed_actions = {
@@ -151,6 +153,11 @@ function handlers.PutDraft(msg)
   if not ok_len_page then return codec.error("INVALID_INPUT", err_page, { field = "Page-Id" }) end
   local ok_type, err_type = validation.assert_type(msg.Content, "table", "Content")
   if not ok_type then return codec.error("INVALID_INPUT", err_type, { field = "Content" }) end
+  -- normalize content against schema expectations
+  if not msg.Content.id then msg.Content.id = msg["Page-Id"] end
+  if not msg.Content.blocks then msg.Content.blocks = {} end
+  local ok_schema, schema_err = schema.validate("page", msg.Content)
+  if not ok_schema then return codec.error("INVALID_INPUT", "Content failed schema", { errors = schema_err }) end
   local content_len = validation.estimate_json_length(msg.Content)
   local ok_size, err_size = validation.check_size(content_len, MAX_CONTENT_BYTES, "Content")
   if not ok_size then return codec.error("INVALID_INPUT", err_size, { field = "Content" }) end
@@ -223,6 +230,9 @@ function handlers.PublishVersion(msg)
   local manifestHash
   if #snapshots > 0 then
     manifestTx, manifestHash = ar.put_snapshot({ siteId = site, version = msg.Version, pages = snapshots })
+    if not manifestTx then
+      return codec.error("INVALID_INPUT", "Snapshot too large for Arweave manifest")
+    end
   end
 
   state.active_versions[site] = msg.Version
@@ -258,6 +268,11 @@ local function route(msg)
     return codec.missing_tags(missing)
   end
 
+  local ok_sec, sec_err = auth.enforce(msg)
+  if not ok_sec then
+    return codec.error("FORBIDDEN", sec_err)
+  end
+
   local seen = idem.check(msg["Request-Id"])
   if seen then return seen end
 
@@ -280,6 +295,7 @@ local function route(msg)
   end
 
   local resp = handler(msg)
+  metrics.inc("site." .. msg.Action .. ".count")
   idem.record(msg["Request-Id"], resp)
   return resp
 end

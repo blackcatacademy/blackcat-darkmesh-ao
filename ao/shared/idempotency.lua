@@ -61,4 +61,10 @@ function Idem._clear()
   seen = {}
 end
 
+function Idem._size()
+  local c = 0
+  for _ in pairs(seen) do c = c + 1 end
+  return c
+end
+
 return Idem
