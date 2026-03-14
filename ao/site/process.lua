@@ -149,6 +149,8 @@ function handlers.PutDraft(msg)
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
   local ok_len_page, err_page = validation.check_length(msg["Page-Id"], 128, "Page-Id")
   if not ok_len_page then return codec.error("INVALID_INPUT", err_page, { field = "Page-Id" }) end
+  local ok_type, err_type = validation.assert_type(msg.Content, "table", "Content")
+  if not ok_type then return codec.error("INVALID_INPUT", err_type, { field = "Content" }) end
   local content_len = validation.estimate_json_length(msg.Content)
   local ok_size, err_size = validation.check_size(content_len, MAX_CONTENT_BYTES, "Content")
   if not ok_size then return codec.error("INVALID_INPUT", err_size, { field = "Content" }) end

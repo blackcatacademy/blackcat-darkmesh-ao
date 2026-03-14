@@ -89,6 +89,10 @@ function handlers.RegisterSite(msg)
   local ok_len, err = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len then return codec.error("INVALID_INPUT", err, { field = "Site-Id" }) end
   local config = msg.Config or {}
+  if msg.Config ~= nil then
+    local ok_type_cfg, err_type_cfg = validation.assert_type(msg.Config, "table", "Config")
+    if not ok_type_cfg then return codec.error("INVALID_INPUT", err_type_cfg, { field = "Config" }) end
+  end
   local config_len = validation.estimate_json_length(config)
   local ok_size, err_size = validation.check_size(config_len, MAX_CONFIG_BYTES, "Config")
   if not ok_size then return codec.error("INVALID_INPUT", err_size, { field = "Config" }) end

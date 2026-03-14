@@ -75,6 +75,7 @@ tests/             # integration, message-contracts, snapshots, security
   - `CATALOG_MAX_PAYLOAD_BYTES` (product/category payloads, default 64 KiB)
   - `ACCESS_MAX_POLICY_BYTES` (entitlement policy payloads, default 32 KiB)
   - `REGISTRY_MAX_CONFIG_BYTES` (site config payload, default 16 KiB)
+- Idempotency cache: `IDEM_TTL_SECONDS` (default 300s) and `IDEM_MAX_ENTRIES` (default 1024) bound the in-memory Request-Id store.
 
 ## License
 Blackcat Darkmesh AO Proprietary License (see `LICENSE`). External contributions require written permission from Black Cat Academy s. r. o.

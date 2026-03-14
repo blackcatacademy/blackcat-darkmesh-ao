@@ -22,6 +22,14 @@ jobs:
       - name: Preflight (schemas + Lua syntax)
         run: scripts/verify/preflight.sh
 
+      - name: Luacheck (if available)
+        run: |
+          if command -v luacheck >/dev/null 2>&1; then
+            luacheck ao scripts
+          else
+            echo "luacheck not installed; skipping"
+          fi
+
       - name: Export audit logs (mock)
         if: always()
         run: scripts/export/audit_ci.sh

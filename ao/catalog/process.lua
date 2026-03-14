@@ -136,6 +136,8 @@ function handlers.UpsertProduct(msg)
     local ok_len_ver, err_ver = validation.check_length(msg.Version, 128, "Version")
     if not ok_len_ver then return codec.error("INVALID_INPUT", err_ver, { field = "Version" }) end
   end
+  local ok_type_payload, err_type_payload = validation.assert_type(msg.Payload, "table", "Payload")
+  if not ok_type_payload then return codec.error("INVALID_INPUT", err_type_payload, { field = "Payload" }) end
   local payload_len = validation.estimate_json_length(msg.Payload)
   local ok_size, err_size = validation.check_size(payload_len, MAX_PAYLOAD_BYTES, "Payload")
   if not ok_size then return codec.error("INVALID_INPUT", err_size, { field = "Payload" }) end
@@ -154,6 +156,14 @@ function handlers.UpsertCategory(msg)
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
   local ok_len_cat, err_cat = validation.check_length(msg["Category-Id"], 128, "Category-Id")
   if not ok_len_cat then return codec.error("INVALID_INPUT", err_cat, { field = "Category-Id" }) end
+  if msg.Payload then
+    local ok_type_payload, err_type_payload = validation.assert_type(msg.Payload, "table", "Payload")
+    if not ok_type_payload then return codec.error("INVALID_INPUT", err_type_payload, { field = "Payload" }) end
+  end
+  if msg.Products then
+    local ok_type_products, err_type_products = validation.assert_type(msg.Products, "table", "Products")
+    if not ok_type_products then return codec.error("INVALID_INPUT", err_type_products, { field = "Products" }) end
+  end
   local payload_len = validation.estimate_json_length(msg.Payload or {})
   local ok_size, err_size = validation.check_size(payload_len, MAX_PAYLOAD_BYTES, "Payload")
   if not ok_size then return codec.error("INVALID_INPUT", err_size, { field = "Payload" }) end

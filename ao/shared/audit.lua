@@ -43,6 +43,8 @@ local function json_encode(value)
   return "\"<unsupported>\""
 end
 
+local lfs_ok, lfs = pcall(require, "lfs")
+
 local function rotate_if_needed(path)
   local f = io.open(path, "r")
   if not f then return end
@@ -51,18 +53,20 @@ local function rotate_if_needed(path)
   if #content >= ROTATE_MAX then
     local rotated = path .. "." .. os.date("!%Y%m%d%H%M%S")
     os.rename(path, rotated)
-    -- retention
-    local dir, file = path:match("(.+)/([^/]+)$")
-    local prefix = file .. "."
-    local rotated_files = {}
-    for rfile in lfs.dir(dir) do
-      if rfile:find("^" .. prefix) then
-        table.insert(rotated_files, dir .. "/" .. rfile)
+    if lfs_ok then
+      -- retention
+      local dir, file = path:match("(.+)/([^/]+)$")
+      local prefix = file .. "."
+      local rotated_files = {}
+      for rfile in lfs.dir(dir) do
+        if rfile:find("^" .. prefix) then
+          table.insert(rotated_files, dir .. "/" .. rfile)
+        end
       end
-    end
-    table.sort(rotated_files, function(a, b) return a > b end) -- newest first (lexicographic on timestamp suffix)
-    for i = RETAIN_FILES + 1, #rotated_files do
-      os.remove(rotated_files[i])
+      table.sort(rotated_files, function(a, b) return a > b end) -- newest first (lexicographic on timestamp suffix)
+      for i = RETAIN_FILES + 1, #rotated_files do
+        os.remove(rotated_files[i])
+      end
     end
   end
 end
