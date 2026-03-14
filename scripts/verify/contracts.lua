@@ -133,6 +133,11 @@ do
   local paged_out = catalog.route(with_req({ Action = "ListCategoryProducts", ["Site-Id"] = "site-1", ["Category-Id"] = "cat-1", Page = 10, PageSize = 10 }))
   assert_eq(#paged_out.payload.items, 0, "empty page")
 
+  -- page bounds
+  local capped = catalog.route(with_req({ Action = "ListCategoryProducts", ["Site-Id"] = "site-1", ["Category-Id"] = "cat-1", Page = -1, PageSize = 500 }))
+  assert_eq(capped.payload.page, 1, "page capped to 1")
+  assert_eq(capped.payload.pageSize, 200, "pageSize capped to 200")
+
   local missing = catalog.route(with_req({ Action = "GetProduct", ["Site-Id"] = "site-1", Sku = "nope" }))
   assert_eq(missing.status, "ERROR", "missing product status")
   assert_code(missing, "NOT_FOUND", "missing product code")

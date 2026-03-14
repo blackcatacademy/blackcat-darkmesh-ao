@@ -61,6 +61,9 @@ function handlers.ListCategoryProducts(msg)
   end
   local page = msg.Page or 1
   local page_size = msg.PageSize or 50
+  if page < 1 then page = 1 end
+  if page_size < 1 then page_size = 1 end
+  if page_size > 200 then page_size = 200 end
   local start = (page - 1) * page_size + 1
   local finish = start + page_size - 1
   local products = {}

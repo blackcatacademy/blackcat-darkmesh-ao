@@ -10,6 +10,8 @@ local manifests = {}
 local MODE = os.getenv("ARWEAVE_MODE") or "mock"
 local SNAPSHOT_DIR = os.getenv("ARWEAVE_STORAGE_DIR") or "arweave/snapshots"
 local REQUEST_LOG = os.getenv("ARWEAVE_REQUEST_LOG") or "arweave/manifests"
+local ENDPOINT = os.getenv("ARWEAVE_HTTP_ENDPOINT")
+local API_KEY = os.getenv("ARWEAVE_HTTP_API_KEY")
 
 local function next_tx()
   counter = counter + 1
@@ -132,12 +134,12 @@ local function log_request(tx, payload, hash)
 end
 
 if MODE == "http" then
-  -- override put_snapshot to only log
+  -- override put_snapshot to log intended HTTP payload; real call not performed here
   function Ar.put_snapshot(payload)
     local tx = next_tx()
     local serialized = json_encode(payload)
     local hash = sha256(serialized) or fallback_checksum(serialized)
-    log_request(tx, payload, hash)
+    log_request(tx, { endpoint = ENDPOINT, apiKey = API_KEY and "<redacted>", body = payload }, hash)
     return tx, hash
   end
 end
