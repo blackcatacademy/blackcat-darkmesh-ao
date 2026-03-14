@@ -82,6 +82,11 @@ do
   assert_status(bad_profile, "ERROR", "register bad profile status")
   assert_code(bad_profile, "INVALID_INPUT", "register bad profile code")
 
+  -- Invalid schema hash/tx patterns
+  local bad_schema = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-badschema", Config = { schemaHash = "xyz", schemaManifestTx = "??bad" }, ["Actor-Role"] = "admin" }))
+  assert_status(bad_schema, "ERROR", "register bad schema status")
+  assert_code(bad_schema, "INVALID_INPUT", "register bad schema code")
+
   -- Invalid codeHash pattern
   local bad_hash = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-badhash", Config = { codeHash = "xyz" }, ["Actor-Role"] = "admin" }))
   assert_status(bad_hash, "ERROR", "register bad hash status")

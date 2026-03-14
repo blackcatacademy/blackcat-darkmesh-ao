@@ -94,6 +94,8 @@ local SCHEMAS = {
       buildId = { type = "string", minLength = 1, maxLength = 128 },
       signerPubKey = { type = "string", pattern = "^[a-fA-F0-9]{64}$" },
       tableProfile = { type = "string", enum = { "minimal", "core-observability", "auth-rbac", "commerce-lite", "monitoring-outbox" } },
+      schemaManifestTx = { type = "string", pattern = "^[A-Za-z0-9_-]{10,128}$" },
+      schemaHash = { type = "string", pattern = "^[a-fA-F0-9]{64}$" },
       policies = {
         type = "object",
         properties = {
