@@ -9,6 +9,7 @@ local manifests = {}
 
 local MODE = os.getenv("ARWEAVE_MODE") or "mock"
 local SNAPSHOT_DIR = os.getenv("ARWEAVE_STORAGE_DIR") or "arweave/snapshots"
+local REQUEST_LOG = os.getenv("ARWEAVE_REQUEST_LOG") or "arweave/manifests"
 
 local function next_tx()
   counter = counter + 1
@@ -117,6 +118,28 @@ function Ar.verify_snapshot(tx, expected_hash)
   if not m then return false, "not_found" end
   if expected_hash and m.hash ~= expected_hash then return false, "hash_mismatch" end
   return true
+end
+
+-- HTTP mode placeholder: log outbound request; real network disabled here.
+local function log_request(tx, payload, hash)
+  ensure_dir(REQUEST_LOG)
+  local path = string.format("%s/%s-request.json", REQUEST_LOG, tx)
+  local f = io.open(path, "w")
+  if f then
+    f:write(json_encode({ tx = tx, hash = hash, payload = payload, mode = MODE }))
+    f:close()
+  end
+end
+
+if MODE == "http" then
+  -- override put_snapshot to only log
+  function Ar.put_snapshot(payload)
+    local tx = next_tx()
+    local serialized = json_encode(payload)
+    local hash = sha256(serialized) or fallback_checksum(serialized)
+    log_request(tx, payload, hash)
+    return tx, hash
+  end
 end
 
 -- Expose for tests

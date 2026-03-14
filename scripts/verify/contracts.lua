@@ -49,6 +49,12 @@ do
   local denied = registry.route(with_req({ Action = "BindDomain", ["Site-Id"] = "site-2", Host = "forbidden.com", ["Actor-Role"] = "viewer" }))
   assert_status(denied, "ERROR", "bind forbidden status")
   assert_code(denied, "FORBIDDEN", "bind forbidden code")
+
+  -- ExpectedVersion conflict
+  registry.route(with_req({ Action = "SetActiveVersion", ["Site-Id"] = "site-2", Version = "v10", ["Actor-Role"] = "registry-admin" }))
+  local conflict = registry.route(with_req({ Action = "SetActiveVersion", ["Site-Id"] = "site-2", Version = "v11", ExpectedVersion = "v0", ["Actor-Role"] = "registry-admin" }))
+  assert_status(conflict, "ERROR", "set version conflict status")
+  assert_code(conflict, "VERSION_CONFLICT", "set version conflict code")
 end
 
 -- Site tests
@@ -97,6 +103,12 @@ do
   local denied = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-3", Version = "v1", ["Actor-Role"] = "viewer" }))
   assert_status(denied, "ERROR", "publish forbidden status")
   assert_code(denied, "FORBIDDEN", "publish forbidden code")
+
+  -- Idempotent publish with same Request-Id returns same manifest
+  local req = { Action = "PublishVersion", ["Site-Id"] = "site-4", Version = "v1", ["Actor-Role"] = "publisher", ["Request-Id"] = "rid-same" }
+  local first = site.route(req)
+  local second = site.route(req)
+  assert_eq(first.payload.manifestTx, second.payload.manifestTx, "idempotent publish manifest")
 end
 
 -- Catalog tests

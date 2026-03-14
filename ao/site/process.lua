@@ -5,6 +5,7 @@ local validation = require("ao.shared.validation")
 local ids = require("ao.shared.ids")
 local ar = require("ao.shared.arweave")
 local auth = require("ao.shared.auth")
+local idem = require("ao.shared.idempotency")
 
 local handlers = {}
 local allowed_actions = {
@@ -176,6 +177,9 @@ local function route(msg)
     return codec.missing_tags(missing)
   end
 
+  local seen = idem.check(msg["Request-Id"])
+  if seen then return seen end
+
   local ok_action, err = validation.require_action(msg, allowed_actions)
   if not ok_action then
     if err == "unknown_action" then
@@ -194,7 +198,9 @@ local function route(msg)
     return codec.unknown_action(msg.Action)
   end
 
-  return handler(msg)
+  local resp = handler(msg)
+  idem.record(msg["Request-Id"], resp)
+  return resp
 end
 
 return {
