@@ -88,5 +88,10 @@ tests/             # integration, message-contracts, snapshots, security
 - Fuzz tests: set `RUN_FUZZ=1` to run `scripts/verify/fuzz.lua` during preflight.
 - Production baseline env: see `ops/env.prod.example` (strict signatures, sqlite rate-limit, Prometheus path).
 
+## Table presets (generated from blackcat-database)
+- Presets live in `config/table-presets.json` (built from `blackcat-database/views-library`).
+- Helper: `lua scripts/setup/table_presets.lua list` or `suggest "commerce analytics"`, `dump core-observability`.
+- Registry config accepts `tableProfile` (enum) to bind a site to a preset; invalid IDs are rejected by the schema.
+
 ## License
 Blackcat Darkmesh AO Proprietary License (see `LICENSE`). External contributions require written permission from Black Cat Academy s. r. o.

@@ -93,6 +93,7 @@ local SCHEMAS = {
       codeHash = { type = "string", pattern = "^[a-fA-F0-9]{64}$" },
       buildId = { type = "string", minLength = 1, maxLength = 128 },
       signerPubKey = { type = "string", pattern = "^[a-fA-F0-9]{64}$" },
+      tableProfile = { type = "string", enum = { "minimal", "core-observability", "auth-rbac", "commerce-lite", "monitoring-outbox" } },
       policies = {
         type = "object",
         properties = {

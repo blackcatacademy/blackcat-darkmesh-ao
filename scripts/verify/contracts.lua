@@ -77,6 +77,11 @@ do
   assert_status(bad_cfg, "ERROR", "register bad cfg status")
   assert_code(bad_cfg, "INVALID_INPUT", "register bad cfg code")
 
+  -- Unknown tableProfile
+  local bad_profile = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-badprofile", Config = { tableProfile = "nonexistent" }, ["Actor-Role"] = "admin" }))
+  assert_status(bad_profile, "ERROR", "register bad profile status")
+  assert_code(bad_profile, "INVALID_INPUT", "register bad profile code")
+
   -- Invalid codeHash pattern
   local bad_hash = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-badhash", Config = { codeHash = "xyz" }, ["Actor-Role"] = "admin" }))
   assert_status(bad_hash, "ERROR", "register bad hash status")

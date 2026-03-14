@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "generatedFrom": "blackcat-database/views-library",
+  "presets": [
+    {
+      "id": "minimal",
+      "label": "Minimal footprint",
+      "engine": "any",
+      "tags": ["none"],
+      "modules": [],
+      "description": "No opinionated database views; use your own tables. Safe default when you only need AO routing."
+    },
+    {
+      "id": "core-observability",
+      "label": "Core + ops views",
+      "engine": "postgres",
+      "tags": ["core", "monitoring", "ops"],
+      "modules": [
+        "book_assets_catalog_health_summary",
+        "key_wrappers_missing_pq",
+        "peer_health",
+        "key_wrapper_layers_pq_readiness_summary",
+        "sync_batches_channels_health",
+        "replication_lag_latest",
+        "slo_rollup",
+        "coupon_redemptions_effectiveness",
+        "sync_errors_by_peer",
+        "crypto_algorithms_deprecation",
+        "key_wrapper_layers_summary"
+      ],
+      "description": "Operational views for catalog, crypto wrappers, replication lag, SLOs, coupons, and sync error triage."
+    },
+    {
+      "id": "auth-rbac",
+      "label": "Auth RBAC views",
+      "engine": "postgres",
+      "tags": ["auth", "rbac", "governance"],
+      "modules": [
+        "rbac_roles_coverage",
+        "rbac_sync_cursors_status",
+        "rbac_user_roles_access_summary",
+        "rbac_user_roles_expiring_assignments"
+      ],
+      "description": "RBAC coverage and sync health views to audit role assignments and expirations."
+    },
+    {
+      "id": "commerce-lite",
+      "label": "Commerce sample",
+      "engine": "postgres",
+      "tags": ["commerce", "payments"],
+      "modules": [
+        "sample_payments_status"
+      ],
+      "description": "Minimal commerce sample view for payment status rollup."
+    },
+    {
+      "id": "monitoring-outbox",
+      "label": "Outbox metrics sample",
+      "engine": "postgres",
+      "tags": ["monitoring", "outbox", "events"],
+      "modules": [
+        "sample_event_outbox_metrics"
+      ],
+      "description": "Sample event outbox metrics to validate pipelines and alerting."
+    }
+  ]
+}
