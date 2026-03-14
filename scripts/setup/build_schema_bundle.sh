@@ -11,8 +11,8 @@ ARCHIVE="$OUT_DIR/schema-bundle-$TS.tar.gz"
 # Re-generate compact manifest (v3) from WeaveDB collections
 python3 "$ROOT/scripts/setup/make_schema_manifest.py"
 
-# Bundle manifest + preset catalog only (no SQL bodies, no view metadata)
-tar -czf "$ARCHIVE" -C "$ROOT" schemas/manifest/schema-manifest.json config/table-presets.json
+# Bundle manifest only (no presets, no SQL bodies)
+tar -czf "$ARCHIVE" -C "$ROOT" schemas/manifest/schema-manifest.json
 SHA="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
 
 echo "wrote bundle: $ARCHIVE"

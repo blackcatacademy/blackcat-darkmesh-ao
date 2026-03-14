@@ -92,7 +92,7 @@ tests/             # integration, message-contracts, snapshots, security
 - Canonical table definitions (columns, types, constraints) jsou po tabulkách v `schemas/canonical-db/tables/` a mapě `schemas/canonical-db/schema-map.yaml`.
 - WeaveDB-ready kolekce v `schemas/weavedb/collections/*.yaml` (JSON Schema + indexes); manifest v3 má sekci `weavedb`.
 - Manifest v3 generuj: `python3 scripts/setup/make_schema_manifest.py` → `schemas/manifest/schema-manifest.json`.
-- Bundle (manifest only) vytvoř: `./scripts/setup/build_schema_bundle.sh`; vezmi SHA a ulož do `schemaHash`/`schemaManifestTx` po publikaci na Arweave.
+- Bundle (manifest only) vytvoř: `./scripts/setup/build_schema_bundle.sh`; nasazeno na Arweave jako tx `iygsD6GhCXGI1cXrl2lw6VOpxbjwISZO5pqWmo7y8XM` (sha256 `b1ee8a00d4d2c989c4d7a88daf1ca45c0ea70fb0037dd8b688d44d05f9f534d5`).
 
 ## License
 Blackcat Darkmesh AO Proprietary License (see `LICENSE`). External contributions require written permission from Black Cat Academy s. r. o.
