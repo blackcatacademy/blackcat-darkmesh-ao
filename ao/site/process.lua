@@ -37,17 +37,8 @@ local state = {
   active_versions = {} -- siteId -> versionId
 }
 
-local function ensure(fields, msg)
-  for _, f in ipairs(fields) do
-    if msg[f] == nil then
-      return false, f
-    end
-  end
-  return true
-end
-
 function handlers.ResolveRoute(msg)
-  local ok, missing = ensure({ "Site-Id", "Path" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Path" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.route_key(msg["Site-Id"], msg.Path)
   local route = state.routes[key]
@@ -64,7 +55,7 @@ function handlers.ResolveRoute(msg)
 end
 
 function handlers.GetPage(msg)
-  local ok, missing = ensure({ "Site-Id", "Page-Id" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Page-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local version = msg.Version or state.active_versions[msg["Site-Id"]] or "active"
   local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], version)
@@ -81,7 +72,7 @@ function handlers.GetPage(msg)
 end
 
 function handlers.GetLayout(msg)
-  local ok, missing = ensure({ "Layout-Id" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Layout-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local version = msg.Version or "active"
   local key = ids.layout_key(msg["Layout-Id"], version)
@@ -97,7 +88,7 @@ function handlers.GetLayout(msg)
 end
 
 function handlers.GetNavigation(msg)
-  local ok, missing = ensure({ "Site-Id", "Menu-Id" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Menu-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local version = msg.Version or state.active_versions[msg["Site-Id"]] or "active"
   local key = ids.menu_key(msg["Site-Id"], msg["Menu-Id"], version)
@@ -114,7 +105,7 @@ function handlers.GetNavigation(msg)
 end
 
 function handlers.PutDraft(msg)
-  local ok, missing = ensure({ "Site-Id", "Page-Id", "Content" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Page-Id", "Content" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], "draft")
   state.drafts[key] = { content = msg.Content, updatedAt = os.date("!%Y-%m-%dT%H:%M:%SZ") }
@@ -122,7 +113,7 @@ function handlers.PutDraft(msg)
 end
 
 function handlers.UpsertRoute(msg)
-  local ok, missing = ensure({ "Site-Id", "Path", "Page-Id" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Path", "Page-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.route_key(msg["Site-Id"], msg.Path)
   state.routes[key] = {
@@ -134,7 +125,7 @@ function handlers.UpsertRoute(msg)
 end
 
 function handlers.PublishVersion(msg)
-  local ok, missing = ensure({ "Site-Id", "Version" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Version" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local site = msg["Site-Id"]
   local snapshots = {}
@@ -168,7 +159,7 @@ function handlers.PublishVersion(msg)
 end
 
 function handlers.ArchivePage(msg)
-  local ok, missing = ensure({ "Site-Id", "Page-Id" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Page-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local version = msg.Version or state.active_versions[msg["Site-Id"]] or "active"
   local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], version)

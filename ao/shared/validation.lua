@@ -49,6 +49,29 @@ function Validation.require_action(msg, allowed)
   return true
 end
 
+-- Validate presence of required fields in a table payload.
+function Validation.require_fields(tbl, fields)
+  local missing = {}
+  for _, f in ipairs(fields) do
+    if tbl[f] == nil then
+      table.insert(missing, f)
+    end
+  end
+  if #missing > 0 then
+    return false, missing
+  end
+  return true
+end
+
+-- Optional payload size guard (bytes when serialized length provided).
+function Validation.check_size(len, max_bytes)
+  if not max_bytes or max_bytes <= 0 then return true end
+  if len > max_bytes then
+    return false, "oversize"
+  end
+  return true
+end
+
 function Validation.assert_type(value, expected, field)
   if type(value) ~= expected then
     return false, ("invalid_type:%s"):format(field or "?")

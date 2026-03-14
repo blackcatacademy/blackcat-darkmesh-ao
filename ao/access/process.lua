@@ -27,15 +27,8 @@ local state = {
   protected = {},      -- asset:<id> -> { ref, visibility }
 }
 
-local function ensure(fields, msg)
-  for _, f in ipairs(fields) do
-    if msg[f] == nil then return false, f end
-  end
-  return true
-end
-
 function handlers.HasEntitlement(msg)
-  local ok, missing = ensure({ "Subject", "Asset" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Subject", "Asset" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.entitlement_key(msg.Subject, msg.Asset)
   local policy = state.entitlements[key]
@@ -48,7 +41,7 @@ function handlers.HasEntitlement(msg)
 end
 
 function handlers.GetProtectedAssetRef(msg)
-  local ok, missing = ensure({ "Asset" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Asset" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local asset = state.protected[msg.Asset]
   if not asset then
@@ -62,7 +55,7 @@ function handlers.GetProtectedAssetRef(msg)
 end
 
 function handlers.GrantEntitlement(msg)
-  local ok, missing = ensure({ "Subject", "Asset", "Policy" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Subject", "Asset", "Policy" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.entitlement_key(msg.Subject, msg.Asset)
   state.entitlements[key] = msg.Policy
@@ -75,7 +68,7 @@ function handlers.GrantEntitlement(msg)
 end
 
 function handlers.RevokeEntitlement(msg)
-  local ok, missing = ensure({ "Subject", "Asset" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Subject", "Asset" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.entitlement_key(msg.Subject, msg.Asset)
   state.entitlements[key] = nil
@@ -88,7 +81,7 @@ function handlers.RevokeEntitlement(msg)
 end
 
 function handlers.PutProtectedAssetRef(msg)
-  local ok, missing = ensure({ "Asset", "Ref" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Asset", "Ref" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   state.protected[msg.Asset] = { ref = msg.Ref, visibility = msg.Visibility or "protected" }
   audit.record("access", "PutProtectedAssetRef", msg, nil, { asset = msg.Asset, ref = msg.Ref })

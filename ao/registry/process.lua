@@ -38,17 +38,10 @@ local function now_iso()
   return os.date("!%Y-%m-%dT%H:%M:%SZ")
 end
 
-local function ensure_field(msg, field)
-  if msg[field] == nil then
-    return false, field
-  end
-  return true
-end
-
 function handlers.GetSiteByHost(msg)
-  local ok, missing_field = ensure_field(msg, "Host")
+  local ok, missing = validation.require_fields(msg, { "Host" })
   if not ok then
-    return codec.error("INVALID_INPUT", "Host is required", { missing = missing_field })
+    return codec.error("INVALID_INPUT", "Host is required", { missing = missing })
   end
   local site_id = state.domains[msg.Host]
   if not site_id then
@@ -61,9 +54,9 @@ function handlers.GetSiteByHost(msg)
 end
 
 function handlers.GetSiteConfig(msg)
-  local ok, missing_field = ensure_field(msg, "Site-Id")
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
   if not ok then
-    return codec.error("INVALID_INPUT", "Site-Id is required", { missing = missing_field })
+    return codec.error("INVALID_INPUT", "Site-Id is required", { missing = missing })
   end
   local site = state.sites[msg["Site-Id"]]
   if not site then
@@ -77,9 +70,9 @@ function handlers.GetSiteConfig(msg)
 end
 
 function handlers.RegisterSite(msg)
-  local ok, missing_field = ensure_field(msg, "Site-Id")
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
   if not ok then
-    return codec.error("INVALID_INPUT", "Site-Id is required", { missing = missing_field })
+    return codec.error("INVALID_INPUT", "Site-Id is required", { missing = missing })
   end
   local config = msg.Config or {}
   local existing = state.sites[msg["Site-Id"]]
@@ -107,11 +100,9 @@ end
 
 function handlers.BindDomain(msg)
   local required = { "Site-Id", "Host" }
-  for _, f in ipairs(required) do
-    local ok_field, missing_field = ensure_field(msg, f)
-    if not ok_field then
-      return codec.error("INVALID_INPUT", "Missing required field", { missing = missing_field })
-    end
+  local ok, missing = validation.require_fields(msg, required)
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
   if not state.sites[msg["Site-Id"]] then
     return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
@@ -126,11 +117,9 @@ end
 
 function handlers.SetActiveVersion(msg)
   local required = { "Site-Id", "Version" }
-  for _, f in ipairs(required) do
-    local ok_field, missing_field = ensure_field(msg, f)
-    if not ok_field then
-      return codec.error("INVALID_INPUT", "Missing required field", { missing = missing_field })
-    end
+  local ok, missing = validation.require_fields(msg, required)
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
   if not state.sites[msg["Site-Id"]] then
     return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
@@ -150,11 +139,9 @@ end
 
 function handlers.GrantRole(msg)
   local required = { "Site-Id", "Subject", "Role" }
-  for _, f in ipairs(required) do
-    local ok_field, missing_field = ensure_field(msg, f)
-    if not ok_field then
-      return codec.error("INVALID_INPUT", "Missing required field", { missing = missing_field })
-    end
+  local ok, missing = validation.require_fields(msg, required)
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
   if not state.sites[msg["Site-Id"]] then
     return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })

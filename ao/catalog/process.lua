@@ -29,15 +29,8 @@ local state = {
   active_versions = {} -- site -> version
 }
 
-local function ensure(fields, msg)
-  for _, f in ipairs(fields) do
-    if msg[f] == nil then return false, f end
-  end
-  return true
-end
-
 function handlers.GetProduct(msg)
-  local ok, missing = ensure({ "Site-Id", "Sku" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Sku" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.product_key(msg["Site-Id"], msg.Sku)
   local product = state.products[key]
@@ -53,7 +46,7 @@ function handlers.GetProduct(msg)
 end
 
 function handlers.ListCategoryProducts(msg)
-  local ok, missing = ensure({ "Site-Id", "Category-Id" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Category-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.category_key(msg["Site-Id"], msg["Category-Id"])
   local category = state.categories[key]
@@ -86,7 +79,7 @@ function handlers.ListCategoryProducts(msg)
 end
 
 function handlers.SearchCatalog(msg)
-  local ok, missing = ensure({ "Site-Id" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local q = msg.Query and msg.Query:lower() or ""
   local results = {}
@@ -109,7 +102,7 @@ function handlers.SearchCatalog(msg)
 end
 
 function handlers.UpsertProduct(msg)
-  local ok, missing = ensure({ "Site-Id", "Sku", "Payload" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Sku", "Payload" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.product_key(msg["Site-Id"], msg.Sku)
   state.products[key] = { payload = msg.Payload, version = msg.Version }
@@ -118,7 +111,7 @@ function handlers.UpsertProduct(msg)
 end
 
 function handlers.UpsertCategory(msg)
-  local ok, missing = ensure({ "Site-Id", "Category-Id" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Category-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local key = ids.category_key(msg["Site-Id"], msg["Category-Id"])
   state.categories[key] = {
@@ -129,7 +122,7 @@ function handlers.UpsertCategory(msg)
 end
 
 function handlers.PublishCatalogVersion(msg)
-  local ok, missing = ensure({ "Site-Id", "Version" }, msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Version" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local current = state.active_versions[msg["Site-Id"]]
   if msg.ExpectedVersion and current and current ~= msg.ExpectedVersion then
