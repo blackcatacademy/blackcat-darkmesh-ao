@@ -4,10 +4,10 @@
   "type": "object",
   "required": ["publishId", "versionId", "manifestTx"],
   "properties": {
-    "publishId": {"type": "string"},
-    "versionId": {"type": "string"},
-    "manifestTx": {"type": "string"},
+    "publishId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "versionId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "manifestTx": {"type": "string", "minLength": 1, "maxLength": 128},
     "activatedAt": {"type": "string", "format": "date-time"},
-    "rollbackTo": {"type": "string"}
+    "rollbackTo": {"type": "string", "minLength": 1, "maxLength": 128}
   }
 }
