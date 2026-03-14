@@ -5,6 +5,7 @@ Current tools:
 - `audit_export.lua [process|all] [format] [outfile]` — concatenate audit logs; `format`=`ndjson` (default) or `raw`; optional `outfile` (otherwise stdout).
 - `audit_archive.sh` — tar.gz all audit logs to `/tmp` (or `AUDIT_ARCHIVE_DIR`).
 - `audit_prune.sh` — prune rotated audit logs beyond `AUDIT_RETAIN_FILES` (default 10).
+- `audit_maintenance.sh` — prune then archive in one step (cron-friendly).
 
 Usage:
 ```bash
@@ -20,4 +21,7 @@ AUDIT_LOG_DIR=arweave/manifests AUDIT_ARCHIVE_DIR=/tmp scripts/export/audit_arch
 
 # prune old rotated logs
 AUDIT_LOG_DIR=arweave/manifests AUDIT_RETAIN_FILES=5 scripts/export/audit_prune.sh
+
+# prune + archive (cron)
+AUDIT_LOG_DIR=arweave/manifests AUDIT_ARCHIVE_DIR=/tmp scripts/export/audit_maintenance.sh
 ```
