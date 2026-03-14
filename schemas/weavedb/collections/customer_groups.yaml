@@ -1,0 +1,12 @@
+format: weavedb-collection/v1
+name: customer_groups
+schema:
+  type: object
+  required: [id, site_id, name]
+  properties:
+    id:      { type: string }
+    site_id: { type: string }
+    name:    { type: string }
+    rules:   { type: object }
+indexes:
+  - fields: [site_id, name]

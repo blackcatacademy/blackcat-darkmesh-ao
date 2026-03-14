@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: store_hours
+schema:
+  type: object
+  required: [id, site_id, day, open, close]
+  properties:
+    id:      { type: string }
+    site_id: { type: string }
+    day:     { type: string, enum: [mon, tue, wed, thu, fri, sat, sun] }
+    open:    { type: string }
+    close:   { type: string }
+    timezone:{ type: string }
+    notes:   { type: string }
+indexes:
+  - fields: [site_id, day]

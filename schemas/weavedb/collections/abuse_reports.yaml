@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: abuse_reports
+schema:
+  type: object
+  required: [id, site_id, reporter_id, target_id, target_type, ts]
+  properties:
+    id:          { type: string }
+    site_id:     { type: string }
+    reporter_id: { type: string }
+    target_id:   { type: string }
+    target_type: { type: string }
+    reason:      { type: string }
+    ts:          { type: string, format: date-time }
+indexes:
+  - fields: [site_id, target_id]
