@@ -22,6 +22,7 @@ local MAX_MANIFEST_BYTES = tonumber(os.getenv("ARWEAVE_MAX_MANIFEST_BYTES") or "
 local HTTP_MAX_BODY = tonumber(os.getenv("ARWEAVE_HTTP_MAX_BODY") or "1048576") -- 1 MiB
 local EXPECT_RESPONSE_HASH = os.getenv("ARWEAVE_EXPECT_RESPONSE_HASH")
 local FORCE_ERROR = os.getenv("ARWEAVE_FORCE_ERROR") == "1"
+local RESPONSE_PATTERN = os.getenv("ARWEAVE_RESPONSE_PATTERN") or "^%s*%{\""
 
 local function next_tx()
   counter = counter + 1
@@ -242,6 +243,10 @@ if MODE == "http" then
           log_request(tx, { error = "response_too_large", size = #body })
           return nil, "http_response_too_large"
         else
+          if RESPONSE_PATTERN and not body:match(RESPONSE_PATTERN) then
+            log_request(tx, { warning = "response_unexpected_pattern" })
+            return nil, "http_response_invalid"
+          end
           local resp_hash = sha256(body)
           if not resp_hash then
             log_request(tx, { warning = "response_hash_failed" })

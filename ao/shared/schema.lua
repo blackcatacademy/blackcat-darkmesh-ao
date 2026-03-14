@@ -82,6 +82,10 @@ local SCHEMAS = {
           immutable = { type = "boolean" },
           allowUploads = { type = "boolean" },
           ttlSeconds = { type = "number" },
+          rateLimitPerMinute = { type = "number" },
+          maxUploadBytes = { type = "number" },
+          allowAnonRead = { type = "boolean" },
+          requireMfa = { type = "boolean" }
         },
       },
       region = { type = "string", enum = { "eu", "us", "apac" } },
@@ -92,6 +96,8 @@ local SCHEMAS = {
           allowAnonymousRead = { type = "boolean" },
           allowAnonymousWrite = { type = "boolean" },
           auditLevel = { type = "string", enum = { "none", "basic", "full" } },
+          dataResidency = { type = "string", enum = { "eu", "us", "apac", "global" } },
+          piiHandling = { type = "string", enum = { "deny", "mask", "allow" } }
         },
       },
     },

@@ -16,6 +16,7 @@ local SIG_SECRET = os.getenv("AUTH_SIGNATURE_SECRET")
 local SIG_PUBLIC = os.getenv("AUTH_SIGNATURE_PUBLIC")
 local SIG_TYPE = os.getenv("AUTH_SIGNATURE_TYPE") or "hmac" -- hmac | ed25519
 local openssl_ok, openssl = pcall(require, "openssl")
+local sodium_ok, sodium = pcall(require, "sodium")
 local sqlite_ok, sqlite = pcall(require, "lsqlite3")
 
 local nonce_store = {}
@@ -99,19 +100,26 @@ function Auth.require_signature(msg)
   end
   local target = (msg.Action or "") .. "|" .. (msg["Site-Id"] or "") .. "|" .. (msg["Request-Id"] or "")
   if SIG_TYPE == "ed25519" and SIG_PUBLIC then
-    -- Try native luaossl first
+    -- Prefer libsodium for detached ed25519 verification (hex signature expected)
+    if sodium_ok and sodium.crypto_sign_verify_detached then
+      local pub = assert(io.open(SIG_PUBLIC, "rb")):read("*a")
+      local raw_sig = sodium.from_hex(sig)
+      if raw_sig and sodium.crypto_sign_verify_detached(raw_sig, target, pub) then
+        return true
+      end
+    end
+    -- Try luaossl
     if openssl_ok and openssl.pkey and openssl.hex then
       local pub_pem = assert(io.open(SIG_PUBLIC, "r")):read("*a")
       local pkey = openssl.pkey.read(pub_pem, true, "public")
       local raw_sig = openssl.hex(sig)
-      local ok, verify_err = pkey:verify(raw_sig, target, "NONE")
+      local ok, _ = pkey:verify(raw_sig, target, "NONE")
       if ok then return true end
     end
-    -- Fallback to shell verify for compatibility
+    -- Fallback shell
     local tmp = os.tmpname()
     local f = io.open(tmp, "w"); if f then f:write(target); f:close() end
     local cmd = string.format("openssl pkeyutl -verify -pubin -inkey %q -rawin -in %q -sigfile %q 2>/dev/null", SIG_PUBLIC, tmp, tmp .. ".sig")
-    -- write signature bytes (assume hex)
     local sf = io.open(tmp .. ".sig", "w")
     if sf then
       sf:write(sig)
