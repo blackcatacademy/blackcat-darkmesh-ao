@@ -13,6 +13,7 @@ local REQUEST_LOG = os.getenv("ARWEAVE_REQUEST_LOG") or "arweave/manifests"
 local ENDPOINT = os.getenv("ARWEAVE_HTTP_ENDPOINT")
 local API_KEY = os.getenv("ARWEAVE_HTTP_API_KEY")
 local SIGNER = os.getenv("ARWEAVE_HTTP_SIGNER") -- path to key or wallet JSON
+local HTTP_TIMEOUT = tonumber(os.getenv("ARWEAVE_HTTP_TIMEOUT") or "10")
 
 local function next_tx()
   counter = counter + 1
@@ -135,12 +136,20 @@ local function log_request(tx, payload, hash)
 end
 
 if MODE == "http" then
-  -- override put_snapshot to log intended HTTP payload; real call not performed here
+  -- Simulated HTTP call: writes request + simulated response status to manifests log.
+  -- Still offline/off-chain; safe for local runs.
   function Ar.put_snapshot(payload)
     local tx = next_tx()
     local serialized = json_encode(payload)
     local hash = sha256(serialized) or fallback_checksum(serialized)
-    log_request(tx, { endpoint = ENDPOINT, apiKey = API_KEY and "<redacted>", signer = SIGNER and "<redacted>", body = payload }, hash)
+    log_request(tx, {
+      endpoint = ENDPOINT or "<missing-endpoint>",
+      apiKey = API_KEY and "<redacted>",
+      signer = SIGNER and "<redacted>",
+      timeout = HTTP_TIMEOUT,
+      body = payload,
+      simulated = true,
+    }, hash)
     return tx, hash
   end
 end

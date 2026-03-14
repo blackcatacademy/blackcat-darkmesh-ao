@@ -59,6 +59,7 @@ tests/             # integration, message-contracts, snapshots, security
 - Arweave config (mock-safe by default):
   - `ARWEAVE_MODE` (`mock`|`http`) — mock persists snapshots locally; http logs intended requests only.
   - `ARWEAVE_HTTP_ENDPOINT`, `ARWEAVE_HTTP_API_KEY`, `ARWEAVE_HTTP_SIGNER` — only logged in http mode.
+  - `ARWEAVE_HTTP_TIMEOUT` seconds; requests are simulated/offline but logged with this value.
 - Audit config: `AUDIT_LOG_DIR` (default `arweave/manifests`), `AUDIT_MAX_RECORDS` (default 1000 in-memory).
   - `AUDIT_FORMAT` (`line`|`ndjson`), `AUDIT_ROTATE_MAX` bytes for log rotation.
 
