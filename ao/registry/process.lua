@@ -1,7 +1,9 @@
 -- Registry process handlers: domains, sites, versions, roles.
+-- Lightweight in-memory scaffolding to keep contracts testable.
 
 local codec = require("ao.shared.codec")
 local validation = require("ao.shared.validation")
+local ids = require("ao.shared.ids")
 
 local handlers = {}
 local allowed_actions = {
@@ -13,28 +15,139 @@ local allowed_actions = {
   "GrantRole",
 }
 
+-- pseudo-state kept in-memory for now; AO runtime would persist this.
+local state = {
+  sites = {},          -- siteId => {config = {}, createdAt = ts}
+  domains = {},        -- host => siteId
+  active_versions = {},-- siteId => versionId
+  roles = {},          -- siteId => map[user] = role
+}
+
+local function now_iso()
+  -- coarse timestamp for audit/debug; determinism is sufficient here.
+  return os.date("!%Y-%m-%dT%H:%M:%SZ")
+end
+
+local function ensure_field(msg, field)
+  if msg[field] == nil then
+    return false, field
+  end
+  return true
+end
+
 function handlers.GetSiteByHost(msg)
-  return codec.not_implemented("GetSiteByHost")
+  local ok, missing_field = ensure_field(msg, "Host")
+  if not ok then
+    return codec.error("INVALID_INPUT", "Host is required", { missing = missing_field })
+  end
+  local site_id = state.domains[msg.Host]
+  if not site_id then
+    return codec.error("NOT_FOUND", "Domain not bound", { host = msg.Host })
+  end
+  return codec.ok({
+    siteId = site_id,
+    activeVersion = state.active_versions[site_id],
+  })
 end
 
 function handlers.GetSiteConfig(msg)
-  return codec.not_implemented("GetSiteConfig")
+  local ok, missing_field = ensure_field(msg, "Site-Id")
+  if not ok then
+    return codec.error("INVALID_INPUT", "Site-Id is required", { missing = missing_field })
+  end
+  local site = state.sites[msg["Site-Id"]]
+  if not site then
+    return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
+  end
+  return codec.ok({
+    siteId = msg["Site-Id"],
+    config = site.config,
+    activeVersion = state.active_versions[msg["Site-Id"]],
+  })
 end
 
 function handlers.RegisterSite(msg)
-  return codec.not_implemented("RegisterSite")
+  local ok, missing_field = ensure_field(msg, "Site-Id")
+  if not ok then
+    return codec.error("INVALID_INPUT", "Site-Id is required", { missing = missing_field })
+  end
+  local config = msg.Config or {}
+  local existing = state.sites[msg["Site-Id"]]
+  if existing then
+    return codec.ok({
+      siteId = msg["Site-Id"],
+      createdAt = existing.createdAt,
+      config = existing.config,
+      activeVersion = state.active_versions[msg["Site-Id"]],
+      note = "already_registered",
+    })
+  end
+  state.sites[msg["Site-Id"]] = {
+    config = config,
+    createdAt = now_iso(),
+  }
+  state.active_versions[msg["Site-Id"]] = config.version or msg.Version or nil
+  return codec.ok({
+    siteId = msg["Site-Id"],
+    createdAt = state.sites[msg["Site-Id"]].createdAt,
+    activeVersion = state.active_versions[msg["Site-Id"]],
+  })
 end
 
 function handlers.BindDomain(msg)
-  return codec.not_implemented("BindDomain")
+  local required = { "Site-Id", "Host" }
+  for _, f in ipairs(required) do
+    local ok_field, missing_field = ensure_field(msg, f)
+    if not ok_field then
+      return codec.error("INVALID_INPUT", "Missing required field", { missing = missing_field })
+    end
+  end
+  if not state.sites[msg["Site-Id"]] then
+    return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
+  end
+  state.domains[msg.Host] = msg["Site-Id"]
+  return codec.ok({
+    host = msg.Host,
+    siteId = msg["Site-Id"],
+  })
 end
 
 function handlers.SetActiveVersion(msg)
-  return codec.not_implemented("SetActiveVersion")
+  local required = { "Site-Id", "Version" }
+  for _, f in ipairs(required) do
+    local ok_field, missing_field = ensure_field(msg, f)
+    if not ok_field then
+      return codec.error("INVALID_INPUT", "Missing required field", { missing = missing_field })
+    end
+  end
+  if not state.sites[msg["Site-Id"]] then
+    return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
+  end
+  state.active_versions[msg["Site-Id"]] = msg.Version
+  return codec.ok({
+    siteId = msg["Site-Id"],
+    activeVersion = msg.Version,
+  })
 end
 
 function handlers.GrantRole(msg)
-  return codec.not_implemented("GrantRole")
+  local required = { "Site-Id", "Subject", "Role" }
+  for _, f in ipairs(required) do
+    local ok_field, missing_field = ensure_field(msg, f)
+    if not ok_field then
+      return codec.error("INVALID_INPUT", "Missing required field", { missing = missing_field })
+    end
+  end
+  if not state.sites[msg["Site-Id"]] then
+    return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
+  end
+  state.roles[msg["Site-Id"]] = state.roles[msg["Site-Id"]] or {}
+  state.roles[msg["Site-Id"]][msg.Subject] = msg.Role
+  return codec.ok({
+    siteId = msg["Site-Id"],
+    subject = msg.Subject,
+    role = msg.Role,
+  })
 end
 
 local function route(msg)
@@ -61,4 +174,5 @@ end
 
 return {
   route = route,
+  _state = state, -- exposed for tests
 }
