@@ -10,6 +10,7 @@ local allowed_actions = {
   "GetProtectedAssetRef",
   "GrantEntitlement",
   "RevokeEntitlement",
+  "PutProtectedAssetRef",
 }
 
 local state = {
@@ -73,6 +74,13 @@ function handlers.RevokeEntitlement(msg)
     asset = msg.Asset,
     revoked = true,
   })
+end
+
+function handlers.PutProtectedAssetRef(msg)
+  local ok, missing = ensure({ "Asset", "Ref" }, msg)
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  state.protected[msg.Asset] = { ref = msg.Ref, visibility = msg.Visibility or "protected" }
+  return codec.ok({ asset = msg.Asset, ref = msg.Ref })
 end
 
 local function route(msg)

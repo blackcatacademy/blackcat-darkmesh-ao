@@ -35,6 +35,7 @@ do
   local publish = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-1", Version = "v2" }))
   assert_eq(publish.status, "OK", "publish status")
   assert_truthy(publish.payload.manifestTx, "publish manifestTx")
+  assert_truthy(publish.payload.manifestHash, "publish manifestHash")
   local route = site.route(with_req({ Action = "ResolveRoute", ["Site-Id"] = "site-1", Path = "/" }))
   assert_eq(route.status, "OK", "resolve route status")
   local page = site.route(with_req({ Action = "GetPage", ["Site-Id"] = "site-1", ["Page-Id"] = "home" }))
@@ -45,22 +46,34 @@ end
 -- Catalog tests
 do
   local catalog = require("ao.catalog.process")
-  catalog.route(with_req({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-1", Payload = { name = "A" } }))
-  catalog.route(with_req({ Action = "UpsertCategory", ["Site-Id"] = "site-1", ["Category-Id"] = "cat-1", Products = { "sku-1" } }))
+  for i = 1, 60 do
+    catalog.route(with_req({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-" .. i, Payload = { name = "Prod" .. i } }))
+  end
+  catalog.route(with_req({ Action = "UpsertCategory", ["Site-Id"] = "site-1", ["Category-Id"] = "cat-1", Products = { "sku-1", "sku-2", "sku-3", "sku-55" } }))
   local product = catalog.route(with_req({ Action = "GetProduct", ["Site-Id"] = "site-1", Sku = "sku-1" }))
   assert_eq(product.status, "OK", "get product status")
   local listing = catalog.route(with_req({ Action = "ListCategoryProducts", ["Site-Id"] = "site-1", ["Category-Id"] = "cat-1" }))
   assert_eq(listing.status, "OK", "list category products")
-  assert_eq(listing.payload.total, 1, "category total")
+  assert_eq(listing.payload.total, 4, "category total")
+  local search = catalog.route(with_req({ Action = "SearchCatalog", ["Site-Id"] = "site-1", Query = "Prod" }))
+  assert_eq(search.status, "OK", "search status")
+  assert_eq(search.payload.total, 60, "search total")
+  local paged = catalog.route(with_req({ Action = "ListCategoryProducts", ["Site-Id"] = "site-1", ["Category-Id"] = "cat-1", Page = 2, PageSize = 2 }))
+  assert_eq(paged.payload.page, 2, "second page number")
+  assert_eq(#paged.payload.items, 2, "second page size")
 end
 
 -- Access tests
 do
   local access = require("ao.access.process")
   access.route(with_req({ Action = "GrantEntitlement", Subject = "user-1", Asset = "asset-1", Policy = "view" }))
+  access.route(with_req({ Action = "PutProtectedAssetRef", Asset = "asset-1", Ref = "ar://tx123", Visibility = "protected" }))
   local check = access.route(with_req({ Action = "HasEntitlement", Subject = "user-1", Asset = "asset-1" }))
   assert_eq(check.status, "OK", "has entitlement status")
   assert_truthy(check.payload.hasEntitlement, "entitlement flag")
+  local asset = access.route(with_req({ Action = "GetProtectedAssetRef", Asset = "asset-1" }))
+  assert_eq(asset.status, "OK", "get asset ref")
+  assert_eq(asset.payload.ref, "ar://tx123", "asset ref matches")
 end
 
 print("contract tests passed")

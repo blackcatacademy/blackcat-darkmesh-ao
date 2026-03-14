@@ -142,12 +142,13 @@ function handlers.PublishVersion(msg)
   end
 
   local manifestTx
+  local manifestHash
   if #snapshots > 0 then
-    manifestTx = ar.put_snapshot({ siteId = site, version = msg.Version, pages = snapshots })
+    manifestTx, manifestHash = ar.put_snapshot({ siteId = site, version = msg.Version, pages = snapshots })
   end
 
   state.active_versions[site] = msg.Version
-  return codec.ok({ siteId = site, activeVersion = msg.Version, manifestTx = manifestTx })
+  return codec.ok({ siteId = site, activeVersion = msg.Version, manifestTx = manifestTx, manifestHash = manifestHash })
 end
 
 function handlers.ArchivePage(msg)
