@@ -15,6 +15,7 @@ local API_KEY = os.getenv("ARWEAVE_HTTP_API_KEY")
 local SIGNER = os.getenv("ARWEAVE_HTTP_SIGNER") -- path to key or wallet JSON
 local HTTP_TIMEOUT = tonumber(os.getenv("ARWEAVE_HTTP_TIMEOUT") or "10")
 local HTTP_REAL = os.getenv("ARWEAVE_HTTP_REAL") == "1"
+local HTTP_SIGNER_HEADER = os.getenv("ARWEAVE_HTTP_SIGNER_HEADER") or "X-Arweave-Signer"
 
 local function next_tx()
   counter = counter + 1
@@ -51,10 +52,12 @@ local function http_post(serialized, tx)
   ensure_dir(REQUEST_LOG)
   local response_path = string.format("%s/%s-response.json", REQUEST_LOG, tx)
   local auth_header = API_KEY and (" -H \"Authorization: Bearer " .. API_KEY .. "\"") or ""
-  local cmd = string.format("echo %q | curl -s -o \"%s\" -w \"%%{http_code}\" -H \"Content-Type: application/json\"%s --max-time %d -X POST \"%s\" --data-binary @-",
+  local signer_header = SIGNER and (" -H \"" .. HTTP_SIGNER_HEADER .. ": " .. SIGNER .. "\"") or ""
+  local cmd = string.format("echo %q | curl -s -o \"%s\" -w \"%%{http_code}\" -H \"Content-Type: application/json\"%s%s --max-time %d -X POST \"%s\" --data-binary @-",
     serialized,
     response_path,
     auth_header,
+    signer_header,
     HTTP_TIMEOUT,
     ENDPOINT or "")
   local pipe = io.popen(cmd, "r")

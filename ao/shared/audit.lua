@@ -6,6 +6,7 @@ local LOG_DIR = os.getenv("AUDIT_LOG_DIR") or "arweave/manifests"
 local MAX_IN_MEMORY = tonumber(os.getenv("AUDIT_MAX_RECORDS") or "1000")
 local FORMAT = os.getenv("AUDIT_FORMAT") or "line" -- line | ndjson
 local ROTATE_MAX = tonumber(os.getenv("AUDIT_ROTATE_MAX") or "1048576") -- bytes
+local RETAIN_FILES = tonumber(os.getenv("AUDIT_RETAIN_FILES") or "10") -- number of rotated files per stream
 
 local function ensure_dir(path)
   os.execute(string.format('mkdir -p "%s"', path))
@@ -50,6 +51,19 @@ local function rotate_if_needed(path)
   if #content >= ROTATE_MAX then
     local rotated = path .. "." .. os.date("!%Y%m%d%H%M%S")
     os.rename(path, rotated)
+    -- retention
+    local dir, file = path:match("(.+)/([^/]+)$")
+    local prefix = file .. "."
+    local rotated_files = {}
+    for rfile in lfs.dir(dir) do
+      if rfile:find("^" .. prefix) then
+        table.insert(rotated_files, dir .. "/" .. rfile)
+      end
+    end
+    table.sort(rotated_files, function(a, b) return a > b end) -- newest first (lexicographic on timestamp suffix)
+    for i = RETAIN_FILES + 1, #rotated_files do
+      os.remove(rotated_files[i])
+    end
   end
 end
 

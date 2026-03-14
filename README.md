@@ -60,8 +60,10 @@ tests/             # integration, message-contracts, snapshots, security
   - `ARWEAVE_MODE` (`mock`|`http`) — mock persists snapshots locally; http logs intended requests only.
   - `ARWEAVE_HTTP_ENDPOINT`, `ARWEAVE_HTTP_API_KEY`, `ARWEAVE_HTTP_SIGNER` — only logged in http mode.
   - `ARWEAVE_HTTP_TIMEOUT` seconds; requests are simulated/offline but logged with this value.
+  - `ARWEAVE_HTTP_REAL=1` enables actual HTTP POST via curl (still logs responses); keep unset for offline.
 - Audit config: `AUDIT_LOG_DIR` (default `arweave/manifests`), `AUDIT_MAX_RECORDS` (default 1000 in-memory).
   - `AUDIT_FORMAT` (`line`|`ndjson`), `AUDIT_ROTATE_MAX` bytes for log rotation.
+  - `AUDIT_RETAIN_FILES` rotated log files per stream (default 10).
 
 ## License
 Blackcat Darkmesh AO Proprietary License (see `LICENSE`). External contributions require written permission from Black Cat Academy s. r. o.
