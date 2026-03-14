@@ -1,0 +1,17 @@
+format: weavedb-collection/v1
+name: audit
+schema:
+  type: object
+  required: [id, site_id, actor, action, ts]
+  properties:
+    id:       { type: string }
+    site_id:  { type: string }
+    actor:    { type: string }
+    action:   { type: string }
+    target:   { type: string }
+    target_type: { type: string }
+    ts:       { type: string, format: date-time }
+    meta:     { type: object }
+indexes:
+  - fields: [site_id, ts]
+  - fields: [actor, ts]

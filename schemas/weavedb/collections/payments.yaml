@@ -1,0 +1,20 @@
+format: weavedb-collection/v1
+name: payments
+schema:
+  type: object
+  required: [id, site_id, order_id, status, amount, currency, created_at]
+  properties:
+    id:         { type: string }
+    site_id:    { type: string }
+    order_id:   { type: string }
+    user_id:    { type: string }
+    gateway:    { type: string }
+    status:     { type: string, enum: [pending, authorized, paid, failed, refunded, cancelled] }
+    amount:     { type: number }
+    currency:   { type: string, minLength: 3, maxLength: 3 }
+    attempts:   { type: integer, minimum: 0 }
+    created_at: { type: string, format: date-time }
+    updated_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, status]
+  - fields: [order_id]
