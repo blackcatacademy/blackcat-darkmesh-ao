@@ -1,2 +1,61 @@
--- Shared schema validation and payload guards (stub).
-return {}
+-- Shared schema validation and payload guards (lightweight).
+-- This keeps minimal synchronous guards in-process; deeper JSON schema checks
+-- should be handled by the upstream bridge or a dedicated validator.
+
+local Validation = {}
+
+Validation.required_tags = {
+  "Action",
+  "Request-Id",
+  "Site-Id",
+  "Schema-Version",
+}
+
+local function contains(list, value)
+  for _, v in ipairs(list) do
+    if v == value then
+      return true
+    end
+  end
+  return false
+end
+
+function Validation.require_tags(msg, extra)
+  local missing = {}
+  for _, key in ipairs(Validation.required_tags) do
+    if msg[key] == nil then
+      table.insert(missing, key)
+    end
+  end
+  if extra then
+    for _, key in ipairs(extra) do
+      if msg[key] == nil then
+        table.insert(missing, key)
+      end
+    end
+  end
+  if #missing > 0 then
+    return false, missing
+  end
+  return true
+end
+
+function Validation.require_action(msg, allowed)
+  local action = msg.Action
+  if not action then
+    return false, "missing_action"
+  end
+  if allowed and not contains(allowed, action) then
+    return false, "unknown_action"
+  end
+  return true
+end
+
+function Validation.assert_type(value, expected, field)
+  if type(value) ~= expected then
+    return false, ("invalid_type:%s"):format(field or "?")
+  end
+  return true
+end
+
+return Validation
