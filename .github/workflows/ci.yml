@@ -28,3 +28,10 @@ jobs:
           ARWEAVE_HTTP_ENDPOINT: ${{ env.ARWEAVE_HTTP_ENDPOINT }}
           ARWEAVE_HTTP_TIMEOUT: 5
         run: bash scripts/verify/arweave_health.sh
+
+      - name: Signer check (optional)
+        if: env.ARWEAVE_HTTP_REAL == '1'
+        env:
+          ARWEAVE_HTTP_SIGNER: ${{ env.ARWEAVE_HTTP_SIGNER }}
+          ARWEAVE_HTTP_REAL: ${{ env.ARWEAVE_HTTP_REAL }}
+        run: bash scripts/verify/signer_check.sh
