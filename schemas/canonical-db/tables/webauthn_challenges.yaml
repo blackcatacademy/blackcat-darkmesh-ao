@@ -1,0 +1,17 @@
+format: ao-table/v1
+name: webauthn_challenges
+summary: WebAuthn pending challenges (registration/authentication) stored server-side.
+columns:
+  id:
+    Description: Surrogate primary key.
+  rp_id:
+    Description: Relying Party ID (domain).
+  challenge_hash:
+    PII: token
+    Description: SHA-256 hash of the challenge (hex).
+  metadata:
+    Description: Stored challenge metadata as JSON (type, subject, allowed credentials).
+  expires_at:
+    Description: Expiration timestamp (UTC).
+  created_at:
+    Description: Creation timestamp (UTC).

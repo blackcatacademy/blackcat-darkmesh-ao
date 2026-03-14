@@ -1,0 +1,16 @@
+format: ao-table/v1
+name: coupon_redemptions
+summary: Records of coupon usage per order and user.
+columns:
+  amount_applied:
+    Description: Applied discount amount.
+  id:
+    Description: Surrogate primary key.
+  coupon_id:
+    Description: Coupon (FK coupons.id).
+  order_id:
+    Description: Order (FK orders.id).
+  redeemed_at:
+    Description: When coupon was redeemed (UTC).
+  user_id:
+    Description: User (FK users.id).

@@ -1,0 +1,20 @@
+format: ao-table/v1
+name: login_attempts
+summary: Login attempts per IP and (optional) user.
+columns:
+  id:
+    Description: Surrogate primary key.
+  auth_event_id:
+    Description: Link to auth_events record, optional.
+  attempted_at:
+    Description: Attempt time (UTC).
+  ip_hash:
+    PII: hashed
+    Description: Hashed client IP.
+  success:
+    Description: Whether authentication succeeded.
+  username_hash:
+    PII: hashed
+    Description: Hashed username/email provided.
+  user_id:
+    Description: User (FK users.id), optional.

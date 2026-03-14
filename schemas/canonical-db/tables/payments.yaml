@@ -1,0 +1,35 @@
+format: ao-table/v1
+name: payments
+summary: Payment attempts and final captures for orders.
+columns:
+  currency:
+    Description: ISO 4217 currency code.
+  id:
+    Description: Surrogate primary key.
+  updated_at:
+    Description: Update timestamp (UTC).
+  gateway:
+    Description: Payment gateway key (e.g., stripe, gopay).
+  details:
+    Description: JSON with provider details/receipts.
+  provider_event_id:
+    Description: Provider event id (optional).
+  order_id:
+    Description: Order (FK orders.id).
+  created_at:
+    Description: Creation timestamp (UTC).
+  status:
+    Description: Payment state.
+    Enum:
+    - initiated
+    - pending
+    - authorized
+    - paid
+    - cancelled
+    - partially_refunded
+    - refunded
+    - failed
+  transaction_id:
+    Description: Provider transaction id (unique if provided).
+  amount:
+    Description: Payment amount. Must be >= 0.

@@ -1,0 +1,28 @@
+format: ao-table/v1
+name: migration_events
+summary: Records describing migrations between schema versions.
+columns:
+  meta:
+    Description: JSON metadata or logs.
+  id:
+    Description: Surrogate primary key.
+  started_at:
+    Description: Migration start timestamp (UTC).
+  system_name:
+    Description: System/component undergoing migration.
+  from_version:
+    Description: Version migrated from.
+  to_version:
+    Description: Target version.
+  finished_at:
+    Description: Completion timestamp (UTC).
+  status:
+    Description: Migration status.
+    Enum:
+    - pending
+    - running
+    - done
+    - failed
+    - cancelled
+  error:
+    Description: Failure message, if any.

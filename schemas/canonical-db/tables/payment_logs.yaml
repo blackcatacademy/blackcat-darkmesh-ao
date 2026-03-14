@@ -1,0 +1,12 @@
+format: ao-table/v1
+name: payment_logs
+summary: Plaintext logs per payment.
+columns:
+  log_at:
+    Description: Log time (UTC).
+  payment_id:
+    Description: Payment (FK payments.id).
+  message:
+    Description: Log message.
+  id:
+    Description: Surrogate primary key.

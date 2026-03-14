@@ -1,0 +1,23 @@
+format: ao-table/v1
+name: kms_providers
+summary: Configured KMS providers. name is UNIQUE.
+columns:
+  id:
+    Description: Surrogate primary key.
+  project_tenant:
+    Description: Project/tenant id.
+  created_at:
+    Description: Creation timestamp (UTC).
+  name:
+    Description: Display name (UNIQUE).
+  is_enabled:
+    Description: Whether provider is enabled.
+  location:
+    Description: Region or location.
+  provider:
+    Description: Provider kind.
+    Enum:
+    - gcp
+    - aws
+    - azure
+    - vault

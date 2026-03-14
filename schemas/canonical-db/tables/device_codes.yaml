@@ -1,0 +1,38 @@
+format: ao-table/v1
+name: device_codes
+summary: OAuth device-code flow storage (issued codes + approval payload).
+columns:
+  id:
+    Description: Surrogate primary key.
+  device_code_hash:
+    PII: token
+    Description: Deterministic hash of device_code (HMAC; used for polling lookup).
+  device_code_hash_key_version:
+    Description: Key version used for device_code_hash.
+  device_code:
+    PII: token
+    Description: Encrypted device_code (envelope).
+  device_code_key_version:
+    Description: Key version used for device_code encryption.
+  user_code_hash:
+    PII: token
+    Description: Deterministic hash of user_code (HMAC; used for activation lookup).
+  user_code_hash_key_version:
+    Description: Key version used for user_code_hash.
+  client_id:
+    Description: OAuth client id requesting the device code.
+  scopes:
+    Description: Requested scopes (JSON array).
+  token_payload:
+    PII: token
+    Description: Encrypted token payload issued after approval (envelope JSON).
+  token_payload_key_version:
+    Description: Key version used for token_payload encryption.
+  interval_sec:
+    Description: Recommended polling interval in seconds.
+  approved_at:
+    Description: When the device code was approved by the user (UTC).
+  expires_at:
+    Description: Expiration timestamp (UTC).
+  created_at:
+    Description: Creation timestamp (UTC).

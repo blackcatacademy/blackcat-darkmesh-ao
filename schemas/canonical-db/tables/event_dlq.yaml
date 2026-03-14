@@ -1,0 +1,22 @@
+format: ao-table/v1
+name: event_dlq
+summary: Dead-letter queue holding events that failed permanently.
+columns:
+  source:
+    Description: Event source or producer system.
+  first_failed_at:
+    Description: Timestamp of the first failure.
+  id:
+    Description: Surrogate primary key.
+  event_key:
+    Description: Event key / idempotency token.
+  error:
+    Description: Error message explaining the failure.
+  event:
+    Description: Original event payload (JSON).
+  retryable:
+    Description: Whether the event can be retried safely.
+  last_failed_at:
+    Description: Timestamp of the latest failure.
+  attempts:
+    Description: How many attempts were made.

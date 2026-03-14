@@ -1,0 +1,8 @@
+format: ao-table/v1
+name: countries
+summary: Country reference list.
+columns:
+  iso2:
+    Description: ISO 3166-1 alpha-2 country code (upper case).
+  name:
+    Description: Official short name.

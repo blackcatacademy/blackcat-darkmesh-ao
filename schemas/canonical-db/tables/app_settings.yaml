@@ -1,0 +1,26 @@
+format: ao-table/v1
+name: app_settings
+summary: Application-wide key/value configuration.
+columns:
+  is_protected:
+    Description: Marks sensitive values for redaction in UIs.
+  description:
+    Description: Human-readable description.
+  type:
+    Description: Datatype of the value.
+    Enum:
+    - string
+    - int
+    - bool
+    - json
+    - secret
+  section:
+    Description: Logical group/namespace.
+  setting_key:
+    Description: Unique setting identifier (natural primary key).
+  setting_value:
+    Description: Value as text (may contain JSON when type=json).
+  updated_by:
+    Description: User who changed the setting (FK users.id).
+  updated_at:
+    Description: Last update timestamp (UTC).

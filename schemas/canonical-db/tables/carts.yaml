@@ -1,0 +1,12 @@
+format: ao-table/v1
+name: carts
+summary: Carts keyed by UUID; may be anonymous or bound to user.
+columns:
+  created_at:
+    Description: Creation timestamp (UTC).
+  user_id:
+    Description: User owner (FK users.id), optional.
+  id:
+    Description: Cart id (UUID textual).
+  updated_at:
+    Description: Update timestamp (UTC).

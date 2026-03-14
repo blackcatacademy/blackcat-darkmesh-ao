@@ -1,0 +1,16 @@
+format: ao-table/v1
+name: slo_windows
+summary: Configured service-level objective windows/targets.
+columns:
+  target_pct:
+    Description: Target success percentage.
+  id:
+    Description: Surrogate primary key.
+  window_interval:
+    Description: Interval over which the SLO is computed.
+  created_at:
+    Description: Creation timestamp (UTC).
+  objective:
+    Description: JSON description of what is being measured.
+  name:
+    Description: SLO identifier.

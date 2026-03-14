@@ -1,0 +1,14 @@
+format: ao-table/v1
+name: permissions
+summary: Application permission catalog.
+columns:
+  created_at:
+    Description: Creation timestamp (UTC).
+  updated_at:
+    Description: Update timestamp (UTC).
+  description:
+    Description: Human description.
+  name:
+    Description: Unique permission name.
+  id:
+    Description: Surrogate primary key.

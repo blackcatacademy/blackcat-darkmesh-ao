@@ -1,0 +1,19 @@
+format: ao-table/v1
+name: magic_links
+summary: One-time magic-link tokens (fingerprint-only, server-side stored).
+columns:
+  id:
+    Description: Surrogate primary key.
+  fingerprint:
+    PII: token
+    Description: HMAC fingerprint of the magic-link token.
+  subject:
+    Description: Subject identifier (typically users.id).
+  user_id:
+    Description: Optional FK users.id for convenience joins.
+  context:
+    Description: Context metadata (e.g., redirect) as JSON.
+  expires_at:
+    Description: Expiration timestamp (UTC).
+  created_at:
+    Description: Creation timestamp (UTC).

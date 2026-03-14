@@ -1,0 +1,16 @@
+format: ao-table/v1
+name: field_hash_policies
+summary: Effective hashing policy assignments for sensitive columns.
+columns:
+  field_name:
+    Description: Column name.
+  id:
+    Description: Surrogate primary key.
+  effective_from:
+    Description: Timestamp when the policy takes effect.
+  notes:
+    Description: Documentation / migration context.
+  entity_table:
+    Description: Table where the field lives.
+  profile_id:
+    Description: Hash profile applied (FK hash_profiles.id).

@@ -1,0 +1,41 @@
+format: ao-table/v1
+name: jwt_tokens
+summary: Refresh/API token registry with revocation support.
+columns:
+  id:
+    Description: Surrogate primary key.
+  type:
+    Description: Token kind.
+    Enum:
+    - refresh
+    - api
+  scopes:
+    Description: Space/comma separated scopes.
+  created_at:
+    Description: Creation timestamp (UTC).
+  ip_hash:
+    PII: hashed
+    Description: Hashed client IP.
+  token_hash:
+    PII: hashed
+    Description: Hashed token.
+  ip_hash_key_version:
+    Description: Key version for ip_hash.
+  user_id:
+    Description: User (FK users.id), optional.
+  replaced_by:
+    Description: Newer token id (token rotation).
+  token_hash_algo:
+    Description: Hash algorithm.
+  expires_at:
+    Description: Expiration timestamp (UTC).
+  revoked:
+    Description: Revocation flag.
+  meta:
+    Description: Additional JSON metadata.
+  last_used_at:
+    Description: Last usage (UTC).
+  token_hash_key_version:
+    Description: Key version used for token hashing.
+  jti:
+    Description: JWT ID (unique).

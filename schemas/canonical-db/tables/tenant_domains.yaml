@@ -1,0 +1,16 @@
+format: ao-table/v1
+name: tenant_domains
+summary: Tenant-owned domains used for routing/custom branding.
+columns:
+  domain:
+    Description: Original domain string.
+  id:
+    Description: Surrogate primary key.
+  created_at:
+    Description: Creation timestamp (UTC).
+  tenant_id:
+    Description: Owning tenant (FK tenants.id).
+  is_primary:
+    Description: Whether this domain is the tenant primary.
+  domain_ci:
+    Description: Lowercase domain used for uniqueness.

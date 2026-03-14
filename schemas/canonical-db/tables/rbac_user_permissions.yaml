@@ -1,0 +1,25 @@
+format: ao-table/v1
+name: rbac_user_permissions
+summary: Direct permission grants to users (outside of roles).
+columns:
+  permission_id:
+    Description: Permission id (FK permissions.id).
+  id:
+    Description: Surrogate primary key.
+  effect:
+    Description: Allow or deny flag.
+    Enum:
+    - allow
+    - deny
+  granted_at:
+    Description: Grant timestamp (UTC).
+  scope:
+    Description: Additional scope qualifier (string).
+  granted_by:
+    Description: User/admin who granted the permission.
+  expires_at:
+    Description: Optional expiration time (UTC).
+  tenant_id:
+    Description: Tenant scope, optional.
+  user_id:
+    Description: User receiving the grant (FK users.id).

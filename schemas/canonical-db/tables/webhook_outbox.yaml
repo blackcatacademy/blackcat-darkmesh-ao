@@ -1,0 +1,24 @@
+format: ao-table/v1
+name: webhook_outbox
+summary: Outbox table for delivering webhooks.
+columns:
+  id:
+    Description: Surrogate primary key.
+  payload:
+    Description: JSON payload.
+  event_type:
+    Description: Webhook event key.
+  retries:
+    Description: Retry counter.
+  next_attempt_at:
+    Description: Next attempt time (UTC).
+  created_at:
+    Description: Creation timestamp (UTC).
+  updated_at:
+    Description: Update timestamp (UTC).
+  status:
+    Description: Delivery status.
+    Enum:
+    - pending
+    - sent
+    - failed

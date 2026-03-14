@@ -1,0 +1,19 @@
+format: ao-table/v1
+name: policy_algorithms
+summary: Weights and priorities for algorithms used within an encryption policy.
+columns:
+  priority:
+    Description: Fallback/ordering priority.
+  policy_id:
+    Description: Encryption policy id (FK encryption_policies.id).
+  weight:
+    Description: Selection weight.
+  algo_id:
+    Description: Algorithm id (FK crypto_algorithms.id).
+  role:
+    Description: Role played by the algorithm.
+    Enum:
+    - kem
+    - sig
+    - hash
+    - symmetric

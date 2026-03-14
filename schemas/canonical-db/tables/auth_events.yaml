@@ -1,0 +1,42 @@
+format: ao-table/v1
+name: auth_events
+summary: Authentication events (logins, resets, lockouts).
+columns:
+  meta:
+    Description: Additional JSON metadata (e.g., email used).
+  id:
+    Description: Surrogate primary key.
+  type:
+    Description: Auth event kind.
+    Enum:
+    - login_success
+    - login_failure
+    - logout
+    - password_reset
+    - lockout
+    - magic_link_request
+    - magic_link_throttled
+    - magic_link_email_queued
+    - device_code_issue
+    - device_code_issue_failure
+    - device_code_activate_success
+    - device_code_activate_failure
+    - device_code_poll_success
+    - device_code_poll_failure
+    - webauthn_register_success
+    - webauthn_register_failure
+    - webauthn_login_success
+    - webauthn_login_failure
+  meta_email:
+    Description: Generated/stored email extracted from meta for indexing/filtering.
+  ip_hash_key_version:
+    Description: Key version used for ip_hash.
+  ip_hash:
+    PII: hashed
+    Description: Hashed client IP.
+  user_agent:
+    Description: Client user agent.
+  occurred_at:
+    Description: When event happened (UTC).
+  user_id:
+    Description: Related user (FK users.id).

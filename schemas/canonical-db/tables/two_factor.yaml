@@ -1,0 +1,22 @@
+format: ao-table/v1
+name: two_factor
+summary: Second factor configuration per user/method.
+columns:
+  last_used_at:
+    Description: Last successful use (UTC).
+  method:
+    Description: 2FA method key (e.g., totp, hotp, webauthn).
+  recovery_codes_enc:
+    PII: encrypted
+    Description: Encrypted recovery codes.
+  created_at:
+    Description: Creation timestamp (UTC).
+  secret:
+    PII: encrypted
+    Description: Shared secret (encrypted/encoded).
+  hotp_counter:
+    Description: HOTP counter (if HOTP).
+  enabled:
+    Description: Whether method is enabled.
+  user_id:
+    Description: User (FK users.id).

@@ -1,0 +1,19 @@
+format: ao-table/v1
+name: tax_rates
+summary: Tax rates per country and goods category. UNIQUE (country_iso2, category, valid_from).
+columns:
+  valid_from:
+    Description: Effective from (date).
+  id:
+    Description: Surrogate primary key.
+  category:
+    Description: Tax category.
+    Enum:
+    - ebook
+    - physical
+  valid_to:
+    Description: Effective to (date), optional.
+  rate:
+    Description: Tax rate %.
+  country_iso2:
+    Description: ISO 3166-1 alpha-2 country code.

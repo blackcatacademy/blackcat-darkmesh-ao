@@ -1,0 +1,21 @@
+format: ao-table/v1
+name: hash_profiles
+summary: Reusable hashing profiles (algorithm + parameters).
+columns:
+  algo_id:
+    Description: Hash algorithm (FK crypto_algorithms.id).
+  id:
+    Description: Surrogate primary key.
+  params:
+    Description: JSON with algorithm-specific tweaks.
+  created_at:
+    Description: Creation timestamp (UTC).
+  output_len:
+    Description: Optional truncated output length in bytes.
+  name:
+    Description: Profile identifier.
+  status:
+    Description: Lifecycle flag.
+    Enum:
+    - active
+    - deprecated

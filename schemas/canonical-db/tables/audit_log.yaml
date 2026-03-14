@@ -1,0 +1,31 @@
+format: ao-table/v1
+name: audit_log
+summary: Immutable trail of data changes across tables.
+columns:
+  table_name:
+    Description: Target table name.
+  id:
+    Description: Surrogate primary key.
+  ip_bin:
+    PII: plain
+    Description: Client IP (binary form).
+  old_value:
+    Description: JSON snapshot before change.
+  new_value:
+    Description: JSON snapshot after change.
+  change_type:
+    Description: Type of change.
+    Enum:
+    - INSERT
+    - UPDATE
+    - DELETE
+  request_id:
+    Description: Correlation/request id if available.
+  record_id:
+    Description: Primary key of the affected record.
+  user_agent:
+    Description: Client user agent string.
+  changed_by:
+    Description: Actor user id (FK users.id) or NULL for system.
+  changed_at:
+    Description: When change occurred (UTC).

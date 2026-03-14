@@ -1,0 +1,12 @@
+format: ao-table/v1
+name: crypto_standard_aliases
+summary: Friendly aliases mapped to crypto_algorithms entries.
+columns:
+  created_at:
+    Description: Creation timestamp (UTC).
+  alias:
+    Description: Alias string (primary key).
+  algo_id:
+    Description: Target algorithm id (FK crypto_algorithms.id).
+  notes:
+    Description: Optional documentation or rollout notes.

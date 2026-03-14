@@ -1,0 +1,31 @@
+format: ao-table/v1
+name: system_jobs
+summary: Asynchronous background jobs (generic).
+columns:
+  updated_at:
+    Description: Update timestamp (UTC).
+  id:
+    Description: Surrogate primary key.
+  payload:
+    Description: JSON payload.
+  started_at:
+    Description: Start time (UTC).
+  retries:
+    Description: Retry count.
+  error:
+    Description: Last error message.
+  created_at:
+    Description: Creation timestamp (UTC).
+  scheduled_at:
+    Description: Schedule time (UTC).
+  finished_at:
+    Description: Finish time (UTC).
+  status:
+    Description: Processing status.
+    Enum:
+    - pending
+    - processing
+    - done
+    - failed
+  job_type:
+    Description: Job type key.

@@ -1,0 +1,44 @@
+format: ao-table/v1
+name: users
+summary: User accounts and authentication attributes.
+columns:
+  actor_role:
+    Description: Role within application.
+    Enum:
+    - customer
+    - admin
+  email_hash:
+    PII: hashed
+    Description: Hashed email (salted/peppered). UNIQUE.
+  updated_at:
+    Description: Update timestamp (UTC).
+  created_at:
+    Description: Creation timestamp (UTC).
+  password_hash:
+    PII: hashed
+    Description: Password hash string.
+  last_login_ip_key_version:
+    Description: Key version for last_login_ip_hash.
+  id:
+    Description: Surrogate primary key.
+  deleted_at:
+    Description: Soft delete timestamp.
+  password_algo:
+    Description: Password hash algorithm id.
+  must_change_password:
+    Description: Force password change at next login.
+  password_key_version:
+    Description: Key/pepper version for passwords.
+  is_active:
+    Description: Account enabled flag.
+  is_locked:
+    Description: Lock flag (manual/automatic).
+  last_login_ip_hash:
+    PII: hashed
+    Description: Hashed last login IP.
+  failed_logins:
+    Description: Failed login counter.
+  last_login_at:
+    Description: Last successful login (UTC).
+  email_hash_key_version:
+    Description: Key version for email_hash.

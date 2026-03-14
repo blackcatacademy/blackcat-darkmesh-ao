@@ -1,0 +1,70 @@
+format: ao-table/v1
+name: crypto_keys
+summary: Local key registry (DEKs, KEKs, HMAC, peppers).
+columns:
+  created_at:
+    Description: Creation timestamp (UTC).
+  id:
+    Description: Surrogate primary key.
+  scope:
+    Description: Business scope tag (e.g., orders).
+  file_path:
+    Description: Filesystem path or vault path.
+  fingerprint:
+    Description: Key fingerprint / digest.
+  key_meta:
+    Description: JSON metadata (key parameters).
+  version:
+    Description: Monotonic version per basename.
+  basename:
+    Description: Logical key basename.
+  origin:
+    Description: Key origin.
+    Enum:
+    - local
+    - kms
+    - imported
+  created_by:
+    Description: Admin user who created key (FK users.id).
+  activated_at:
+    Description: Activation timestamp.
+  is_backup_encrypted:
+    Description: Backup blob is encrypted with KEK.
+  replaced_by:
+    Description: Next key id when rotated.
+  notes:
+    Description: Free-form notes.
+  retired_at:
+    Description: Retirement timestamp.
+  key_type:
+    Description: Key purpose type.
+    Enum:
+    - dek
+    - kek
+    - hmac
+    - pepper
+  backup_blob:
+    PII: encrypted
+    Description: Encrypted backup (binary).
+  algorithm:
+    Description: Algorithm identifier.
+  length_bits:
+    Description: Key length in bits.
+  status:
+    Description: Lifecycle state.
+    Enum:
+    - active
+    - retired
+    - compromised
+    - archived
+  usage:
+    Description: 'Allowed operations (set/array of values: encrypt,decrypt,sign,verify,wrap,unwrap).'
+    Enum:
+    - encrypt
+    - decrypt
+    - sign
+    - verify
+    - wrap
+    - unwrap
+  filename:
+    Description: Optional filename where stored.

@@ -1,0 +1,20 @@
+format: ao-table/v1
+name: refunds
+summary: Payment refunds and their status.
+columns:
+  currency:
+    Description: ISO 4217 currency code.
+  id:
+    Description: Surrogate primary key.
+  created_at:
+    Description: Creation timestamp (UTC).
+  payment_id:
+    Description: Payment (FK payments.id).
+  status:
+    Description: Gateway/state status label.
+  details:
+    Description: JSON details from provider.
+  reason:
+    Description: Reason provided by operator/gateway.
+  amount:
+    Description: Refund amount (>= 0).

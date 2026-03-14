@@ -1,0 +1,14 @@
+format: ao-table/v1
+name: replication_lag_samples
+summary: Snapshot metrics measuring replication lag per peer.
+columns:
+  peer_id:
+    Description: Peer being measured (FK peer_nodes.id).
+  captured_at:
+    Description: Capture timestamp (UTC).
+  metric:
+    Description: Metric name (apply_lag_ms, transport_lag_ms).
+  id:
+    Description: Surrogate primary key.
+  value:
+    Description: Measured value (ms).

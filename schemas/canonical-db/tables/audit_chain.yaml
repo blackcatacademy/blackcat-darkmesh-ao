@@ -1,0 +1,16 @@
+format: ao-table/v1
+name: audit_chain
+summary: Hash chain built on top of audit_log entries for tamper evidence.
+columns:
+  prev_hash:
+    Description: Hash of the previous audit entry in the chain.
+  id:
+    Description: Surrogate primary key.
+  audit_id:
+    Description: Audit entry id (FK audit_log.id).
+  chain_name:
+    Description: Chain namespace (multiple chains may coexist).
+  created_at:
+    Description: Creation timestamp (UTC).
+  hash:
+    Description: Hash of the current entry.

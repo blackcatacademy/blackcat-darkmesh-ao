@@ -1,0 +1,20 @@
+format: ao-table/v1
+name: user_consents
+summary: Captured consents per user and version. UNIQUE (user_id, consent_type, version).
+columns:
+  source:
+    Description: Source (e.g., web, import).
+  consent_type:
+    Description: Consent type key.
+  granted:
+    Description: Granted flag (true/false).
+  id:
+    Description: Surrogate primary key.
+  version:
+    Description: Document/policy version string.
+  meta:
+    Description: JSON meta (IP, UA, doc hash).
+  granted_at:
+    Description: When consent was recorded (UTC).
+  user_id:
+    Description: User (FK users.id).

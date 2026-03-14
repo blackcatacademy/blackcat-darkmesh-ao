@@ -1,0 +1,61 @@
+format: ao-table/v1
+name: system_errors
+summary: Application error/event log with grouping and resolution.
+columns:
+  url:
+    Description: Request URL.
+  created_at:
+    Description: First occurrence (UTC).
+  id:
+    Description: Surrogate primary key.
+  ip_hash_key_version:
+    Description: Key version for ip_hash.
+  line:
+    Description: Source line number.
+  level:
+    Description: Severity level.
+    Enum:
+    - notice
+    - warning
+    - error
+    - critical
+  ip_bin:
+    Description: Binary IP (if captured).
+  fingerprint:
+    Description: Deduplication fingerprint.
+  ip_hash:
+    PII: hashed
+    Description: Hashed IP.
+  context:
+    Description: JSON context (structured).
+  resolved_by:
+    Description: Resolver user id (FK users.id), optional.
+  stack_trace:
+    Description: Long stack trace.
+  file:
+    Description: Source file path.
+  user_id:
+    Description: Related user (optional).
+  resolved_at:
+    Description: Resolution timestamp (UTC).
+  message:
+    Description: Error message.
+  token:
+    Description: Correlated token/id.
+  exception_class:
+    Description: Exception class name (if any).
+  method:
+    Description: HTTP method.
+  last_seen:
+    Description: Most recent occurrence (UTC).
+  resolved:
+    Description: Resolution flag.
+  ip_text:
+    PII: plain
+    Description: Plaintext IP (if captured).
+  http_status:
+    Description: HTTP status code.
+  occurrences:
+    Description: Aggregate count of occurrences.
+  user_agent:
+    Description: User agent string.

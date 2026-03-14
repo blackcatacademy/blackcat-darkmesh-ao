@@ -1,0 +1,24 @@
+format: ao-table/v1
+name: kms_routing_policies
+summary: Routing directives describing how tenants map to KMS providers.
+columns:
+  strategy:
+    Description: Routing strategy.
+    Enum:
+    - prefer
+    - require
+    - avoid
+  id:
+    Description: Surrogate primary key.
+  providers:
+    Description: JSON list of provider options/weights.
+  created_at:
+    Description: Creation timestamp (UTC).
+  name:
+    Description: Policy name.
+  active:
+    Description: Whether the policy is active.
+  priority:
+    Description: Priority ordering (higher first).
+  match:
+    Description: JSON filter describing when to apply the policy.

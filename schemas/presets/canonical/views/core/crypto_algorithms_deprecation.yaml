@@ -1,0 +1,5 @@
+format: ao-view/v1
+id: crypto_algorithms_deprecation
+owner: blackcat-database-crypto
+tags: []
+requires: []

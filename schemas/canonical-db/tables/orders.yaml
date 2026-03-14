@@ -1,0 +1,48 @@
+format: ao-table/v1
+name: orders
+summary: Orders lifecycle, totals, and encrypted customer blob.
+columns:
+  id:
+    Description: Surrogate primary key.
+  updated_at:
+    Description: Update timestamp (UTC).
+  created_at:
+    Description: Creation timestamp (UTC).
+  discount_total:
+    Description: Discount total.
+  metadata:
+    Description: JSON with auxiliary metadata.
+  public_order_no:
+    Description: Human-friendly order number.
+  subtotal:
+    Description: Subtotal amount.
+  encrypted_customer_blob_key_version:
+    Description: Key version of encrypted blob.
+  encryption_meta:
+    Description: JSON encryption metadata.
+  payment_method:
+    Description: Selected payment method.
+  user_id:
+    Description: Customer (FK users.id), optional (guest checkout).
+  tax_total:
+    Description: Tax total.
+  total:
+    Description: Grand total.
+  status:
+    Description: Order state.
+    Enum:
+    - pending
+    - paid
+    - failed
+    - cancelled
+    - refunded
+    - completed
+  currency:
+    Description: ISO 4217 currency code.
+  uuid_bin:
+    Description: UUID binary form (unique, for compact lookups).
+  encrypted_customer_blob:
+    PII: encrypted
+    Description: Encrypted PII/customer details.
+  uuid:
+    Description: Unique external order id (UUID text).

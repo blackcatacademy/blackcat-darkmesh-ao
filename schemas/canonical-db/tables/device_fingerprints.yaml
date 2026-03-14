@@ -1,0 +1,24 @@
+format: ao-table/v1
+name: device_fingerprints
+summary: Known device/browser fingerprints with derived risk scoring.
+columns:
+  risk_score:
+    Description: 0-100 risk score derived from signals.
+  id:
+    Description: Surrogate primary key.
+  fingerprint_hash:
+    PII: hashed
+    Description: Stable hash of the fingerprint payload.
+  last_ip_hash:
+    PII: hashed
+    Description: Hashed last known IP.
+  last_seen:
+    Description: Last time the device was observed.
+  last_ip_key_version:
+    Description: Key version used for last_ip_hash.
+  first_seen:
+    Description: Timestamp when the device first appeared.
+  attributes:
+    Description: JSON blob with device characteristics.
+  user_id:
+    Description: Related user (FK users.id), nullable.

@@ -1,0 +1,18 @@
+format: ao-table/v1
+name: categories
+summary: Hierarchical product categories.
+columns:
+  slug:
+    Description: Unique slug.
+  id:
+    Description: Surrogate primary key.
+  updated_at:
+    Description: Update timestamp (UTC).
+  created_at:
+    Description: Creation timestamp (UTC).
+  name:
+    Description: Category name.
+  parent_id:
+    Description: Parent category (self-FK), nullable.
+  deleted_at:
+    Description: Soft delete timestamp.

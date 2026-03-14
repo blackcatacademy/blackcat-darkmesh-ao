@@ -1,0 +1,24 @@
+format: ao-table/v1
+name: order_items
+summary: Normalized order line items (snapshotted data).
+columns:
+  quantity:
+    Description: Quantity (> 0).
+  id:
+    Description: Surrogate primary key.
+  sku_snapshot:
+    Description: Captured SKU at purchase time.
+  tax_rate:
+    Description: Tax rate % (0..100).
+  product_ref:
+    Description: External product reference (optional).
+  title_snapshot:
+    Description: Captured title at purchase time.
+  unit_price:
+    Description: Unit price at purchase.
+  book_id:
+    Description: Book (FK books.id), optional for non-book items.
+  currency:
+    Description: ISO 4217 currency code.
+  order_id:
+    Description: Order (FK orders.id).

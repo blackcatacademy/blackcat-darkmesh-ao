@@ -1,0 +1,16 @@
+format: ao-table/v1
+name: vat_validations
+summary: External VAT ID validation results (cache).
+columns:
+  id:
+    Description: Surrogate primary key.
+  raw:
+    Description: Raw JSON response payload.
+  vat_id:
+    Description: VAT identifier as provided.
+  valid:
+    Description: Validation result (true/false).
+  checked_at:
+    Description: When checked (UTC).
+  country_iso2:
+    Description: Country ISO2 of VAT id.

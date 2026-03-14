@@ -1,0 +1,48 @@
+format: ao-table/v1
+name: notifications
+summary: Outbox for templated user notifications.
+columns:
+  template:
+    Description: Template identifier.
+  retries:
+    Description: Attempt counter.
+  id:
+    Description: Surrogate primary key.
+  sent_at:
+    Description: Actual send time (UTC).
+  locked_by:
+    Description: Worker id that holds the lock.
+  priority:
+    Description: Priority (higher = sooner).
+  last_attempt_at:
+    Description: Last attempt time (UTC).
+  created_at:
+    Description: Creation timestamp (UTC).
+  payload:
+    Description: JSON payload for template rendering.
+  locked_until:
+    Description: Worker lock until (UTC).
+  user_id:
+    Description: Target user (optional).
+  error:
+    Description: Last error message.
+  channel:
+    Description: Delivery channel.
+    Enum:
+    - email
+    - push
+  status:
+    Description: Processing status.
+    Enum:
+    - pending
+    - processing
+    - sent
+    - failed
+  scheduled_at:
+    Description: Scheduled send time (UTC).
+  updated_at:
+    Description: Update timestamp (UTC).
+  max_retries:
+    Description: Maximum attempts.
+  next_attempt_at:
+    Description: Backoff until (UTC).

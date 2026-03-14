@@ -1,0 +1,25 @@
+format: ao-table/v1
+name: data_retention_policies
+summary: Declarative data-retention rules describing purge/anonymize actions.
+columns:
+  field_name:
+    Description: Optional column restricted by the policy.
+  action:
+    Description: Retention action.
+    Enum:
+    - delete
+    - anonymize
+    - hash
+    - truncate
+  entity_table:
+    Description: Table affected by the policy.
+  id:
+    Description: Surrogate primary key.
+  notes:
+    Description: Operational notes or audit context.
+  created_at:
+    Description: Creation timestamp (UTC).
+  active:
+    Description: Whether the policy is currently enforced.
+  keep_for:
+    Description: Retention window (interval / textual duration).

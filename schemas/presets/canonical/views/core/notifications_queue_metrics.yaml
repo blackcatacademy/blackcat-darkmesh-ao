@@ -1,0 +1,5 @@
+format: ao-view/v1
+id: notifications_queue_metrics
+owner: null
+tags: []
+requires: []

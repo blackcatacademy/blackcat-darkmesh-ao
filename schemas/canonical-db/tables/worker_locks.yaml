@@ -1,0 +1,8 @@
+format: ao-table/v1
+name: worker_locks
+summary: Distributed/DB-backed locks for background workers.
+columns:
+  locked_until:
+    Description: Lease expiration time (UTC).
+  name:
+    Description: Lock name (primary key).

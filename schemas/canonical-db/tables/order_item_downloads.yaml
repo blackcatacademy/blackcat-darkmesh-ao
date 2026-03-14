@@ -1,0 +1,32 @@
+format: ao-table/v1
+name: order_item_downloads
+summary: Per-order download entitlements for digital items. UNIQUE (order_id, book_id, asset_id).
+columns:
+  asset_id:
+    Description: Asset (FK book_assets.id).
+  token_key_version:
+    Description: Key version used for download_token_hash.
+  book_id:
+    Description: Book (FK books.id).
+  ip_hash:
+    PII: hashed
+    Description: Hashed IP of last usage.
+  used:
+    Description: Number of uses so far.
+  max_uses:
+    Description: Max allowed downloads.
+  order_id:
+    Description: Order (FK orders.id).
+  expires_at:
+    Description: Expiry timestamp (UTC).
+  id:
+    Description: Surrogate primary key.
+  last_used_at:
+    Description: Last download timestamp (UTC).
+  ip_hash_key_version:
+    Description: Key version for ip_hash.
+  key_version:
+    Description: Content encryption key version.
+  download_token_hash:
+    PII: hashed
+    Description: Hashed download token (dedupe/lookup).

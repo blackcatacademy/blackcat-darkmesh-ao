@@ -1,0 +1,41 @@
+format: ao-table/v1
+name: key_events
+summary: Operational log for crypto key lifecycle and usage.
+columns:
+  meta:
+    Description: JSON meta about event.
+  source:
+    Description: Origin of event.
+    Enum:
+    - cron
+    - admin
+    - api
+    - manual
+  id:
+    Description: Surrogate primary key.
+  event_type:
+    Description: Event type.
+    Enum:
+    - created
+    - rotated
+    - activated
+    - retired
+    - compromised
+    - deleted
+    - used_encrypt
+    - used_decrypt
+    - access_failed
+    - backup
+    - restore
+  job_id:
+    Description: Batch/job id, optional.
+  created_at:
+    Description: Timestamp (UTC).
+  basename:
+    Description: Key basename, if id not present.
+  actor_id:
+    Description: Actor (FK users.id), optional.
+  key_id:
+    Description: Key (FK crypto_keys.id), optional.
+  note:
+    Description: Free-form note.

@@ -1,0 +1,26 @@
+format: ao-table/v1
+name: cart_items
+summary: Items added to shopping carts. UNIQUE (cart_id, book_id, sku) to prevent duplicate items in the cart.
+columns:
+  currency:
+    Description: ISO 4217 currency code.
+  sku:
+    Description: SKU snapshot.
+  sku_norm:
+    Description: Normalized SKU (COALESCE(sku,'')) used for uniqueness.
+  id:
+    Description: Surrogate primary key.
+  variant:
+    Description: JSON with selected variant/options.
+  unit_price:
+    Description: Unit price at time of adding.
+  meta:
+    Description: Additional JSON metadata.
+  quantity:
+    Description: Quantity > 0.
+  book_id:
+    Description: Book (FK books.id).
+  cart_id:
+    Description: Cart identifier (UUID textual).
+  price_snapshot:
+    Description: Cached line price for integrity.

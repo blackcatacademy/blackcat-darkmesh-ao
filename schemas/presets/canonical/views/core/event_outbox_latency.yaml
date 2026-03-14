@@ -1,0 +1,5 @@
+format: ao-view/v1
+id: event_outbox_latency
+owner: null
+tags: []
+requires: []

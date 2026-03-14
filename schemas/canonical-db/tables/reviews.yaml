@@ -1,0 +1,18 @@
+format: ao-table/v1
+name: reviews
+summary: "User reviews and ratings for books. UNIQUE (book_id, user_id) \xE2\u20AC\u201D one user can only rate a book once."
+columns:
+  review_text:
+    Description: Free-form review text.
+  id:
+    Description: Surrogate primary key.
+  updated_at:
+    Description: Last update (UTC), optional.
+  rating:
+    Description: Rating 1..5.
+  created_at:
+    Description: Creation timestamp (UTC).
+  book_id:
+    Description: Book (FK books.id).
+  user_id:
+    Description: Authoring user (FK users.id), optional.

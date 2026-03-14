@@ -1,0 +1,36 @@
+format: ao-table/v1
+name: pq_migration_jobs
+summary: Jobs that migrate stored data to PQ-safe hashing/encryption policies.
+columns:
+  processed_count:
+    Description: How many records were processed.
+  scope:
+    Description: What is being migrated (hashes, wrappers, signatures).
+  finished_at:
+    Description: Completion timestamp.
+  created_at:
+    Description: Creation timestamp (UTC).
+  started_at:
+    Description: When the job started.
+  target_algo_id:
+    Description: Target crypto algorithm id, optional.
+  created_by:
+    Description: User who enqueued the job.
+  selection:
+    Description: JSON selector describing the affected dataset.
+  error:
+    Description: Failure cause, if any.
+  id:
+    Description: Surrogate primary key.
+  status:
+    Description: Execution status.
+    Enum:
+    - pending
+    - running
+    - done
+    - failed
+    - cancelled
+  target_policy_id:
+    Description: Target encryption policy id, optional.
+  scheduled_at:
+    Description: Scheduled start time.

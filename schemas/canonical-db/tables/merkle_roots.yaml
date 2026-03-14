@@ -1,0 +1,22 @@
+format: ao-table/v1
+name: merkle_roots
+summary: Per-period Merkle root snapshots for append-only data.
+columns:
+  root_hash:
+    Description: Merkle root hash (bytea).
+  id:
+    Description: Surrogate primary key.
+  proof_uri:
+    Description: Optional URI pointing to notarized proof bundles.
+  created_at:
+    Description: When the root was stored.
+  period_start:
+    Description: Start timestamp of the covered period.
+  subject_table:
+    Description: Table being summarized.
+  status:
+    Description: Lifecycle state of the Merkle root (pending/anchored/verified/failed).
+  period_end:
+    Description: End timestamp of the covered period.
+  leaf_count:
+    Description: Number of leaves included.

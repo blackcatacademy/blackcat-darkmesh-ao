@@ -1,0 +1,32 @@
+format: ao-table/v1
+name: session_audit
+summary: Low-level session lifecycle and security events.
+columns:
+  session_token_key_version:
+    Description: Key version for session_token.
+  id:
+    Description: Surrogate primary key.
+  ip_hash_key_version:
+    Description: Key version for ip_hash.
+  session_id:
+    Description: Framework session id (string).
+  meta_json:
+    Description: JSON metadata.
+  outcome:
+    Description: Outcome label (e.g., success, fail).
+  created_at:
+    Description: Event timestamp (UTC).
+  ip_hash:
+    PII: hashed
+    Description: Hashed IP.
+  user_id:
+    Description: User (FK users.id), optional.
+  csrf_key_version:
+    Description: Key version for CSRF related data.
+  session_token:
+    PII: hashed
+    Description: Hashed session token.
+  event:
+    Description: Event code (e.g., created, rotated, revoked).
+  user_agent:
+    Description: Client user agent.

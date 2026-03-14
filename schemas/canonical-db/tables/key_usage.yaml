@@ -1,0 +1,18 @@
+format: ao-table/v1
+name: key_usage
+summary: Daily counters of key operations.
+columns:
+  id:
+    Description: Surrogate primary key.
+  encrypt_count:
+    Description: Encrypt operations count.
+  decrypt_count:
+    Description: Decrypt operations count.
+  date:
+    Description: UTC date (yyyy-mm-dd).
+  last_used_at:
+    Description: Last usage timestamp (UTC).
+  key_id:
+    Description: Key (FK crypto_keys.id).
+  verify_count:
+    Description: Verify operations count.

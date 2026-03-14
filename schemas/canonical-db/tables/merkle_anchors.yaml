@@ -1,0 +1,20 @@
+format: ao-table/v1
+name: merkle_anchors
+summary: Anchors proving Merkle roots in external systems (files, blockchain, etc.).
+columns:
+  meta:
+    Description: JSON metadata tied to the anchor.
+  anchor_type:
+    Description: Anchor medium.
+    Enum:
+    - file
+    - blockchain
+    - notary
+  anchor_ref:
+    Description: Reference or locator for the anchor.
+  merkle_root_id:
+    Description: Referenced Merkle root (FK merkle_roots.id).
+  id:
+    Description: Surrogate primary key.
+  anchored_at:
+    Description: When the anchor was created.

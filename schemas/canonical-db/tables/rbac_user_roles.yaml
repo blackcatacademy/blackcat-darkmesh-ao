@@ -1,0 +1,26 @@
+format: ao-table/v1
+name: rbac_user_roles
+summary: Assignments of RBAC roles to users.
+columns:
+  id:
+    Description: Surrogate primary key.
+  granted_at:
+    Description: Grant timestamp (UTC).
+  scope:
+    Description: Additional scope qualifier.
+  role_id:
+    Description: Role granted (FK rbac_roles.id).
+  expires_at:
+    Description: Optional expiration time (UTC).
+  tenant_id:
+    Description: Tenant scope, optional.
+  status:
+    Description: Assignment status.
+    Enum:
+    - active
+    - revoked
+    - expired
+  granted_by:
+    Description: User/admin who granted the role.
+  user_id:
+    Description: User receiving the role (FK users.id).

@@ -1,0 +1,30 @@
+format: ao-table/v1
+name: peer_nodes
+summary: Known database/application peers for replication and sync.
+columns:
+  meta:
+    Description: JSON metadata describing the peer.
+  id:
+    Description: Surrogate primary key.
+  type:
+    Description: Peer type.
+    Enum:
+    - postgres
+    - mysql
+    - app
+    - service
+  last_seen:
+    Description: Last heartbeat timestamp.
+  created_at:
+    Description: Registration timestamp (UTC).
+  name:
+    Description: Peer display name.
+  location:
+    Description: Optional region / data center.
+  status:
+    Description: Health status.
+    Enum:
+    - active
+    - offline
+    - degraded
+    - disabled

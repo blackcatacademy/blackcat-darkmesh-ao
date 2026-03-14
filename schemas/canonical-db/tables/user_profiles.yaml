@@ -1,0 +1,15 @@
+format: ao-table/v1
+name: user_profiles
+summary: Encrypted user profile blob (optional).
+columns:
+  user_id:
+    Description: User (FK users.id), also PK.
+  updated_at:
+    Description: Last update timestamp (UTC).
+  encryption_meta:
+    Description: JSON meta of encryption.
+  profile_enc:
+    PII: encrypted
+    Description: Encrypted profile payload.
+  key_version:
+    Description: Key version for profile_enc.

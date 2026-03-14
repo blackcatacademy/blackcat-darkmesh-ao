@@ -1,0 +1,22 @@
+format: ao-table/v1
+name: sync_batch_items
+summary: Individual entries inside sync batches.
+columns:
+  id:
+    Description: Surrogate primary key.
+  error:
+    Description: Failure reason, if applicable.
+  event_key:
+    Description: Event identifier transported in the batch.
+  batch_id:
+    Description: Parent batch (FK sync_batches.id).
+  created_at:
+    Description: Creation timestamp (UTC).
+  status:
+    Description: Item status.
+    Enum:
+    - pending
+    - sent
+    - applied
+    - failed
+    - skipped

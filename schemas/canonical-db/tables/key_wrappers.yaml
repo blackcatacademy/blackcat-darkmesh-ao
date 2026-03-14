@@ -1,0 +1,31 @@
+format: ao-table/v1
+name: key_wrappers
+summary: Composite wrappers protecting DEKs with multiple KMS/crypto layers.
+columns:
+  kms1_key_id:
+    Description: Primary wrapping KMS key.
+  id:
+    Description: Surrogate primary key.
+  dek_wrap2:
+    Description: Second wrapped DEK blob.
+  wrapper_uuid:
+    Description: Stable UUID identifier.
+  created_at:
+    Description: Creation timestamp (UTC).
+  kms2_key_id:
+    Description: Secondary wrapping KMS key.
+  wrap_version:
+    Description: Version number for the wrapper format.
+  rotated_at:
+    Description: When the wrapper was rotated, if ever.
+  crypto_suite:
+    Description: JSON description of the crypto suite used.
+  status:
+    Description: Lifecycle flag.
+    Enum:
+    - active
+    - rotated
+    - retired
+    - invalid
+  dek_wrap1:
+    Description: First wrapped DEK blob.

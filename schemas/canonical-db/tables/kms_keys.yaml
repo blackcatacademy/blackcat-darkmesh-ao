@@ -1,0 +1,26 @@
+format: ao-table/v1
+name: kms_keys
+summary: External KMS key references. UNIQUE (provider_id, external_key_ref).
+columns:
+  provider_id:
+    Description: KMS provider (FK kms_providers.id).
+  id:
+    Description: Surrogate primary key.
+  purpose:
+    Description: Primary purpose.
+    Enum:
+    - wrap
+    - encrypt
+    - both
+  algorithm:
+    Description: Algorithm or template id.
+  created_at:
+    Description: Creation timestamp (UTC).
+  status:
+    Description: Lifecycle status.
+    Enum:
+    - active
+    - retired
+    - disabled
+  external_key_ref:
+    Description: Provider-specific key identifier. Part of UNIQUE (provider_id, external_key_ref).

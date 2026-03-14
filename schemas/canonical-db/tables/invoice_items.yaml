@@ -1,0 +1,24 @@
+format: ao-table/v1
+name: invoice_items
+summary: Normalized invoice line items.
+columns:
+  line_total:
+    Description: Total incl. tax for line.
+  tax_amount:
+    Description: Tax amount.
+  id:
+    Description: Surrogate primary key.
+  invoice_id:
+    Description: Invoice (FK invoices.id).
+  description:
+    Description: Line description.
+  unit_price:
+    Description: Unit price excl. tax.
+  quantity:
+    Description: Quantity (> 0).
+  line_no:
+    Description: Line number within invoice.
+  tax_rate:
+    Description: Tax rate % (0..100).
+  currency:
+    Description: ISO 4217 currency code.

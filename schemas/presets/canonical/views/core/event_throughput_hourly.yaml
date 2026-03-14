@@ -1,0 +1,5 @@
+format: ao-view/v1
+id: event_throughput_hourly
+owner: null
+tags: []
+requires: []

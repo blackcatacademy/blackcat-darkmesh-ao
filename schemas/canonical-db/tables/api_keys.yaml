@@ -1,0 +1,35 @@
+format: ao-table/v1
+name: api_keys
+summary: Tenant/user scoped API tokens stored only as hashed secrets.
+columns:
+  id:
+    Description: Surrogate primary key.
+  updated_at:
+    Description: Last update timestamp (UTC).
+  scopes:
+    Description: JSON array with granted scopes.
+  name_ci:
+    Description: Case-insensitive token label (generated).
+  created_at:
+    Description: Creation timestamp (UTC).
+  token_hash:
+    PII: hashed
+    Description: Hashed token payload.
+  name:
+    Description: Human-friendly token label.
+  tenant_id:
+    Description: Owning tenant (FK tenants.id).
+  user_id:
+    Description: User that created the token (FK users.id), optional.
+  expires_at:
+    Description: Optional expiration timestamp.
+  status:
+    Description: Lifecycle status flag.
+    Enum:
+    - active
+    - revoked
+    - disabled
+  last_used_at:
+    Description: Last usage timestamp (UTC).
+  token_hash_key_version:
+    Description: Key version used when hashing the token.

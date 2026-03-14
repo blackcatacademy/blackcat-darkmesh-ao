@@ -1,0 +1,25 @@
+format: ao-table/v1
+name: payment_gateway_notifications
+summary: Inbound notifications from payment gateways (webhooks, IPNs). transaction_id is REQUIRED and UNIQUE.
+columns:
+  id:
+    Description: Surrogate primary key.
+  status:
+    Description: Processing status.
+    Enum:
+    - pending
+    - processing
+    - done
+    - failed
+  received_at:
+    Description: When we received the notification (UTC).
+  attempts:
+    Description: Processing attempts.
+  processing_by:
+    Description: Worker name processing the event.
+  processing_until:
+    Description: Lease end.
+  transaction_id:
+    Description: Gateway transaction id (REQUIRED, UNIQUE).
+  last_error:
+    Description: Last error message.

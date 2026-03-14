@@ -1,0 +1,14 @@
+format: ao-table/v1
+name: global_id_registry
+summary: ULID/UUID registry for mapping global ids to local tables.
+columns:
+  entity_table:
+    Description: Local table name.
+  gid:
+    Description: Primary ULID identifier.
+  entity_pk:
+    Description: Local primary key value.
+  guid:
+    Description: Optional UUID representation.
+  created_at:
+    Description: Creation timestamp (UTC).

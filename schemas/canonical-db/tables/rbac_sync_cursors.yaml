@@ -1,0 +1,12 @@
+format: ao-table/v1
+name: rbac_sync_cursors
+summary: Per-peer replication cursors for RBAC repositories.
+columns:
+  last_commit:
+    Description: Last processed commit hash.
+  last_synced_at:
+    Description: Timestamp when the peer last synced.
+  repo_id:
+    Description: Repository id (FK rbac_repositories.id).
+  peer:
+    Description: Consumer identifier (service name).

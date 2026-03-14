@@ -1,0 +1,20 @@
+format: ao-table/v1
+name: rbac_role_permissions
+summary: Permission rules bundled with RBAC roles.
+columns:
+  effect:
+    Description: Permit or deny flag.
+    Enum:
+    - allow
+    - deny
+  role_id:
+    Description: Role identifier (FK rbac_roles.id).
+  permission_id:
+    Description: Permission identifier (FK permissions.id).
+  source:
+    Description: Whether the rule came from repo or local overrides.
+    Enum:
+    - repo
+    - local
+  created_at:
+    Description: Creation timestamp (UTC).

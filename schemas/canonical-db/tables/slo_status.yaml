@@ -1,0 +1,22 @@
+format: ao-table/v1
+name: slo_status
+summary: Computed status entries for service-level objectives.
+columns:
+  total_events:
+    Description: Total events observed.
+  id:
+    Description: Surrogate primary key.
+  window_id:
+    Description: SLO window (FK slo_windows.id).
+  computed_at:
+    Description: Timestamp when the SLO was evaluated.
+  sli_value:
+    Description: Measured SLI value.
+  good_events:
+    Description: Number of good events counted.
+  status:
+    Description: Evaluation result.
+    Enum:
+    - good
+    - breach
+    - unknown

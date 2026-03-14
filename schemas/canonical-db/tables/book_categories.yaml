@@ -1,0 +1,8 @@
+format: ao-table/v1
+name: book_categories
+summary: Many-to-many relationship between books and categories.
+columns:
+  book_id:
+    Description: Book (FK books.id).
+  category_id:
+    Description: Category (FK categories.id).

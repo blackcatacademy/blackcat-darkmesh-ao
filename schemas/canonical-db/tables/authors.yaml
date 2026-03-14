@@ -1,0 +1,32 @@
+format: ao-table/v1
+name: authors
+summary: Authors and aggregate rating counters.
+columns:
+  avg_rating:
+    Description: Average rating (derived).
+  id:
+    Description: Surrogate primary key.
+  last_rating_at:
+    Description: Timestamp of last rating.
+  name:
+    Description: Author display name.
+  photo_url:
+    Description: Profile photo URL.
+  slug:
+    Description: URL-friendly unique slug.
+  created_at:
+    Description: Row creation time (UTC).
+  bio:
+    Description: Short biography.
+  rating_sum:
+    Description: Sum of rating values.
+  books_count:
+    Description: Denormalized number of books.
+  deleted_at:
+    Description: Soft delete timestamp.
+  ratings_count:
+    Description: Total ratings count.
+  story:
+    Description: Long-form story/notes.
+  updated_at:
+    Description: Row update time (UTC).

@@ -1,0 +1,51 @@
+format: ao-table/v1
+name: book_assets
+summary: "Binary and ancillary assets for books (covers, files, extras). UNIQUE (book_id, asset_type) \xE2\u20AC\u201D max.\
+  \ one asset of a given type per book."
+columns:
+  is_encrypted:
+    Description: Whether asset is encrypted at rest.
+  id:
+    Description: Surrogate primary key.
+  storage_path:
+    Description: Backend storage path or URI.
+  book_id:
+    Description: Book (FK books.id).
+  content_hash:
+    Description: Optional file content hash (hex).
+  encryption_iv:
+    Description: IV/nonce used for encryption.
+  created_at:
+    Description: Creation timestamp (UTC).
+  size_bytes:
+    Description: File size in bytes.
+  mime_type:
+    Description: MIME type.
+  key_version:
+    Description: Local key version reference.
+  encryption_key_enc:
+    PII: encrypted
+    Description: Wrapped DEK or encrypted key blob.
+  key_id:
+    Description: Optional link to crypto_keys.id.
+  encryption_tag:
+    Description: Auth tag for AEAD ciphers.
+  encryption_aad:
+    Description: Associated data for AEAD ciphers.
+  asset_type:
+    Description: Kind of asset.
+    Enum:
+    - cover
+    - pdf
+    - epub
+    - mobi
+    - sample
+    - extra
+  encryption_meta:
+    Description: JSON metadata about encryption layers.
+  filename:
+    Description: Original file name.
+  download_filename:
+    Description: Suggested download file name.
+  encryption_algo:
+    Description: Algorithm identifier (e.g., AES-256-GCM).

@@ -1,0 +1,40 @@
+format: ao-table/v1
+name: signing_keys
+summary: Inventory of signing keys (local, KMS-backed, or imported).
+columns:
+  private_key_enc:
+    Description: Encrypted private key blob.
+  id:
+    Description: Surrogate primary key.
+  scope:
+    Description: Usage scope (audit, events, assets, ...).
+  name:
+    Description: Key name / identifier.
+  algo_id:
+    Description: Signature algorithm (FK crypto_algorithms.id).
+  created_at:
+    Description: Creation timestamp (UTC).
+  public_key:
+    Description: Public key bytes.
+  origin:
+    Description: Key origin.
+    Enum:
+    - local
+    - kms
+    - imported
+  created_by:
+    Description: User who created/uploaded the key.
+  activated_at:
+    Description: Activation timestamp (UTC).
+  notes:
+    Description: Operational notes.
+  retired_at:
+    Description: Retirement timestamp (UTC).
+  kms_key_id:
+    Description: Backing KMS key if stored hardware-side.
+  status:
+    Description: Lifecycle status.
+    Enum:
+    - active
+    - retired
+    - compromised

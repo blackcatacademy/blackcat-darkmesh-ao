@@ -1,0 +1,36 @@
+format: ao-table/v1
+name: encryption_events
+summary: Audit of cryptographic operations.
+columns:
+  field_name:
+    Description: Target field.
+  id:
+    Description: Surrogate primary key.
+  entity_table:
+    Description: Entity table name.
+  policy_id:
+    Description: Applied policy (FK encryption_policies.id), optional.
+  error_code:
+    Description: Error code when failure.
+  created_at:
+    Description: Timestamp (UTC).
+  local_key_version:
+    Description: Local key version used.
+  layers:
+    Description: JSON list of layers/steps.
+  entity_pk:
+    Description: Entity primary key.
+  outcome:
+    Description: Result.
+    Enum:
+    - success
+    - failure
+  op:
+    Description: Operation performed.
+    Enum:
+    - encrypt
+    - decrypt
+    - rotate
+    - rehash
+    - unwrap
+    - wrap

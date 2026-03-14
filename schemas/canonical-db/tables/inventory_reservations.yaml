@@ -1,0 +1,23 @@
+format: ao-table/v1
+name: inventory_reservations
+summary: Temporary stock reservations tied to orders.
+columns:
+  id:
+    Description: Surrogate primary key.
+  reserved_until:
+    Description: Expiration timestamp (UTC).
+  created_at:
+    Description: Creation timestamp (UTC).
+  order_id:
+    Description: Order (FK orders.id), optional.
+  quantity:
+    Description: Reserved quantity (> 0).
+  status:
+    Description: Reservation state.
+    Enum:
+    - pending
+    - confirmed
+    - expired
+    - cancelled
+  book_id:
+    Description: Book (FK books.id).

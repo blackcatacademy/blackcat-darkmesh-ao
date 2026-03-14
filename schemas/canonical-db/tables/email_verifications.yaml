@@ -1,0 +1,24 @@
+format: ao-table/v1
+name: email_verifications
+summary: Email verification tokens for users.
+columns:
+  token_hash:
+    PII: token
+    Description: Full token hash (hex/char).
+  id:
+    Description: Surrogate primary key.
+  key_version:
+    Description: Key version used for hashing/encryption.
+  selector:
+    Description: Short public selector (unique).
+  created_at:
+    Description: Creation timestamp (UTC).
+  used_at:
+    Description: When token was used, if so.
+  expires_at:
+    Description: Expiration timestamp (UTC).
+  validator_hash:
+    PII: hashed
+    Description: Hashed validator part.
+  user_id:
+    Description: Related user (FK users.id).

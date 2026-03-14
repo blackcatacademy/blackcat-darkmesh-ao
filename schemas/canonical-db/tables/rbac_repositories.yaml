@@ -1,0 +1,23 @@
+format: ao-table/v1
+name: rbac_repositories
+summary: Sources of RBAC definitions (git repos, APIs, etc.).
+columns:
+  url:
+    Description: Optional URL/endpoint.
+  id:
+    Description: Surrogate primary key.
+  last_commit:
+    Description: Hash/identifier of the last synced commit.
+  signing_key_id:
+    Description: Signing key used to verify snapshots (FK signing_keys.id).
+  last_synced_at:
+    Description: Last successful sync time.
+  created_at:
+    Description: Creation timestamp (UTC).
+  name:
+    Description: Repository identifier.
+  status:
+    Description: Repository status.
+    Enum:
+    - active
+    - disabled

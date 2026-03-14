@@ -1,0 +1,21 @@
+format: ao-table/v1
+name: encrypted_fields
+summary: Per-field encryption store for arbitrary entities.
+columns:
+  meta:
+    Description: Encryption metadata (JSON).
+  field_name:
+    Description: Encrypted field name.
+  id:
+    Description: Surrogate primary key.
+  entity_table:
+    Description: Referenced table name.
+  ciphertext:
+    PII: encrypted
+    Description: Encrypted payload.
+  created_at:
+    Description: Creation timestamp (UTC).
+  updated_at:
+    Description: Update timestamp (UTC).
+  entity_pk:
+    Description: Referenced entity primary key (string).

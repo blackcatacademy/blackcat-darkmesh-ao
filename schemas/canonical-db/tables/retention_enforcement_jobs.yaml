@@ -1,0 +1,28 @@
+format: ao-table/v1
+name: retention_enforcement_jobs
+summary: Runs of data-retention enforcement tasks.
+columns:
+  id:
+    Description: Surrogate primary key.
+  started_at:
+    Description: Execution start timestamp.
+  policy_id:
+    Description: Retention policy being enforced (FK data_retention_policies.id).
+  error:
+    Description: Failure details, if any.
+  created_at:
+    Description: Creation timestamp (UTC).
+  processed_count:
+    Description: How many rows were processed.
+  scheduled_at:
+    Description: Scheduled start time.
+  finished_at:
+    Description: Execution completion timestamp.
+  status:
+    Description: Job status.
+    Enum:
+    - pending
+    - running
+    - done
+    - failed
+    - cancelled

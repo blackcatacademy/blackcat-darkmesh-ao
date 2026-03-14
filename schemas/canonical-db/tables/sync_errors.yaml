@@ -1,0 +1,16 @@
+format: ao-table/v1
+name: sync_errors
+summary: Errors raised while applying replication batches.
+columns:
+  source:
+    Description: Source subsystem/channel.
+  id:
+    Description: Surrogate primary key.
+  error:
+    Description: Error message.
+  event_key:
+    Description: Offending event key (if known).
+  peer_id:
+    Description: Peer involved (FK peer_nodes.id).
+  created_at:
+    Description: Timestamp when the error was recorded.

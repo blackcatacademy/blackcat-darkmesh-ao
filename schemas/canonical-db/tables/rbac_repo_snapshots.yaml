@@ -1,0 +1,14 @@
+format: ao-table/v1
+name: rbac_repo_snapshots
+summary: Stored RBAC snapshots pulled from repositories.
+columns:
+  commit_id:
+    Description: Commit/version identifier stored.
+  taken_at:
+    Description: When the snapshot was taken.
+  id:
+    Description: Surrogate primary key.
+  repo_id:
+    Description: Source repository (FK rbac_repositories.id).
+  metadata:
+    Description: JSON metadata associated with the snapshot.

@@ -1,0 +1,31 @@
+format: ao-table/v1
+name: encryption_policies
+summary: Encryption policy registry and parameters. policy_name is UNIQUE.
+columns:
+  mode:
+    Description: Execution mode.
+    Enum:
+    - local
+    - kms
+    - multi-kms
+  id:
+    Description: Surrogate primary key.
+  max_layers:
+    Description: Maximum layers.
+  aad_template:
+    Description: AAd JSON template.
+  notes:
+    Description: Free-form notes.
+  created_at:
+    Description: Creation timestamp (UTC).
+  min_layers:
+    Description: Minimum layers.
+  layer_selection:
+    Description: Layer selection algorithm.
+    Enum:
+    - defined
+    - round_robin
+    - random
+    - hash_mod
+  policy_name:
+    Description: Unique policy name (UNIQUE).

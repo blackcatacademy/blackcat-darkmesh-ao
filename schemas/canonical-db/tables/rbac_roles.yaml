@@ -1,0 +1,26 @@
+format: ao-table/v1
+name: rbac_roles
+summary: RBAC role definitions synchronized from repositories.
+columns:
+  slug:
+    Description: Stable role slug.
+  id:
+    Description: Surrogate primary key.
+  updated_at:
+    Description: Last update timestamp (UTC).
+  version:
+    Description: Version number from the repo.
+  description:
+    Description: Optional description.
+  created_at:
+    Description: Creation timestamp (UTC).
+  name:
+    Description: Human name of the role.
+  repo_id:
+    Description: Owning repository (FK rbac_repositories.id).
+  status:
+    Description: Lifecycle status.
+    Enum:
+    - active
+    - deprecated
+    - archived

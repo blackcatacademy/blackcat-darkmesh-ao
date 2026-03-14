@@ -1,0 +1,24 @@
+format: ao-table/v1
+name: key_wrapper_layers
+summary: Individual layers that compose a key wrapper.
+columns:
+  meta:
+    Description: Additional JSON metadata.
+  layer_no:
+    Description: Layer order (1..N).
+  id:
+    Description: Surrogate primary key.
+  kem_ciphertext:
+    Description: Ciphertext blob for the wrapped key material.
+  encap_pubkey:
+    Description: Optional encapsulated public key.
+  aad:
+    Description: JSON AAD metadata used during wrapping.
+  created_at:
+    Description: Creation timestamp (UTC).
+  key_wrapper_id:
+    Description: Parent key wrapper (FK key_wrappers.id).
+  kms_key_id:
+    Description: KMS key used for the layer, if any.
+  kem_algo_id:
+    Description: KEM algorithm used for wrapping (FK crypto_algorithms.id).

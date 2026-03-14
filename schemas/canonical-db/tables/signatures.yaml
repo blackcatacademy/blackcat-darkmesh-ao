@@ -1,0 +1,24 @@
+format: ao-table/v1
+name: signatures
+summary: Digital signatures over critical entities for audit integrity.
+columns:
+  algo_id:
+    Description: Signature algorithm (FK crypto_algorithms.id).
+  id:
+    Description: Surrogate primary key.
+  hash_algo_id:
+    Description: Hash algorithm used (FK crypto_algorithms.id).
+  signing_key_id:
+    Description: Signing key used (FK signing_keys.id).
+  payload_hash:
+    Description: Hash of the signed payload.
+  created_at:
+    Description: Creation timestamp (UTC).
+  signature:
+    Description: Binary signature blob.
+  subject_table:
+    Description: Table of the signed entity.
+  context:
+    Description: Logical context (audit_chain, event_outbox, etc.).
+  subject_pk:
+    Description: Primary key of the signed record.

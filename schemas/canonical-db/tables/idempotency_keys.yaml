@@ -1,0 +1,19 @@
+format: ao-table/v1
+name: idempotency_keys
+summary: Idempotency keys to deduplicate external payment/API requests.
+columns:
+  gateway_payload:
+    Description: Original payload JSON.
+  key_hash:
+    PII: token
+    Description: Key hash (natural PK).
+  created_at:
+    Description: Creation timestamp (UTC).
+  payment_id:
+    Description: Related payment (FK payments.id), optional.
+  order_id:
+    Description: Related order (FK orders.id), optional.
+  ttl_seconds:
+    Description: Time-to-live in seconds (> 0).
+  redirect_url:
+    Description: Client redirect URL (if any).

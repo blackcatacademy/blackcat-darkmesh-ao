@@ -1,0 +1,31 @@
+format: ao-table/v1
+name: rewrap_jobs
+summary: Key rewrap tasks that move ciphertexts to new key wrappers/KMS keys.
+columns:
+  attempts:
+    Description: Retry counter.
+  id:
+    Description: Surrogate primary key.
+  started_at:
+    Description: Processing start timestamp.
+  target_kms2_key_id:
+    Description: Target secondary KMS key.
+  created_at:
+    Description: Creation timestamp (UTC).
+  key_wrapper_id:
+    Description: Wrapper being rewrapped (FK key_wrappers.id).
+  finished_at:
+    Description: Processing completion timestamp.
+  scheduled_at:
+    Description: Scheduled start time.
+  target_kms1_key_id:
+    Description: Target primary KMS key.
+  status:
+    Description: Job status flag.
+    Enum:
+    - pending
+    - running
+    - done
+    - failed
+  last_error:
+    Description: Last error message observed.

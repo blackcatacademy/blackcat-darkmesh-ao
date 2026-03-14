@@ -1,0 +1,5 @@
+format: ao-view/v1
+id: sync_batches_channels_health
+owner: blackcat-database-sync
+tags: []
+requires: []

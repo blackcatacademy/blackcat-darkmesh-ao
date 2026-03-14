@@ -1,0 +1,33 @@
+format: ao-table/v1
+name: coupons
+summary: Discount coupons configuration.
+columns:
+  id:
+    Description: Surrogate primary key.
+  type:
+    Description: Discount type.
+    Enum:
+    - percent
+    - fixed
+  updated_at:
+    Description: Update timestamp (UTC).
+  starts_at:
+    Description: Validity start (date).
+  min_order_amount:
+    Description: Minimum order subtotal to apply (optional).
+  value:
+    Description: Discount value (percent or fixed).
+  created_at:
+    Description: Creation timestamp (UTC).
+  applies_to:
+    Description: JSON targeting (SKUs, categories, users).
+  max_redemptions:
+    Description: Max total redemptions across users (0 = unlimited).
+  is_active:
+    Description: Whether coupon is currently active.
+  currency:
+    Description: ISO 4217 currency for fixed discounts; NULL for percent.
+  ends_at:
+    Description: Validity end (date), nullable.
+  code:
+    Description: Unique coupon code (case-sensitive).

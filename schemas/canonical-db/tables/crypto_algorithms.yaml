@@ -1,0 +1,29 @@
+format: ao-table/v1
+name: crypto_algorithms
+summary: Catalog of supported cryptographic primitives.
+columns:
+  params:
+    Description: JSON metadata with algorithm-specific parameters.
+  id:
+    Description: Surrogate primary key.
+  variant:
+    Description: Optional variant descriptor (hybrid, FIPS profile, etc.).
+  nist_level:
+    Description: Post-quantum NIST security level, if any.
+  created_at:
+    Description: Catalog insertion timestamp (UTC).
+  name:
+    Description: Canonical algorithm name (e.g., ML-KEM-768).
+  status:
+    Description: Lifecycle flag.
+    Enum:
+    - active
+    - deprecated
+    - experimental
+  class:
+    Description: Algorithm class.
+    Enum:
+    - kem
+    - sig
+    - hash
+    - symmetric

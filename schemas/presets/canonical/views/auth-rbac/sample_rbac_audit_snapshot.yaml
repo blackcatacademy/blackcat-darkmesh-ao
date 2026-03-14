@@ -1,0 +1,11 @@
+format: ao-view/v1
+id: sample_rbac_audit_snapshot
+owner: blackcat-auth
+tags:
+- audit
+- rbac
+- reporting
+requires:
+- rbac_user_roles
+- rbac_role_permissions
+- audit_log

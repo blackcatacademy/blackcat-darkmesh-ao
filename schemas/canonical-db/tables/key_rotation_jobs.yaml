@@ -1,0 +1,32 @@
+format: ao-table/v1
+name: key_rotation_jobs
+summary: Planned and executed key rotation jobs.
+columns:
+  id:
+    Description: Surrogate primary key.
+  started_at:
+    Description: Start time (UTC).
+  attempts:
+    Description: Number of attempts.
+  executed_by:
+    Description: Operator user id (FK users.id), optional.
+  created_at:
+    Description: Creation timestamp (UTC).
+  basename:
+    Description: Key basename to rotate.
+  scheduled_at:
+    Description: Scheduled time (UTC).
+  finished_at:
+    Description: Finish time (UTC).
+  status:
+    Description: Job status.
+    Enum:
+    - pending
+    - running
+    - done
+    - failed
+    - cancelled
+  result:
+    Description: Result/summary text.
+  target_version:
+    Description: Desired target version (nullable).

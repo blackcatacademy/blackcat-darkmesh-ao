@@ -1,0 +1,26 @@
+format: ao-table/v1
+name: event_inbox
+summary: Inbox table for inbound events awaiting processing.
+columns:
+  source:
+    Description: Producer system identifier.
+  id:
+    Description: Surrogate primary key.
+  payload:
+    Description: JSON payload to be processed.
+  processed_at:
+    Description: When processing finished (UTC).
+  received_at:
+    Description: When the event was received (UTC).
+  event_key:
+    Description: Event key used for idempotency.
+  attempts:
+    Description: Number of processing attempts.
+  status:
+    Description: Processing status flag.
+    Enum:
+    - pending
+    - processed
+    - failed
+  last_error:
+    Description: Last error message written for the event.

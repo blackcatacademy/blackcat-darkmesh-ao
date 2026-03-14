@@ -1,0 +1,18 @@
+format: ao-table/v1
+name: payment_webhooks
+summary: Raw webhook payloads (deduplicated by payload_hash UNIQUE).
+columns:
+  id:
+    Description: Surrogate primary key.
+  payload:
+    Description: Original JSON payload.
+  created_at:
+    Description: Received at (UTC).
+  payload_hash:
+    Description: Hash of payload for dedupe (UNIQUE).
+  payment_id:
+    Description: Payment (FK payments.id), optional.
+  from_cache:
+    Description: Marked if sourced from cache/retry.
+  gateway_event_id:
+    Description: Gateway event id, optional.

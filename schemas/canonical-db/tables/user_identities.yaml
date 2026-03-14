@@ -1,0 +1,16 @@
+format: ao-table/v1
+name: user_identities
+summary: External identity links (OAuth/OpenID/etc.). One row per (provider, provider_user_id).
+columns:
+  id:
+    Description: Surrogate primary key.
+  provider_user_id:
+    Description: User id at provider. Part of UNIQUE (provider, provider_user_id).
+  created_at:
+    Description: Creation timestamp (UTC).
+  updated_at:
+    Description: Update timestamp (UTC).
+  provider:
+    Description: Provider key (e.g., google, github). Part of UNIQUE (provider, provider_user_id).
+  user_id:
+    Description: User (FK users.id).

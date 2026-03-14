@@ -1,0 +1,10 @@
+format: ao-view/v1
+id: sample_payments_status
+owner: blackcat-commerce
+tags:
+- payments
+- ops
+- analytics
+requires:
+- payments
+- payment_logs

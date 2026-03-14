@@ -1,0 +1,16 @@
+format: ao-table/v1
+name: encryption_bindings
+summary: Bindings assigning specific key wrappers to encrypted entity fields.
+columns:
+  field_name:
+    Description: Encrypted column name; NULL = whole row binding.
+  id:
+    Description: Surrogate primary key.
+  entity_table:
+    Description: Table name containing encrypted data.
+  created_at:
+    Description: Creation timestamp (UTC).
+  key_wrapper_id:
+    Description: Assigned key wrapper (FK key_wrappers.id).
+  entity_pk:
+    Description: Primary key value of the encrypted row.

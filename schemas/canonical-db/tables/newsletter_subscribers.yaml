@@ -1,0 +1,49 @@
+format: ao-table/v1
+name: newsletter_subscribers
+summary: Newsletter subscription registry with double opt-in. email_hash is UNIQUE; confirm_selector is UNIQUE.
+columns:
+  id:
+    Description: Surrogate primary key.
+  origin:
+    Description: Acquisition source (e.g., form, import).
+  updated_at:
+    Description: Update timestamp (UTC).
+  created_at:
+    Description: Creation timestamp (UTC).
+  unsubscribed_at:
+    Description: Unsubscribe timestamp (UTC).
+  unsubscribe_token_hash:
+    PII: hashed
+    Description: Hashed unsubscribe token.
+  confirm_validator_hash:
+    PII: hashed
+    Description: Hashed validator token.
+  ip_hash:
+    PII: hashed
+    Description: Hashed IP of action.
+  confirm_expires:
+    Description: Confirmation expiry (UTC).
+  email_key_version:
+    Description: Key version for email_enc.
+  user_id:
+    Description: Related user (optional).
+  email_enc:
+    PII: encrypted
+    Description: Encrypted email address.
+  confirm_selector:
+    Description: Public selector for confirmation (UNIQUE).
+  ip_hash_key_version:
+    Description: Key version for ip_hash.
+  meta:
+    Description: JSON metadata (UTM, tags).
+  confirm_key_version:
+    Description: Key version for confirmation hash.
+  unsubscribe_token_key_version:
+    Description: Key version for unsubscribe hash.
+  email_hash:
+    PII: hashed
+    Description: Hashed email value (UNIQUE).
+  confirmed_at:
+    Description: Confirmation timestamp (UTC).
+  email_hash_key_version:
+    Description: Key version for email_hash.

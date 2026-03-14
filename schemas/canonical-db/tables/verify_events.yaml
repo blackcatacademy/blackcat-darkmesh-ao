@@ -1,0 +1,24 @@
+format: ao-table/v1
+name: verify_events
+summary: Verification events (email/phone, other checks).
+columns:
+  meta:
+    Description: JSON metadata.
+  id:
+    Description: Surrogate primary key.
+  type:
+    Description: Verification type.
+    Enum:
+    - verify_success
+    - verify_failure
+  ip_hash_key_version:
+    Description: Key version for ip_hash.
+  ip_hash:
+    PII: hashed
+    Description: Hashed IP.
+  user_agent:
+    Description: Client user agent.
+  occurred_at:
+    Description: When event occurred (UTC).
+  user_id:
+    Description: Related user (FK users.id), optional.

@@ -1,0 +1,20 @@
+format: ao-table/v1
+name: rate_limits
+summary: Configured rate-limiting rules at the application level.
+columns:
+  id:
+    Description: Surrogate primary key.
+  active:
+    Description: Whether the rule is active.
+  created_at:
+    Description: Creation timestamp (UTC).
+  name:
+    Description: Rule/bucket name.
+  window_size_sec:
+    Description: Window length in seconds.
+  subject_type:
+    Description: Entity type being limited.
+  subject_id:
+    Description: Identifier of the subject.
+  limit_count:
+    Description: Number of allowed operations within the window.

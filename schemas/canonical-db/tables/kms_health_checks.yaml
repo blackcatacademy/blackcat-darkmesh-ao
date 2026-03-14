@@ -1,0 +1,22 @@
+format: ao-table/v1
+name: kms_health_checks
+summary: Periodic health probes for KMS providers/keys.
+columns:
+  provider_id:
+    Description: KMS provider being checked (FK kms_providers.id).
+  id:
+    Description: Surrogate primary key.
+  latency_ms:
+    Description: Measured latency in milliseconds.
+  error:
+    Description: Error string when degraded/down.
+  kms_key_id:
+    Description: Specific key being checked (FK kms_keys.id), optional.
+  status:
+    Description: Probe result.
+    Enum:
+    - up
+    - degraded
+    - down
+  checked_at:
+    Description: Timestamp of the check (UTC).

@@ -1,0 +1,46 @@
+format: ao-table/v1
+name: books
+summary: Books catalog with pricing and stock flags.
+columns:
+  created_at:
+    Description: Creation timestamp (UTC).
+  id:
+    Description: Surrogate primary key.
+  publisher:
+    Description: Publisher name.
+  updated_at:
+    Description: Update timestamp (UTC).
+  published_at:
+    Description: Publication date.
+  slug:
+    Description: URL-friendly unique slug.
+  is_available:
+    Description: Available for purchase/download.
+  author_id:
+    Description: Author (FK authors.id).
+  short_description:
+    Description: Short blurb.
+  title:
+    Description: Book title.
+  deleted_at:
+    Description: Soft delete timestamp.
+  isbn:
+    Description: ISBN identifier.
+  full_description:
+    Description: Long description (rich text allowed).
+  price:
+    Description: Current unit price.
+  is_active:
+    Description: Visible in catalog.
+  stock_quantity:
+    Description: Units in stock.
+  main_category_id:
+    Description: Primary category (FK categories.id).
+  currency:
+    Description: ISO 4217 currency code (3 letters).
+  language:
+    Description: Language code (e.g., en, cs).
+  sku:
+    Description: Stock keeping unit.
+  pages:
+    Description: Number of pages (if applicable).

@@ -1,0 +1,20 @@
+format: ao-table/v1
+name: rate_limit_counters
+summary: Sliding-window counters for rate limiting enforcement.
+columns:
+  window_start:
+    Description: Beginning of the measurement window.
+  id:
+    Description: Surrogate primary key.
+  updated_at:
+    Description: Last update timestamp (UTC).
+  count:
+    Description: Number of hits recorded during the window.
+  name:
+    Description: Rate limiting bucket name.
+  window_size_sec:
+    Description: Window length in seconds.
+  subject_type:
+    Description: Entity type being limited (ip,user,api_key,tenant).
+  subject_id:
+    Description: Identifier of the subject (stringified).

@@ -1,0 +1,16 @@
+format: ao-table/v1
+name: entity_external_ids
+summary: Links between local entities and identifiers in external systems.
+columns:
+  source:
+    Description: External system identifier.
+  id:
+    Description: Surrogate primary key.
+  entity_table:
+    Description: Local table name.
+  external_id:
+    Description: External ID for the record.
+  created_at:
+    Description: Creation timestamp (UTC).
+  entity_pk:
+    Description: Primary key value of the local record.

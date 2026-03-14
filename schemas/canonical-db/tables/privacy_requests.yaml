@@ -1,0 +1,30 @@
+format: ao-table/v1
+name: privacy_requests
+summary: Data-subject privacy requests (access, erasure, portability, etc.).
+columns:
+  meta:
+    Description: JSON blob with additional context.
+  requested_at:
+    Description: When the request was submitted.
+  id:
+    Description: Surrogate primary key.
+  type:
+    Description: Request type.
+    Enum:
+    - access
+    - erasure
+    - rectify
+    - restrict
+    - portability
+  status:
+    Description: Request status.
+    Enum:
+    - pending
+    - processing
+    - done
+    - failed
+    - cancelled
+  processed_at:
+    Description: When it was completed.
+  user_id:
+    Description: Subject user (FK users.id).

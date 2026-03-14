@@ -1,0 +1,32 @@
+format: ao-table/v1
+name: event_outbox
+summary: Outbox table for domain events waiting to be published downstream.
+columns:
+  id:
+    Description: Surrogate primary key.
+  entity_table:
+    Description: Originating table.
+  producer_node:
+    Description: Node that produced the event.
+  event_type:
+    Description: Event type string.
+  next_attempt_at:
+    Description: When the next attempt is scheduled.
+  event_key:
+    Description: Event key / idempotency token.
+  payload:
+    Description: JSON payload delivered to consumers.
+  created_at:
+    Description: Creation timestamp (UTC).
+  status:
+    Description: Delivery status.
+    Enum:
+    - pending
+    - sent
+    - failed
+  attempts:
+    Description: Number of delivery attempts.
+  entity_pk:
+    Description: Primary key of the originating row.
+  processed_at:
+    Description: When processing completed.

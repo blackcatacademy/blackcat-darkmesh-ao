@@ -1,0 +1,30 @@
+format: ao-table/v1
+name: invoices
+summary: Issued invoices linked to orders. invoice_number is UNIQUE.
+columns:
+  order_id:
+    Description: Order (FK orders.id), optional.
+  due_date:
+    Description: Due date (optional).
+  variable_symbol:
+    Description: Local payment identifier/VS.
+  created_at:
+    Description: Creation timestamp (UTC).
+  invoice_number:
+    Description: Unique invoice number (UNIQUE).
+  discount_total:
+    Description: Total discount amount.
+  subtotal:
+    Description: Subtotal excl. discounts & tax.
+  tax_total:
+    Description: Total tax amount.
+  issue_date:
+    Description: Issue date.
+  id:
+    Description: Surrogate primary key.
+  currency:
+    Description: ISO 4217 currency code.
+  total:
+    Description: Grand total.
+  qr_data:
+    Description: Encoded payment data (string/QR).

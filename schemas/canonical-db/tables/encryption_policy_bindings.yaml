@@ -1,0 +1,16 @@
+format: ao-table/v1
+name: encryption_policy_bindings
+summary: History of which encryption policy applies to a field.
+columns:
+  field_name:
+    Description: Column that the policy covers.
+  id:
+    Description: Surrogate primary key.
+  effective_from:
+    Description: Timestamp when the policy becomes active.
+  policy_id:
+    Description: Policy identifier (FK encryption_policies.id).
+  notes:
+    Description: Documentation / rollout notes.
+  entity_table:
+    Description: Table name.

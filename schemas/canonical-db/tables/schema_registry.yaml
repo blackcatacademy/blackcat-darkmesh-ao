@@ -1,0 +1,18 @@
+format: ao-table/v1
+name: schema_registry
+summary: Registry of schema versions applied to various components.
+columns:
+  meta:
+    Description: JSON metadata with migration context.
+  id:
+    Description: Surrogate primary key.
+  version:
+    Description: Version identifier.
+  applied_at:
+    Description: When the version was applied.
+  system_name:
+    Description: System/service name.
+  component:
+    Description: Component name (db, api, etc.).
+  checksum:
+    Description: Checksum/signature of the migration bundle.

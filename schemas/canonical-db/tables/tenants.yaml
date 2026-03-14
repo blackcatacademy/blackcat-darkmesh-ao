@@ -1,0 +1,26 @@
+format: ao-table/v1
+name: tenants
+summary: Top-level tenant/organization records used for multi-tenancy.
+columns:
+  slug:
+    Description: Canonical slug (unique per tenant).
+  id:
+    Description: Surrogate primary key.
+  deleted_at:
+    Description: Soft-delete timestamp.
+  version:
+    Description: Optimistic locking version counter.
+  created_at:
+    Description: Creation timestamp (UTC).
+  slug_ci:
+    Description: Lowercase slug used for case-insensitive uniqueness.
+  name:
+    Description: Tenant display name.
+  updated_at:
+    Description: Last update timestamp (UTC).
+  status:
+    Description: Tenant status.
+    Enum:
+    - active
+    - suspended
+    - deleted

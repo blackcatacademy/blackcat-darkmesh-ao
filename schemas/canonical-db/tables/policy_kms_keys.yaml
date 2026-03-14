@@ -1,0 +1,12 @@
+format: ao-table/v1
+name: policy_kms_keys
+summary: KMS key assignments per encryption policy. PRIMARY KEY (policy_id, kms_key_id).
+columns:
+  priority:
+    Description: Priority (higher first).
+  policy_id:
+    Description: Policy (FK encryption_policies.id).
+  kms_key_id:
+    Description: KMS key (FK kms_keys.id).
+  weight:
+    Description: Weight for selection algorithms.

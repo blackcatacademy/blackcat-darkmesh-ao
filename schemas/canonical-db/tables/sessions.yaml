@@ -1,0 +1,40 @@
+format: ao-table/v1
+name: sessions
+summary: Active/expired sessions and their lifecycle.
+columns:
+  last_seen_at:
+    Description: Last activity timestamp (UTC).
+  ip_hash_key_version:
+    Description: Key version for ip_hash.
+  created_at:
+    Description: Creation timestamp (UTC).
+  ip_hash:
+    PII: hashed
+    Description: Hashed client IP.
+  token_hash:
+    PII: hashed
+    Description: Hashed session token.
+  token_issued_at:
+    Description: Original token issue time (UTC).
+  session_blob:
+    PII: encrypted
+    Description: Optional encrypted session payload.
+  user_id:
+    Description: User (FK users.id), optional.
+  token_fingerprint:
+    PII: hashed
+    Description: Stable token fingerprint (hashed).
+  expires_at:
+    Description: Expiration timestamp (UTC).
+  revoked:
+    Description: Revocation flag.
+  id:
+    Description: Surrogate primary key.
+  last_failed_decrypt_at:
+    Description: Timestamp of last failed decrypt.
+  failed_decrypt_count:
+    Description: Number of failed decrypt attempts.
+  token_hash_key_version:
+    Description: Key version for token_hash.
+  user_agent:
+    Description: Client user agent.
