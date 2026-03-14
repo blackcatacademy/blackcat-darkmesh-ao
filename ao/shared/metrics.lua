@@ -11,7 +11,6 @@ local counters = {}
 local since_flush = 0
 local last_flush = os.time()
 local last_tick = os.time()
-local bg_running = false
 
 local function ensure_dir(path)
   local dir = path:match("(.+)/[^/]+$")
@@ -64,20 +63,6 @@ function Metrics.flush_prom()
     f:write(string.format("%s %d\n", k:gsub("[^%w_]", "_"), v))
   end
   f:close()
-end
-
--- Background flush using simple shell loop; optional, best-effort.
-function Metrics.start_bg()
-  if bg_running or FLUSH_INTERVAL <= 0 then return end
-  bg_running = true
-  local cmd = string.format("(while true; do sleep %d; LUA_PATH='%s' lua -e \"require('ao.shared.metrics').flush_prom()\"; done) >/dev/null 2>&1 &",
-    math.max(1, FLUSH_INTERVAL),
-    package.path)
-  os.execute(cmd)
-end
-
-function Metrics._bg_running()
-  return bg_running
 end
 
 function Metrics.get(name)

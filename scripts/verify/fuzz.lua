@@ -103,16 +103,18 @@ do
   local conflict2 = registry.route(with_req({ Action = "SetActiveVersion", ["Site-Id"] = "conc-reg", Version = "v2", ExpectedVersion = "nope", ["Actor-Role"] = "registry-admin" }))
   if conflict2.status ~= "ERROR" then error("Expected VERSION_CONFLICT on SetActiveVersion") end
 
-  -- random interleavings of SetActiveVersion and PublishVersion
+-- random interleavings of SetActiveVersion and PublishVersion
   local reg = require("ao.registry.process")
   reg.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "conc-reg2", ["Actor-Role"] = "admin" }))
   local actions = {
     function() reg.route(with_req({ Action = "SetActiveVersion", ["Site-Id"] = "conc-reg2", Version = "v1", ["Actor-Role"] = "registry-admin" })) end,
     function() reg.route(with_req({ Action = "SetActiveVersion", ["Site-Id"] = "conc-reg2", Version = "v2", ExpectedVersion = "v0", ["Actor-Role"] = "registry-admin" })) end,
   }
-  for i = 1, 5 do
+  for i = 1, 20 do
     actions[math.random(1, #actions)]()
   end
+  local lookup = reg.route(with_req({ Action = "GetSiteConfig", ["Site-Id"] = "conc-reg2" }))
+  if lookup.status ~= "OK" then error("GetSiteConfig failed after interleavings") end
 end
 
 -- Audit rotation/prune: set tiny rotate and emit many records

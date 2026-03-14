@@ -18,7 +18,7 @@ local SIG_TYPE = os.getenv("AUTH_SIGNATURE_TYPE") or "hmac" -- hmac | ed25519
 local openssl_ok, openssl = pcall(require, "openssl")
 local sodium_ok, sodium = pcall(require, "sodium")
 local sqlite_ok, sqlite = pcall(require, "lsqlite3")
-local SHELL_FALLBACK = os.getenv("AUTH_ALLOW_SHELL_FALLBACK") ~= "0"
+local SHELL_FALLBACK = os.getenv("AUTH_ALLOW_SHELL_FALLBACK") == "1" -- default now off
 
 local nonce_store = {}
 local rate_store = {}
