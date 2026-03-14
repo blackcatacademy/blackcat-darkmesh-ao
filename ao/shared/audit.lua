@@ -86,6 +86,7 @@ function Audit.record(process, action, msg, resp, extra)
     requestId = msg and msg["Request-Id"],
     actorRole = msg and (msg["Actor-Role"] or msg.actorRole),
     siteId = msg and (msg["Site-Id"] or msg.siteId),
+    status = resp and resp.status,
     resultCode = resp and resp.code or resp and resp.status,
   }
   if extra then
@@ -94,6 +95,20 @@ function Audit.record(process, action, msg, resp, extra)
     end
   end
   Audit.append(entry)
+  -- optional per-process log
+  if LOG_DIR and process then
+    local path = string.format("%s/audit-%s.log", LOG_DIR, process)
+    rotate_if_needed(path)
+    local f = io.open(path, "a")
+    if f then
+      if FORMAT == "ndjson" then
+        f:write(json_encode(entry), "\n")
+      else
+        f:write(tostring(entry.action or "event"), " ", json_encode(entry), "\n")
+      end
+      f:close()
+    end
+  end
 end
 
 function Audit.all()
