@@ -11,10 +11,40 @@ Commands:
 import argparse
 import hashlib
 import json
+import os
+import sys
 import tarfile
 from pathlib import Path
 
 import yaml
+
+# --- styling ---------------------------------------------------------------
+USE_COLOR = sys.stdout.isatty() and os.getenv("NO_COLOR") is None
+
+
+class C:
+    RESET = "\033[0m" if USE_COLOR else ""
+    BOLD = "\033[1m" if USE_COLOR else ""
+    DIM = "\033[2m" if USE_COLOR else ""
+    CYAN = "\033[96m" if USE_COLOR else ""
+    MAGENTA = "\033[95m" if USE_COLOR else ""
+    YELLOW = "\033[93m" if USE_COLOR else ""
+    GREEN = "\033[92m" if USE_COLOR else ""
+    BLUE = "\033[94m" if USE_COLOR else ""
+
+
+def banner():
+    if not USE_COLOR:
+        print("=== WeaveDB Schema Helper ===")
+        return
+    art = [
+        "╔═══════════════════════════════════════╗",
+        "║  WEAVEDB SCHEMA HELPER  ·  v3 bundles ║",
+        "╚═══════════════════════════════════════╝",
+    ]
+    colors = [C.CYAN, C.MAGENTA, C.BLUE]
+    for i, line in enumerate(art):
+        print(colors[i % len(colors)] + line + C.RESET)
 
 ROOT = Path(__file__).resolve().parents[2]
 COLL_DIR = ROOT / "schemas" / "weavedb" / "collections"
@@ -38,8 +68,7 @@ PRESETS = {
             "inventory_reservations", "inventory_adjustments",
             "carts", "cart_events", "orders", "payments", "refunds", "shipments",
             "returns", "return_items", "price_rules", "coupons", "gift_cards",
-            "gift_wrapping", "gift_messages", "gift_wrapping", "gift_wrapping",
-            "gift_wrapping", "gift_wrapping",
+            "gift_wrapping", "gift_messages",
             "loyalty_points", "wishlists", "reviews", "event_outbox",
             "rate_limits", "entitlements", "segments", "customer_groups",
             "analytics_events", "webhooks", "newsletter_subscribers",
@@ -105,13 +134,14 @@ def build_manifest_subset(collections: dict, chosen: set) -> dict:
 
 
 def cmd_list(collections):
+    banner()
     all_names = sorted(collections)
-    print("Collections:")
+    print(f"{C.BOLD}Collections ({len(all_names)} total){C.RESET}")
     for name in all_names:
-        print(f"  - {name}")
-    print("\nPresets:")
+        print(f"  {C.CYAN}•{C.RESET} {name}")
+    print(f"\n{C.BOLD}Presets{C.RESET}")
     for pid, meta in PRESETS.items():
-        print(f"  {pid:12s} : {meta['description']}")
+        print(f"  {C.MAGENTA}{pid:12s}{C.RESET} {meta['description']}")
 
 
 def cmd_explain(collections, name):
@@ -155,8 +185,8 @@ def cmd_export(collections, presets, out_path: Path):
 
     sha = calc_sha256(out_path)
     temp_manifest.unlink()
-    print(f"Wrote bundle: {out_path}")
-    print(f"SHA256: {sha}")
+    print(f"{C.GREEN}✔{C.RESET} Wrote bundle: {out_path}")
+    print(f"{C.GREEN}✔{C.RESET} SHA256: {C.BOLD}{sha}{C.RESET}")
 
 
 def main():
