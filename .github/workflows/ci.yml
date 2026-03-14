@@ -22,6 +22,18 @@ jobs:
       - name: Preflight (schemas + Lua syntax)
         run: scripts/verify/preflight.sh
 
+      - name: Export audit logs (mock)
+        if: always()
+        run: scripts/export/audit_ci.sh
+
+      - name: Upload audit logs artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-logs
+          path: artifacts/audit.ndjson
+          if-no-files-found: ignore
+
       - name: Arweave health (optional)
         if: env.ARWEAVE_HTTP_ENDPOINT != ''
         env:

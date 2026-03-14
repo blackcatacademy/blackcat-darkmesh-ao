@@ -53,6 +53,7 @@ tests/             # integration, message-contracts, snapshots, security
 ## Development
 - Prereqs: `lua5.4` (or `luac`) and `python3`.
 - Run static checks before opening a PR: `scripts/verify/preflight.sh`.
+- Contract smoke tests are bundled in the preflight script (runs under Lua 5.4).
 - Branches: `main` (releasable), `develop` (integration), `feature/*`, `adr/*`, `release/*`.
 - Message contracts and schemas are treated as public API; prefer additive changes over breaking ones.
 - Role policy: write actions are gated by actor roles (registry/site/catalog/access); provide `Actor-Role` tag in messages to pass policy checks.
@@ -65,6 +66,15 @@ tests/             # integration, message-contracts, snapshots, security
 - Audit config: `AUDIT_LOG_DIR` (default `arweave/manifests`), `AUDIT_MAX_RECORDS` (default 1000 in-memory).
   - `AUDIT_FORMAT` (`line`|`ndjson`), `AUDIT_ROTATE_MAX` bytes for log rotation.
   - `AUDIT_RETAIN_FILES` rotated log files per stream (default 10).
+- Audit export tooling:
+  - `scripts/export/audit_dump.lua [N] [process]` — tail audit logs (mock-safe).
+  - `scripts/export/audit_export.lua [process|all] [format] [outfile]` — export NDJSON or raw.
+  - `scripts/export/audit_ci.sh [outfile]` — CI-friendly helper; writes `artifacts/audit.ndjson` if logs exist (no-op otherwise).
+- Payload caps (env overrides):
+  - `SITE_MAX_CONTENT_BYTES` (draft/page content, default 64 KiB)
+  - `CATALOG_MAX_PAYLOAD_BYTES` (product/category payloads, default 64 KiB)
+  - `ACCESS_MAX_POLICY_BYTES` (entitlement policy payloads, default 32 KiB)
+  - `REGISTRY_MAX_CONFIG_BYTES` (site config payload, default 16 KiB)
 
 ## License
 Blackcat Darkmesh AO Proprietary License (see `LICENSE`). External contributions require written permission from Black Cat Academy s. r. o.

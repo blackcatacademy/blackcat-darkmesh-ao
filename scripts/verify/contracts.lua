@@ -71,6 +71,12 @@ do
   local extra = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-extra", Config = {}, Foo = "bar", ["Actor-Role"] = "admin" }))
   assert_status(extra, "ERROR", "register extra status")
   assert_code(extra, "UNSUPPORTED_FIELD", "register extra code")
+
+  -- Oversize config guard
+  local big_cfg = { blob = string.rep("x", 20 * 1024) }
+  local oversize_cfg = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-big", Config = big_cfg, ["Actor-Role"] = "admin" }))
+  assert_status(oversize_cfg, "ERROR", "register oversize status")
+  assert_code(oversize_cfg, "INVALID_INPUT", "register oversize code")
 end
 
 -- Site tests
@@ -107,6 +113,12 @@ do
   assert_eq(publish_empty.status, "OK", "publish empty status")
   assert_falsy(publish_empty.payload.manifestTx, "publish empty manifest")
 
+  -- Oversize content guard
+  local big_content = { body = string.rep("x", 70 * 1024) }
+  local oversize = site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-oversize", ["Page-Id"] = "home", Content = big_content, ["Actor-Role"] = "editor" }))
+  assert_status(oversize, "ERROR", "putdraft oversize status")
+  assert_code(oversize, "INVALID_INPUT", "putdraft oversize code")
+
   -- Archive then fetch
   site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-2", ["Page-Id"] = "old", Content = { title = "Old" }, ["Actor-Role"] = "editor" }))
   site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-2", Version = "v1", ["Actor-Role"] = "publisher" }))
@@ -140,6 +152,21 @@ do
   local conflict = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-1", Version = "v3", ExpectedVersion = "old", ["Actor-Role"] = "publisher" }))
   assert_status(conflict, "ERROR", "publish expected version conflict")
   assert_code(conflict, "VERSION_CONFLICT", "publish conflict code")
+
+  -- Path length guard
+  local long_path = "/" .. string.rep("p", 2050)
+  local long_path_resp = site.route(with_req({ Action = "ResolveRoute", ["Site-Id"] = "site-1", Path = long_path }))
+  assert_status(long_path_resp, "ERROR", "resolve long path status")
+  assert_code(long_path_resp, "INVALID_INPUT", "resolve long path code")
+
+  -- ArchivePage unexpected field and version length guard
+  local archive_extra = site.route(with_req({ Action = "ArchivePage", ["Site-Id"] = "site-2", ["Page-Id"] = "old", Extra = true, ["Actor-Role"] = "publisher" }))
+  assert_status(archive_extra, "ERROR", "archive extra status")
+  assert_code(archive_extra, "UNSUPPORTED_FIELD", "archive extra code")
+  local long_version = string.rep("v", 130)
+  local archive_long_version = site.route(with_req({ Action = "ArchivePage", ["Site-Id"] = "site-2", ["Page-Id"] = "old", Version = long_version, ["Actor-Role"] = "publisher" }))
+  assert_status(archive_long_version, "ERROR", "archive long version status")
+  assert_code(archive_long_version, "INVALID_INPUT", "archive long version code")
 end
 
 -- Catalog tests
@@ -173,6 +200,12 @@ do
   assert_eq(missing.status, "ERROR", "missing product status")
   assert_code(missing, "NOT_FOUND", "missing product code")
 
+  -- oversize payload guard
+  local huge_payload = { name = string.rep("X", 70 * 1024) }
+  local oversize_payload = catalog.route(with_req({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-big", Payload = huge_payload, ["Actor-Role"] = "catalog-admin" }))
+  assert_status(oversize_payload, "ERROR", "upsert payload oversize status")
+  assert_code(oversize_payload, "INVALID_INPUT", "upsert payload oversize code")
+
   -- search miss
   local search_miss = catalog.route(with_req({ Action = "SearchCatalog", ["Site-Id"] = "site-1", Query = "zzz" }))
   assert_eq(search_miss.payload.total, 0, "search miss total")
@@ -203,6 +236,12 @@ do
   local extra = catalog.route(with_req({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-extra", Payload = {}, Extra = true, ["Actor-Role"] = "catalog-admin" }))
   assert_status(extra, "ERROR", "upsert extra status")
   assert_code(extra, "UNSUPPORTED_FIELD", "upsert extra code")
+
+  -- Length guard on SKU
+  local long_sku = string.rep("s", 129)
+  local too_long = catalog.route(with_req({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = long_sku, Payload = {}, ["Actor-Role"] = "catalog-admin" }))
+  assert_status(too_long, "ERROR", "upsert sku too long status")
+  assert_code(too_long, "INVALID_INPUT", "upsert sku too long code")
 end
 
 -- Access tests
@@ -249,6 +288,18 @@ do
   local extra = access.route(with_req({ Action = "GrantEntitlement", Subject = "u4", Asset = "asset-4", Policy = "view", Foo = "bar", ["Actor-Role"] = "admin" }))
   assert_status(extra, "ERROR", "grant extra status")
   assert_code(extra, "UNSUPPORTED_FIELD", "grant extra code")
+
+  -- Length guard on asset id
+  local long_asset = string.rep("a", 300)
+  local long_asset_resp = access.route(with_req({ Action = "GrantEntitlement", Subject = "user-long", Asset = long_asset, Policy = "view", ["Actor-Role"] = "admin" }))
+  assert_status(long_asset_resp, "ERROR", "grant long asset status")
+  assert_code(long_asset_resp, "INVALID_INPUT", "grant long asset code")
+
+  -- Size guard on policy
+  local huge_policy = { blob = string.rep("x", 40 * 1024) }
+  local oversize_policy = access.route(with_req({ Action = "GrantEntitlement", Subject = "u5", Asset = "asset-oversize", Policy = huge_policy, ["Actor-Role"] = "admin" }))
+  assert_status(oversize_policy, "ERROR", "grant oversize policy status")
+  assert_code(oversize_policy, "INVALID_INPUT", "grant oversize policy code")
 end
 
 -- Unknown action test

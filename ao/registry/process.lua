@@ -33,6 +33,8 @@ local state = {
   roles = {},          -- siteId => map[user] = role
 }
 
+local MAX_CONFIG_BYTES = tonumber(os.getenv("REGISTRY_MAX_CONFIG_BYTES") or "") or (16 * 1024)
+
 local function now_iso()
   -- coarse timestamp for audit/debug; determinism is sufficient here.
   return os.date("!%Y-%m-%dT%H:%M:%SZ")
@@ -87,6 +89,9 @@ function handlers.RegisterSite(msg)
   local ok_len, err = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len then return codec.error("INVALID_INPUT", err, { field = "Site-Id" }) end
   local config = msg.Config or {}
+  local config_len = validation.estimate_json_length(config)
+  local ok_size, err_size = validation.check_size(config_len, MAX_CONFIG_BYTES, "Config")
+  if not ok_size then return codec.error("INVALID_INPUT", err_size, { field = "Config" }) end
   local existing = state.sites[msg["Site-Id"]]
   if existing then
     return codec.ok({

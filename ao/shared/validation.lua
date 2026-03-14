@@ -83,10 +83,10 @@ function Validation.require_no_extras(tbl, allowed_fields)
 end
 
 -- Optional payload size guard (bytes when serialized length provided).
-function Validation.check_size(len, max_bytes)
-  if not max_bytes or max_bytes <= 0 then return true end
+function Validation.check_size(len, max_bytes, field)
+  if not max_bytes or max_bytes <= 0 or not len then return true end
   if len > max_bytes then
-    return false, "oversize"
+    return false, ("too_large:%s"):format(field or "?")
   end
   return true
 end
@@ -105,6 +105,50 @@ function Validation.check_length(value, max_len, field)
     return false, ("too_long:%s"):format(field or "?")
   end
   return true
+end
+
+local function is_array(tbl)
+  local i = 0
+  for _ in pairs(tbl) do
+    i = i + 1
+    if tbl[i] == nil then return false end
+  end
+  return true
+end
+
+local function json_encoded_length(value)
+  local t = type(value)
+  if t == "nil" then return 4 end -- null
+  if t == "boolean" then return value and 4 or 5 end -- true/false
+  if t == "number" then return #tostring(value) end
+  if t == "string" then return #string.format("%q", value) end
+  if t == "table" then
+    if is_array(value) then
+      local sum = 2 -- []
+      local first = true
+      for _, v in ipairs(value) do
+        if not first then sum = sum + 1 end -- comma
+        sum = sum + json_encoded_length(v)
+        first = false
+      end
+      return sum
+    else
+      local sum = 2 -- {}
+      local first = true
+      for k, v in pairs(value) do
+        if not first then sum = sum + 1 end -- comma
+        sum = sum + #string.format("%q", tostring(k)) + 1 + json_encoded_length(v) -- colon
+        first = false
+      end
+      return sum
+    end
+  end
+  return #tostring(value)
+end
+
+-- Rough estimate of JSON-encoded length (bytes) for payload size guards.
+function Validation.estimate_json_length(value)
+  return json_encoded_length(value)
 end
 
 return Validation

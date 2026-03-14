@@ -27,11 +27,17 @@ local state = {
   protected = {},      -- asset:<id> -> { ref, visibility }
 }
 
+local MAX_POLICY_BYTES = tonumber(os.getenv("ACCESS_MAX_POLICY_BYTES") or "") or (32 * 1024)
+
 function handlers.HasEntitlement(msg)
   local ok, missing = validation.require_fields(msg, { "Subject", "Asset" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Subject", "Asset", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_len_sub, err_sub = validation.check_length(msg.Subject, 128, "Subject")
+  if not ok_len_sub then return codec.error("INVALID_INPUT", err_sub, { field = "Subject" }) end
+  local ok_len_asset, err_asset = validation.check_length(msg.Asset, 256, "Asset")
+  if not ok_len_asset then return codec.error("INVALID_INPUT", err_asset, { field = "Asset" }) end
   local key = ids.entitlement_key(msg.Subject, msg.Asset)
   local policy = state.entitlements[key]
   return codec.ok({
@@ -47,6 +53,8 @@ function handlers.GetProtectedAssetRef(msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Asset", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_len_asset, err_asset = validation.check_length(msg.Asset, 256, "Asset")
+  if not ok_len_asset then return codec.error("INVALID_INPUT", err_asset, { field = "Asset" }) end
   local asset = state.protected[msg.Asset]
   if not asset then
     return codec.error("NOT_FOUND", "Asset ref not found", { asset = msg.Asset })
@@ -63,6 +71,15 @@ function handlers.GrantEntitlement(msg)
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Subject", "Asset", "Policy", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_len_sub, err_sub = validation.check_length(msg.Subject, 128, "Subject")
+  if not ok_len_sub then return codec.error("INVALID_INPUT", err_sub, { field = "Subject" }) end
+  local ok_len_asset, err_asset = validation.check_length(msg.Asset, 256, "Asset")
+  if not ok_len_asset then return codec.error("INVALID_INPUT", err_asset, { field = "Asset" }) end
+  local ok_len_policy, err_policy = validation.check_length(msg.Policy, 64, "Policy")
+  if not ok_len_policy then return codec.error("INVALID_INPUT", err_policy, { field = "Policy" }) end
+  local policy_size = validation.estimate_json_length(msg.Policy)
+  local ok_size, err_size = validation.check_size(policy_size, MAX_POLICY_BYTES, "Policy")
+  if not ok_size then return codec.error("INVALID_INPUT", err_size, { field = "Policy" }) end
   local key = ids.entitlement_key(msg.Subject, msg.Asset)
   state.entitlements[key] = msg.Policy
   audit.record("access", "GrantEntitlement", msg, nil, { subject = msg.Subject, asset = msg.Asset, policy = msg.Policy })
@@ -76,6 +93,12 @@ end
 function handlers.RevokeEntitlement(msg)
   local ok, missing = validation.require_fields(msg, { "Subject", "Asset" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Subject", "Asset", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_len_sub, err_sub = validation.check_length(msg.Subject, 128, "Subject")
+  if not ok_len_sub then return codec.error("INVALID_INPUT", err_sub, { field = "Subject" }) end
+  local ok_len_asset, err_asset = validation.check_length(msg.Asset, 256, "Asset")
+  if not ok_len_asset then return codec.error("INVALID_INPUT", err_asset, { field = "Asset" }) end
   local key = ids.entitlement_key(msg.Subject, msg.Asset)
   state.entitlements[key] = nil
   audit.record("access", "RevokeEntitlement", msg, nil, { subject = msg.Subject, asset = msg.Asset })
@@ -89,6 +112,16 @@ end
 function handlers.PutProtectedAssetRef(msg)
   local ok, missing = validation.require_fields(msg, { "Asset", "Ref" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Asset", "Ref", "Visibility", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_len_asset, err_asset = validation.check_length(msg.Asset, 256, "Asset")
+  if not ok_len_asset then return codec.error("INVALID_INPUT", err_asset, { field = "Asset" }) end
+  local ok_len_ref, err_ref = validation.check_length(msg.Ref, 2048, "Ref")
+  if not ok_len_ref then return codec.error("INVALID_INPUT", err_ref, { field = "Ref" }) end
+  if msg.Visibility then
+    local ok_len_vis, err_vis = validation.check_length(msg.Visibility, 32, "Visibility")
+    if not ok_len_vis then return codec.error("INVALID_INPUT", err_vis, { field = "Visibility" }) end
+  end
   state.protected[msg.Asset] = { ref = msg.Ref, visibility = msg.Visibility or "protected" }
   audit.record("access", "PutProtectedAssetRef", msg, nil, { asset = msg.Asset, ref = msg.Ref })
   return codec.ok({ asset = msg.Asset, ref = msg.Ref })
