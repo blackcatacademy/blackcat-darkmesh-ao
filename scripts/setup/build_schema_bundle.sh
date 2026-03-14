@@ -8,8 +8,11 @@ mkdir -p "$OUT_DIR"
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 ARCHIVE="$OUT_DIR/schema-bundle-$TS.tar.gz"
 
-# Bundle only canonical presets (engine-neutral) plus the preset catalog
-tar -czf "$ARCHIVE" -C "$ROOT" schemas/presets/canonical config/table-presets.json
+# Re-generate compact manifest
+python3 "$ROOT/scripts/setup/make_schema_manifest.py"
+
+# Bundle compact manifest + preset catalog (no SQL bodies)
+tar -czf "$ARCHIVE" -C "$ROOT" schemas/manifest/schema-manifest.json config/table-presets.json
 SHA="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
 
 echo "wrote bundle: $ARCHIVE"
