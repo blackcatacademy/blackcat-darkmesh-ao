@@ -43,6 +43,8 @@ function handlers.GetSiteByHost(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Host is required", { missing = missing })
   end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Host", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local site_id = state.domains[msg.Host]
   if not site_id then
     return codec.error("NOT_FOUND", "Domain not bound", { host = msg.Host })
@@ -58,6 +60,8 @@ function handlers.GetSiteConfig(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Site-Id is required", { missing = missing })
   end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local site = state.sites[msg["Site-Id"]]
   if not site then
     return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
@@ -74,6 +78,8 @@ function handlers.RegisterSite(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Site-Id is required", { missing = missing })
   end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Config", "Version", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local config = msg.Config or {}
   local existing = state.sites[msg["Site-Id"]]
   if existing then
@@ -104,6 +110,8 @@ function handlers.BindDomain(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Host", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   if not state.sites[msg["Site-Id"]] then
     return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
   end
@@ -121,6 +129,8 @@ function handlers.SetActiveVersion(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Version", "ExpectedVersion", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   if not state.sites[msg["Site-Id"]] then
     return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
   end
@@ -143,6 +153,8 @@ function handlers.GrantRole(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Subject", "Role", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   if not state.sites[msg["Site-Id"]] then
     return codec.error("NOT_FOUND", "Site not registered", { siteId = msg["Site-Id"] })
   end

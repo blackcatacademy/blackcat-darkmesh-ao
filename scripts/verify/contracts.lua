@@ -66,6 +66,11 @@ do
   local g1 = registry.route({ Action = "GrantRole", ["Site-Id"] = "site-2", Subject = "userA", Role = "editor", ["Actor-Role"] = "registry-admin", ["Request-Id"] = "rid-grant" })
   local g2 = registry.route({ Action = "GrantRole", ["Site-Id"] = "site-2", Subject = "userA", Role = "admin", ["Actor-Role"] = "registry-admin", ["Request-Id"] = "rid-grant" })
   assert_eq(g2.payload.role, g1.payload.role, "grant role idempotent keeps first role")
+
+  -- Unexpected field in register
+  local extra = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-extra", Config = {}, Foo = "bar", ["Actor-Role"] = "admin" }))
+  assert_status(extra, "ERROR", "register extra status")
+  assert_code(extra, "UNSUPPORTED_FIELD", "register extra code")
 end
 
 -- Site tests
