@@ -100,6 +100,10 @@ function Audit.all()
   return records
 end
 
+function Audit.log_path()
+  return LOG_DIR and (LOG_DIR .. "/audit.log") or nil
+end
+
 function Audit._clear()
   records = {}
 end
