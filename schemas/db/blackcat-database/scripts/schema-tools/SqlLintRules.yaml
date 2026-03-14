@@ -1,0 +1,10 @@
+RequireFkIndex: True
+RequireViewDirectives: True
+RequirePrimaryKey: True
+TimeColumns:
+  - created_at
+  - updated_at
+  - createdon
+  - updatedon
+  - timestamp
+  - ts

@@ -1,0 +1,59 @@
+Content: |-
+  <?php
+  declare(strict_types=1);
+  
+  namespace [[NAMESPACE]]\Repository;
+  
+  use [[NAMESPACE]]\Criteria;
+  use BlackCat\Database\Contracts\ContractRepository as RepoContract;
+  use BlackCat\Database\Contracts\KeysetRepository as KeysetRepoContract;
+  use [[NAMESPACE]]\Dto\[[DTO_CLASS]] as Dto;
+  
+  /**
+   * Contract generated for [[ENTITY_CLASS]] repositories.
+   * Mirrors the public API of the generated repository so tests can type against the interface.
+   */
+  interface [[ENTITY_CLASS]]RepositoryInterface extends RepoContract, KeysetRepoContract
+  {
+      // --- INSERT / BULK -------------------------------------------------------
+      public function insert(array $row): void;
+      public function insertMany(array $rows): void;
+  
+      // --- UPSERT (including revive variants) ---------------------------------
+      public function upsert(array $row): void;
+      public function upsertRevive(array $row): void;
+      public function upsertByKeys(array $row, array $keys, array $updateColumns = []): void;
+      public function upsertByKeysRevive(array $row, array $keys, array $updateColumns = []): void;
+      public function upsertMany(array $rows): int;
+      public function upsertManyRevive(array $rows): int;
+
+      // --- UPDATE / DELETE / RESTORE ------------------------------------------
+      public function updateByIdWhere(int|string|array $id, array $row, array $where): int;
+      public function updateById(int|string|array $id, array $row): int;
+      public function deleteById(int|string|array $id): int;
+      public function restoreById(int|string|array $id): int;
+  
+      // --- READ ---------------------------------------------------------------
+      public function findById(int|string|array $id): ?array;
+      public function findAllByIds(array $ids): array;
+      public function getById(int|string|array $id, bool $asDto = false): array|Dto|null;
+      public function getByUnique(array $keyValues, bool $asDto = false): array|Dto|null;
+      public function exists(string $whereSql = '1=1', array $params = []): bool;
+      public function count(string $whereSql = '1=1', array $params = []): int;
+      public function existsById(int|string|array $id): bool;
+  
+      // --- PAGINATION / LOCKING ----------------------------------------------
+      public function paginate(object $criteria): array;
+      /**
+       * @param array{col?:string,dir?:string,pk?:string,nullsLast?:bool} $order
+       * @param array{colValue:mixed,pkValue:mixed}|null $cursor
+       * @return array{0:array<int,array<string,mixed>>,1:array{colValue:mixed,pkValue:mixed}|null}
+       */
+      public function paginateBySeek(object $criteria, array $order, ?array $cursor, int $limit): array;
+      public function lockById(int|string|array $id, string $mode = 'wait', string $strength = 'update'): ?array;
+  }
+Tokens:
+  - NAMESPACE
+  - ENTITY_CLASS
+  - DTO_CLASS
+File: src/Repository/[[ENTITY_CLASS]]RepositoryInterface.php

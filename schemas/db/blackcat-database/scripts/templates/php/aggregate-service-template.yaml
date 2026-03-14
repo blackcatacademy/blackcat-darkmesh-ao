@@ -1,0 +1,104 @@
+Content: |-
+  <?php
+  declare(strict_types=1);
+  
+  namespace [[NAMESPACE]]\Service;
+  
+  [[USES_ARRAY]]
+  use BlackCat\Database\Support\ServiceHelpers;
+  use BlackCat\Database\Contracts\ContractRepository as RepoContract;
+  
+  /**
+   * Orchestrates multiple repositories within a single transaction (savepoints supported).
+   * - Leaves idempotence/locking to the Repository/DB layer.
+   * - Provides a helper: withRowLock().
+   */
+  final class [[SERVICE_CLASS]]
+  {
+      use ServiceHelpers;
+
+      /** @var array<string,object> */
+      private readonly array $repositories;
+
+      public function __construct(
+          [[CTOR_PARAMS]]
+      ) {
+          // Repository autowiring (generated)
+          $this->repositories = [[REPOSITORY_MAP]];
+      }
+  
+      /** @phpstan-ignore-next-line exposed for generated aggregate methods */
+      private function repo(string $alias): RepoContract
+      {
+          if (!isset($this->repositories[$alias])) {
+              throw new \InvalidArgumentException("Unknown repository alias '$alias'.");
+          }
+          /** @var RepoContract */
+          return $this->repositories[$alias];
+      }
+  
+      /**
+       * Lock a row (SELECT ... FOR UPDATE) and execute work within the same transaction.
+       * - $locker is a callable that performs the locking SELECT (ideally $repo->lockById)
+       * - Supports locker signatures with or without the $mode argument ('wait'|'nowait'|'skip_locked').
+       * - $fetch: callable(array|null $lockedRow, Database $db): mixed
+       */
+      protected function withRowLock(callable $locker, int|string|array $id, callable $fetch, string $mode = 'wait'): mixed
+      {
+          $mode = strtolower($mode);
+          if (!in_array($mode, ['wait', 'skip_locked', 'nowait'], true)) { $mode = 'wait'; }
+  
+          return $this->txn(function () use ($locker, $id, $fetch, $mode) {
+              // Support locker($id, $mode) as well as locker($id)
+              try {
+                  $num = 1;
+                  if (is_array($locker) && count($locker) === 2) {
+                      $rm  = new \ReflectionMethod($locker[0], (string)$locker[1]);
+                      $num = $rm->getNumberOfParameters();
+                  } elseif ($locker instanceof \Closure) {
+                      $rf  = new \ReflectionFunction($locker);
+                      $num = $rf->getNumberOfParameters();
+                  } elseif (is_object($locker) && is_callable($locker)) {
+                      $rm  = new \ReflectionMethod($locker, '__invoke');
+                      $num = $rm->getNumberOfParameters();
+                  } elseif (is_string($locker) && \function_exists($locker)) {
+                      $rf  = new \ReflectionFunction($locker);
+                      $num = $rf->getNumberOfParameters();
+                  }
+                  $row = ($num >= 2) ? $locker($id, $mode) : $locker($id);
+              } catch (\Throwable) {
+                  // Best-effort fallback: treat as not found / locked elsewhere
+                  $row = null;
+              }
+  
+              if ($mode === 'skip_locked' && $row === null) {
+                  return null; // respect skip_locked - no record currently available
+              }
+              if ($row === null) {
+                  $idStr = is_array($id) ? json_encode($id, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : (string)$id;
+                  throw new \[[NAMESPACE]]\ModuleException("Record {$idStr} not found for locking.");
+              }
+              return $fetch($row, $this->db());
+          });
+      }
+  
+      public function withAdvisoryLock(string $key, callable $fn, int $timeoutSec = 10): mixed {
+          return $this->withLock($key, $timeoutSec, fn() => $fn($this->db()));
+      }
+  
+      /** Attempt a lock with SKIP LOCKED; returns null when the row is locked instead of throwing. */
+      public function tryWithRowLock(callable $locker, int|string|array $id, callable $fetch): mixed
+      {
+          return $this->withRowLock($locker, $id, $fetch, 'skip_locked');
+      }
+
+      [[AGGREGATE_METHODS]]
+  }
+Tokens:
+  - NAMESPACE
+  - SERVICE_CLASS
+  - USES_ARRAY
+  - CTOR_PARAMS
+  - REPOSITORY_MAP
+  - AGGREGATE_METHODS
+File: src/Service/[[SERVICE_CLASS]].php
