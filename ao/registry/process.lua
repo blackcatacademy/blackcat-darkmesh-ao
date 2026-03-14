@@ -240,6 +240,7 @@ local function route(msg)
   local resp = handler(msg)
   metrics.inc("registry." .. msg.Action .. ".count")
   metrics.tick()
+  metrics.start_bg()
   idem.record(msg["Request-Id"], resp)
   return resp
 end
