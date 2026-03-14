@@ -15,6 +15,8 @@ local RL_SQLITE = os.getenv("AUTH_RATE_LIMIT_SQLITE")
 local SIG_SECRET = os.getenv("AUTH_SIGNATURE_SECRET")
 local SIG_PUBLIC = os.getenv("AUTH_SIGNATURE_PUBLIC")
 local SIG_TYPE = os.getenv("AUTH_SIGNATURE_TYPE") or "hmac" -- hmac | ed25519
+local openssl_ok, openssl = pcall(require, "openssl")
+local sqlite_ok, sqlite = pcall(require, "lsqlite3")
 
 local nonce_store = {}
 local rate_store = {}
@@ -97,6 +99,15 @@ function Auth.require_signature(msg)
   end
   local target = (msg.Action or "") .. "|" .. (msg["Site-Id"] or "") .. "|" .. (msg["Request-Id"] or "")
   if SIG_TYPE == "ed25519" and SIG_PUBLIC then
+    -- Try native luaossl first
+    if openssl_ok and openssl.pkey and openssl.hex then
+      local pub_pem = assert(io.open(SIG_PUBLIC, "r")):read("*a")
+      local pkey = openssl.pkey.read(pub_pem, true, "public")
+      local raw_sig = openssl.hex(sig)
+      local ok, verify_err = pkey:verify(raw_sig, target, "NONE")
+      if ok then return true end
+    end
+    -- Fallback to shell verify for compatibility
     local tmp = os.tmpname()
     local f = io.open(tmp, "w"); if f then f:write(target); f:close() end
     local cmd = string.format("openssl pkeyutl -verify -pubin -inkey %q -rawin -in %q -sigfile %q 2>/dev/null", SIG_PUBLIC, tmp, tmp .. ".sig")
@@ -157,10 +168,15 @@ function Auth.check_rate_limit(msg)
   if bucket.count > RL_MAX then
     return false, "rate_limited"
   end
-  if RL_SQLITE and (os.execute("command -v sqlite3 >/dev/null 2>&1") == 0 or os.execute("command -v sqlite3 >/dev/null 2>&1") == true) then
-    local db = RL_SQLITE
-    os.execute(string.format("sqlite3 %q \"CREATE TABLE IF NOT EXISTS rate (k TEXT PRIMARY KEY, count INT, reset INT);\"", db))
-    os.execute(string.format("sqlite3 %q \"INSERT OR REPLACE INTO rate (k,count,reset) VALUES ('%s',%d,%d);\"", db, key, bucket.count, bucket.reset))
+  if RL_SQLITE and sqlite_ok then
+    if not Auth._db then
+      Auth._db = sqlite.open(RL_SQLITE)
+      Auth._db:exec("CREATE TABLE IF NOT EXISTS rate (k TEXT PRIMARY KEY, count INT, reset INT)")
+    end
+    local stmt = Auth._db:prepare("INSERT OR REPLACE INTO rate (k,count,reset) VALUES (?, ?, ?)")
+    stmt:bind_values(key, bucket.count, bucket.reset)
+    stmt:step()
+    stmt:finalize()
   elseif RL_STATE_FILE then
     local f = io.open(RL_STATE_FILE, "w")
     if f then

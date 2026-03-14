@@ -75,9 +75,25 @@ local SCHEMAS = {
     properties = {
       version = { type = "string", minLength = 1, maxLength = 128 },
       metadata = { type = "object" },
-      flags = { type = "object" },
+      flags = {
+        type = "object",
+        properties = {
+          cors = { type = "boolean" },
+          immutable = { type = "boolean" },
+          allowUploads = { type = "boolean" },
+          ttlSeconds = { type = "number" },
+        },
+      },
       region = { type = "string", enum = { "eu", "us", "apac" } },
       tier = { type = "string", enum = { "dev", "staging", "prod" } },
+      policies = {
+        type = "object",
+        properties = {
+          allowAnonymousRead = { type = "boolean" },
+          allowAnonymousWrite = { type = "boolean" },
+          auditLevel = { type = "string", enum = { "none", "basic", "full" } },
+        },
+      },
     },
   },
 }

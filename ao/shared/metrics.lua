@@ -10,6 +10,7 @@ local FLUSH_INTERVAL = tonumber(os.getenv("METRICS_FLUSH_INTERVAL_SEC") or "0")
 local counters = {}
 local since_flush = 0
 local last_flush = os.time()
+local last_tick = os.time()
 
 local function ensure_dir(path)
   local dir = path:match("(.+)/[^/]+$")
@@ -44,11 +45,13 @@ function Metrics.inc(name, value)
 end
 
 function Metrics.tick()
-  if FLUSH_INTERVAL > 0 and (os.time() - last_flush) >= FLUSH_INTERVAL then
+  local now = os.time()
+  if FLUSH_INTERVAL > 0 and (now - last_flush) >= FLUSH_INTERVAL then
     Metrics.flush_prom()
-    last_flush = os.time()
+    last_flush = now
     since_flush = 0
   end
+  last_tick = now
 end
 
 function Metrics.flush_prom()
