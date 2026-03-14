@@ -88,16 +88,11 @@ tests/             # integration, message-contracts, snapshots, security
 - Fuzz tests: set `RUN_FUZZ=1` to run `scripts/verify/fuzz.lua` during preflight.
 - Production baseline env: see `ops/env.prod.example` (strict signatures, sqlite rate-limit, Prometheus path).
 
-## Table presets (generated from blackcat-database)
-- Presets live in `config/table-presets.json` (built from `blackcat-database/views-library`).
-- Vendored YAML source of truth is now in `schemas/presets/` (copied from `views-library/*`). Edit there if you need local tweaks; re-export bundles from this copy.
-- Canonical, engine-neutral copies derived from Postgres live in `schemas/presets/canonical/` to avoid MySQL/PG duplication when bundling for AO.
-- Canonical table definitions (columns, types, constraints) are split per table in `schemas/canonical-db/tables/` with the map in `schemas/canonical-db/schema-map.yaml`.
-- WeaveDB-ready collections live in `schemas/weavedb/collections/*.yaml` (JSON Schema + indexes); manifest v3 adds a `weavedb` section.
-- Compact runtime manifest is auto-generated via `scripts/setup/make_schema_manifest.py` to `schemas/manifest/schema-manifest.json` (no SQL bodies, hashes included). Bundles use this manifest + `config/table-presets.json`.
-- Helper: `lua scripts/setup/table_presets.lua list` or `suggest "commerce analytics"`, `dump core-observability`.
-- Registry config accepts `tableProfile` (enum) to bind a site to a preset; invalid IDs are rejected by the schema.
-- Registry config can also carry `schemaManifestTx` + `schemaHash` (sha256 of the bundle) when you publish the schema bundle to Arweave; this keeps the canonical schema decentralized.
+## Schemas (WeaveDB-first)
+- Canonical table definitions (columns, types, constraints) jsou po tabulkách v `schemas/canonical-db/tables/` a mapě `schemas/canonical-db/schema-map.yaml`.
+- WeaveDB-ready kolekce v `schemas/weavedb/collections/*.yaml` (JSON Schema + indexes); manifest v3 má sekci `weavedb`.
+- Manifest v3 generuj: `python3 scripts/setup/make_schema_manifest.py` → `schemas/manifest/schema-manifest.json`.
+- Bundle (manifest only) vytvoř: `./scripts/setup/build_schema_bundle.sh`; vezmi SHA a ulož do `schemaHash`/`schemaManifestTx` po publikaci na Arweave.
 
 ## License
 Blackcat Darkmesh AO Proprietary License (see `LICENSE`). External contributions require written permission from Black Cat Academy s. r. o.
