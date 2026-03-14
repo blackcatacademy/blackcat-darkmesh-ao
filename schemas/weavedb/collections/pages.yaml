@@ -1,0 +1,15 @@
+format: weavedb-collection/v1
+name: pages
+schema:
+  type: object
+  required: [id, site_id, path, content, updated_at]
+  properties:
+    id:         { type: string }
+    site_id:    { type: string }
+    path:       { type: string }
+    title:      { type: string }
+    content:    { type: object }
+    locale:     { type: string }
+    updated_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, path]

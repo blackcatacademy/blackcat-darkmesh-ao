@@ -1,0 +1,13 @@
+format: weavedb-collection/v1
+name: users
+schema:
+  type: object
+  required: [id, created_at]
+  properties:
+    id:         { type: string }
+    email_hash: { type: string }
+    status:     { type: string, enum: [active, disabled, invited] }
+    roles:      { type: array, items: { type: string } }
+    created_at: { type: string, format: date-time }
+indexes:
+  - fields: [email_hash]

@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: routes
+schema:
+  type: object
+  required: [id, site_id, path, target_id, target_type]
+  properties:
+    id:          { type: string }
+    site_id:     { type: string }
+    path:        { type: string }
+    target_id:   { type: string }
+    target_type: { type: string, enum: [page, product, category, external] }
+    updated_at:  { type: string, format: date-time }
+indexes:
+  - fields: [site_id, path]

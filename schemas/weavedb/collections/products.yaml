@@ -1,0 +1,16 @@
+format: weavedb-collection/v1
+name: products
+schema:
+  type: object
+  required: [id, site_id, sku, name, price, currency]
+  properties:
+    id:       { type: string }
+    site_id:  { type: string }
+    sku:      { type: string }
+    name:     { type: string }
+    price:    { type: number }
+    currency: { type: string, minLength: 3, maxLength: 3 }
+    tags:     { type: array, items: { type: string } }
+    updated_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, sku]

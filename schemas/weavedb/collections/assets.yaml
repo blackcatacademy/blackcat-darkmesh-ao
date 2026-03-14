@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: assets
+schema:
+  type: object
+  required: [id, site_id, kind, uri, created_at]
+  properties:
+    id:         { type: string }
+    site_id:    { type: string }
+    kind:       { type: string, enum: [image, video, doc, html, json, other] }
+    uri:        { type: string }
+    hash:       { type: string }
+    created_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, kind]

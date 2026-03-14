@@ -1,0 +1,11 @@
+format: weavedb-collection/v1
+name: roles
+schema:
+  type: object
+  required: [id]
+  properties:
+    id:    { type: string }
+    name:  { type: string }
+    scope: { type: string }
+indexes:
+  - fields: [id]

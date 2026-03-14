@@ -1,0 +1,16 @@
+format: weavedb-collection/v1
+name: orders
+schema:
+  type: object
+  required: [id, site_id, user_id, status, total, currency, created_at]
+  properties:
+    id:         { type: string }
+    site_id:    { type: string }
+    user_id:    { type: string }
+    status:     { type: string, enum: [pending, paid, completed, failed, cancelled, refunded] }
+    total:      { type: number }
+    currency:   { type: string, minLength: 3, maxLength: 3 }
+    items:      { type: array, items: { type: object } }
+    created_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, user_id, status]

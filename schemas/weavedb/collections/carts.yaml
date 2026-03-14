@@ -1,0 +1,14 @@
+format: weavedb-collection/v1
+name: carts
+schema:
+  type: object
+  required: [id, site_id, user_id, created_at]
+  properties:
+    id:         { type: string }
+    site_id:    { type: string }
+    user_id:    { type: string }
+    items:      { type: array, items: { type: object } }
+    currency:   { type: string, minLength: 3, maxLength: 3 }
+    created_at: { type: string, format: date-time }
+indexes:
+  - fields: [site_id, user_id]

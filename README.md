@@ -92,7 +92,8 @@ tests/             # integration, message-contracts, snapshots, security
 - Presets live in `config/table-presets.json` (built from `blackcat-database/views-library`).
 - Vendored YAML source of truth is now in `schemas/presets/` (copied from `views-library/*`). Edit there if you need local tweaks; re-export bundles from this copy.
 - Canonical, engine-neutral copies derived from Postgres live in `schemas/presets/canonical/` to avoid MySQL/PG duplication when bundling for AO.
-- Canonical table definitions (columns, types, constraints) are in `schemas/canonical-db/` (`schema-defs.yaml`, `schema-map.yaml`) sourced from Postgres; use these as the single DB schema reference.
+- Canonical table definitions (columns, types, constraints) are split per table in `schemas/canonical-db/tables/` with the map in `schemas/canonical-db/schema-map.yaml`.
+- WeaveDB-ready collections live in `schemas/weavedb/collections/*.yaml` (JSON Schema + indexes); manifest v3 adds a `weavedb` section.
 - Compact runtime manifest is auto-generated via `scripts/setup/make_schema_manifest.py` to `schemas/manifest/schema-manifest.json` (no SQL bodies, hashes included). Bundles use this manifest + `config/table-presets.json`.
 - Helper: `lua scripts/setup/table_presets.lua list` or `suggest "commerce analytics"`, `dump core-observability`.
 - Registry config accepts `tableProfile` (enum) to bind a site to a preset; invalid IDs are rejected by the schema.

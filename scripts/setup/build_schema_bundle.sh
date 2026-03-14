@@ -8,10 +8,10 @@ mkdir -p "$OUT_DIR"
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 ARCHIVE="$OUT_DIR/schema-bundle-$TS.tar.gz"
 
-# Re-generate compact manifest
+# Re-generate compact manifest (v3) from WeaveDB collections
 python3 "$ROOT/scripts/setup/make_schema_manifest.py"
 
-# Bundle compact manifest + preset catalog (no SQL bodies)
+# Bundle manifest + preset catalog only (no SQL bodies, no view metadata)
 tar -czf "$ARCHIVE" -C "$ROOT" schemas/manifest/schema-manifest.json config/table-presets.json
 SHA="$(sha256sum "$ARCHIVE" | awk '{print $1}')"
 
