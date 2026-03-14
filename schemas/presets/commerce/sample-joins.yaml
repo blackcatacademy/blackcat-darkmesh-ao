@@ -1,0 +1,23 @@
+Views:
+  sample_orders_with_user:
+    create: |-
+      CREATE OR REPLACE VIEW vw_sample_orders_with_user AS
+      SELECT
+        o.id,
+        o.tenant_id,
+        o.user_id,
+        u.email_hash,
+        o.status,
+        o.total_amount,
+        o.currency,
+        o.created_at
+      FROM orders o
+      LEFT JOIN users u ON u.id = o.user_id;
+    Requires:
+      - orders
+      - users
+    Tags:
+      - commerce
+      - reporting
+    Owner: blackcat-commerce
+FormatVersion: 1.1

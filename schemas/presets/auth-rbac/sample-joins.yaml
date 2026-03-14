@@ -1,0 +1,29 @@
+Views:
+  sample_rbac_user_permissions_effective:
+    create: |-
+      -- Sample: effective permissions with minimal columns (MySQL-style syntax)
+      CREATE OR REPLACE VIEW vw_sample_rbac_effective_permissions AS
+      SELECT
+        ur.user_id,
+        rp.permission_id,
+        rp.scope,
+        'allow' AS effect
+      FROM rbac_user_roles ur
+      JOIN rbac_role_permissions rp ON rp.role_id = ur.role_id AND rp.effect = 'allow'
+      UNION
+      SELECT
+        up.user_id,
+        up.permission_id,
+        up.scope,
+        up.effect
+      FROM rbac_user_permissions up;
+    Requires:
+      - rbac_user_roles
+      - rbac_role_permissions
+      - rbac_user_permissions
+    Tags:
+      - auth
+      - rbac
+      - analytics
+    Owner: blackcat-auth
+FormatVersion: 1.1
