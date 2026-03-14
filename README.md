@@ -111,6 +111,7 @@ Handy CLI helpers:
 - List collections: `python scripts/setup/schema_helper.py list`
 - Suggest presets from prompt: `python scripts/setup/schema_helper.py suggest --prompt "ebook shop with subscriptions"`
 - Export bundle with presets: `python scripts/setup/schema_helper.py export --presets core,commerce,content,ebook,subscriptions --out dev/schema-bundles/custom.tar.gz`
+- Wizard for a site-specific bundle (prompts for slug/presets): run `python scripts/start.py` and choose option **4**.
 - Dependency check: `lua scripts/verify/deps_check.lua`
 
 **Production reminders**

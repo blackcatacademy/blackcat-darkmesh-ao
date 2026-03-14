@@ -158,6 +158,35 @@ def do_export():
     )
 
 
+def do_wizard():
+    print(f"{C.BOLD}{grad('Site bundle wizard')}{C.RESET}")
+    site = input("Site slug (letters/digits/hyphen): ").strip() or "site"
+    default_presets = "core,content,commerce"
+    presets = input(f"Presets [{default_presets}]: ").strip() or default_presets
+    extra = input("Extra collections (comma, optional): ").strip()
+    if extra:
+        presets = presets + "," + extra
+
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    out = BUNDLES_DIR / f"schema-bundle-{site}-{ts}.tar.gz"
+    print(f"{C.DIM}Exporting to {out}{C.RESET}")
+    run(
+        [
+            sys.executable,
+            str(SCHEMA_HELPER),
+            "export",
+            "--presets",
+            presets,
+            "--out",
+            str(out),
+        ]
+    )
+    print(f"\nDeploy with arkb (PowerShell):")
+    print(f'  npx arkb deploy "{out.as_posix()}" --content-type application/gzip')
+    print(f"Deploy (Linux/WSL):")
+    print(f"  npx arkb deploy {out.as_posix()} --content-type application/gzip")
+
+
 def do_deps_check():
     if not DEPS_CHECK.exists():
         print(f"{C.YELLOW}!{C.RESET} deps_check.lua not found at {DEPS_CHECK}")
@@ -172,7 +201,8 @@ def menu():
         "1": ("List collections", do_list),
         "2": ("Suggest presets from prompt", do_suggest),
         "3": ("Export bundle (choose presets)", do_export),
-        "4": ("Run deps check (lua libs)", do_deps_check),
+        "4": ("Wizard: make site bundle", do_wizard),
+        "5": ("Run deps check (lua libs)", do_deps_check),
         "0": ("Exit", None),
     }
     print("")
