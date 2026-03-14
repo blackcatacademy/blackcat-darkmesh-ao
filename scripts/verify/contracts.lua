@@ -11,6 +11,14 @@ local function assert_truthy(val, label)
   if not val then error(label .. " expected truthy") end
 end
 
+local function assert_falsy(val, label)
+  if val then error(label .. " expected falsy") end
+end
+
+local function assert_code(resp, code, label)
+  assert_eq(resp.code, code, label .. " code")
+end
+
 local function with_req(fields)
   fields["Request-Id"] = fields["Request-Id"] or tostring(math.random())
   return fields
@@ -43,6 +51,22 @@ do
   assert_eq(page.payload.version, "v2", "page version active")
 end
 
+-- Site edge cases
+do
+  local site = require("ao.site.process")
+  local missing = site.route(with_req({ Action = "ResolveRoute", ["Site-Id"] = "site-1" })) -- missing Path
+  assert_eq(missing.status, "ERROR", "missing field status")
+  assert_code(missing, "INVALID_INPUT", "missing field code")
+
+  local notfound = site.route(with_req({ Action = "ResolveRoute", ["Site-Id"] = "site-1", Path = "/nope" }))
+  assert_eq(notfound.status, "ERROR", "resolve unknown status")
+  assert_code(notfound, "NOT_FOUND", "resolve unknown code")
+
+  local publish_empty = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-2", Version = "v1" }))
+  assert_eq(publish_empty.status, "OK", "publish empty status")
+  assert_falsy(publish_empty.payload.manifestTx, "publish empty manifest")
+end
+
 -- Catalog tests
 do
   local catalog = require("ao.catalog.process")
@@ -61,6 +85,13 @@ do
   local paged = catalog.route(with_req({ Action = "ListCategoryProducts", ["Site-Id"] = "site-1", ["Category-Id"] = "cat-1", Page = 2, PageSize = 2 }))
   assert_eq(paged.payload.page, 2, "second page number")
   assert_eq(#paged.payload.items, 2, "second page size")
+
+  local paged_out = catalog.route(with_req({ Action = "ListCategoryProducts", ["Site-Id"] = "site-1", ["Category-Id"] = "cat-1", Page = 10, PageSize = 10 }))
+  assert_eq(#paged_out.payload.items, 0, "empty page")
+
+  local missing = catalog.route(with_req({ Action = "GetProduct", ["Site-Id"] = "site-1", Sku = "nope" }))
+  assert_eq(missing.status, "ERROR", "missing product status")
+  assert_code(missing, "NOT_FOUND", "missing product code")
 end
 
 -- Access tests
@@ -74,6 +105,23 @@ do
   local asset = access.route(with_req({ Action = "GetProtectedAssetRef", Asset = "asset-1" }))
   assert_eq(asset.status, "OK", "get asset ref")
   assert_eq(asset.payload.ref, "ar://tx123", "asset ref matches")
+
+  access.route(with_req({ Action = "RevokeEntitlement", Subject = "user-1", Asset = "asset-1" }))
+  local check2 = access.route(with_req({ Action = "HasEntitlement", Subject = "user-1", Asset = "asset-1" }))
+  assert_eq(check2.status, "OK", "has entitlement revoked status")
+  assert_falsy(check2.payload.hasEntitlement, "entitlement revoked flag")
+
+  local missing_asset = access.route(with_req({ Action = "GetProtectedAssetRef", Asset = "asset-missing" }))
+  assert_eq(missing_asset.status, "ERROR", "missing asset ref status")
+  assert_code(missing_asset, "NOT_FOUND", "missing asset ref code")
+end
+
+-- Unknown action test
+do
+  local registry = require("ao.registry.process")
+  local resp = registry.route(with_req({ Action = "NopeAction" }))
+  assert_eq(resp.status, "ERROR", "unknown action status")
+  assert_code(resp, "UNKNOWN_ACTION", "unknown action code")
 end
 
 print("contract tests passed")
