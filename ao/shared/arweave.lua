@@ -69,6 +69,13 @@ local function http_post(serialized, tx)
   return status, response_path
 end
 
+local function signer_exists()
+  if not SIGNER or SIGNER == "" then return true end
+  local f = io.open(SIGNER, "r")
+  if f then f:close(); return true end
+  return false
+end
+
 local function fallback_checksum(str)
   local sum = 0
   for i = 1, #str do
@@ -172,6 +179,18 @@ if MODE == "http" then
     local hash = sha256(serialized) or fallback_checksum(serialized)
     local httpStatus, response_path
     if HTTP_REAL and ENDPOINT and has_curl() then
+      if not signer_exists() then
+        log_request(tx, {
+          endpoint = ENDPOINT or "<missing-endpoint>",
+          apiKey = API_KEY and "<redacted>",
+          signer = SIGNER or "<missing>",
+          timeout = HTTP_TIMEOUT,
+          body = payload,
+          simulated = true,
+          error = "signer_missing"
+        }, hash)
+        return tx, hash
+      end
       httpStatus, response_path = http_post(serialized, tx)
     end
     log_request(tx, {

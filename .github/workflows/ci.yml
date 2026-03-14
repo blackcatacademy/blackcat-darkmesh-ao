@@ -21,3 +21,10 @@ jobs:
 
       - name: Preflight (schemas + Lua syntax)
         run: scripts/verify/preflight.sh
+
+      - name: Arweave health (optional)
+        if: env.ARWEAVE_HTTP_ENDPOINT != ''
+        env:
+          ARWEAVE_HTTP_ENDPOINT: ${{ env.ARWEAVE_HTTP_ENDPOINT }}
+          ARWEAVE_HTTP_TIMEOUT: 5
+        run: bash scripts/verify/arweave_health.sh

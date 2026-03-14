@@ -61,6 +61,7 @@ tests/             # integration, message-contracts, snapshots, security
   - `ARWEAVE_HTTP_ENDPOINT`, `ARWEAVE_HTTP_API_KEY`, `ARWEAVE_HTTP_SIGNER` — only logged in http mode.
   - `ARWEAVE_HTTP_TIMEOUT` seconds; requests are simulated/offline but logged with this value.
   - `ARWEAVE_HTTP_REAL=1` enables actual HTTP POST via curl (still logs responses); keep unset for offline.
+  - `ARWEAVE_HTTP_SIGNER_HEADER` custom header name for signer path (default `X-Arweave-Signer`); signer file must exist when `*_REAL=1`.
 - Audit config: `AUDIT_LOG_DIR` (default `arweave/manifests`), `AUDIT_MAX_RECORDS` (default 1000 in-memory).
   - `AUDIT_FORMAT` (`line`|`ndjson`), `AUDIT_ROTATE_MAX` bytes for log rotation.
   - `AUDIT_RETAIN_FILES` rotated log files per stream (default 10).
