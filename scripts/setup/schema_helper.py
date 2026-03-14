@@ -40,13 +40,13 @@ def banner():
         print("=== WeaveDB Schema Helper ===")
         return
     art = [
-        "╔═══════════════════════════════════════════╗",
-        "║   ◉  WEAVEDB SCHEMA HELPER  ·  v3 bundles ║",
-        "╚═══════════════════════════════════════════╝",
+        "╔════════════════════════════════════════════╗",
+        "║   ◉  WEAVEDB SCHEMA HELPER  ·  v3 bundles  ║",
+        "╚════════════════════════════════════════════╝",
     ]
-    colors = [C.PINK, C.CYAN, C.BLUE]
+    palette = [C.PINK, C.CYAN, C.BLUE, C.MAGENTA]
     for i, line in enumerate(art):
-        print(colors[i % len(colors)] + line + C.RESET)
+        print(palette[i % len(palette)] + line + C.RESET)
 
 
 def accent(text):
@@ -57,6 +57,13 @@ def accent(text):
     for i, ch in enumerate(text):
         out.append(palette[i % len(palette)] + ch)
     return "".join(out) + C.RESET
+
+
+def gradient(text):
+    palette = [C.ORANGE, C.PINK, C.MAGENTA, C.CYAN, C.GREEN]
+    if not USE_COLOR:
+        return text
+    return "".join(palette[i % len(palette)] + ch for i, ch in enumerate(text)) + C.RESET
 
 ROOT = Path(__file__).resolve().parents[2]
 COLL_DIR = ROOT / "schemas" / "weavedb" / "collections"
@@ -148,10 +155,10 @@ def build_manifest_subset(collections: dict, chosen: set) -> dict:
 def cmd_list(collections):
     banner()
     all_names = sorted(collections)
-    print(f"{C.BOLD}{accent('Collections')} ({len(all_names)} total){C.RESET}")
+    print(f"{C.BOLD}{gradient('Collections')} ({len(all_names)} total){C.RESET}")
     for name in all_names:
         print(f"  {C.CYAN}●{C.RESET} {name}")
-    print(f"\n{C.BOLD}{accent('Presets')}{C.RESET}")
+    print(f"\n{C.BOLD}{gradient('Presets')}{C.RESET}")
     for pid, meta in PRESETS.items():
         color = C.MAGENTA if pid != "full" else C.ORANGE
         print(f"  {color}{pid:12s}{C.RESET} {meta['description']}")
@@ -194,8 +201,17 @@ def cmd_export(collections, presets, out_path: Path):
     temp_manifest = ROOT / "schemas" / "manifest" / "schema-manifest.tmp.json"
     temp_manifest.write_text(json.dumps(manifest, separators=(",", ":")))
 
+    spin = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    idx = 0
     with tarfile.open(out_path, "w:gz") as tar:
+        # tiny spinner effect
+        if USE_COLOR:
+            sys.stdout.write(f"{C.DIM}{spin[idx]} building bundle...{C.RESET}\r")
+            sys.stdout.flush()
         tar.add(temp_manifest, arcname="schemas/manifest/schema-manifest.json")
+        if USE_COLOR:
+            sys.stdout.write(" " * 40 + "\r")
+            sys.stdout.flush()
 
     sha = calc_sha256(out_path)
     temp_manifest.unlink()
