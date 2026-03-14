@@ -145,11 +145,11 @@ function handlers.UpsertProduct(msg)
   if msg.Payload.sku ~= msg.Sku then
     return codec.error("INVALID_INPUT", "Payload sku must match Sku field", { field = "Sku" })
   end
-  local ok_schema, schema_err = schema.validate("product", msg.Payload)
-  if not ok_schema then return codec.error("INVALID_INPUT", "Payload failed schema", { errors = schema_err }) end
   local payload_len = validation.estimate_json_length(msg.Payload)
   local ok_size, err_size = validation.check_size(payload_len, MAX_PAYLOAD_BYTES, "Payload")
   if not ok_size then return codec.error("INVALID_INPUT", err_size, { field = "Payload" }) end
+  local ok_schema, schema_err = schema.validate("product", msg.Payload)
+  if not ok_schema then return codec.error("INVALID_INPUT", "Payload failed schema", { errors = schema_err }) end
   local key = ids.product_key(msg["Site-Id"], msg.Sku)
   state.products[key] = { payload = msg.Payload, version = msg.Version }
   audit.record("catalog", "UpsertProduct", msg, nil, { sku = msg.Sku })

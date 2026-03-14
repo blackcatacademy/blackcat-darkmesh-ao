@@ -156,11 +156,11 @@ function handlers.PutDraft(msg)
   -- normalize content against schema expectations
   if not msg.Content.id then msg.Content.id = msg["Page-Id"] end
   if not msg.Content.blocks then msg.Content.blocks = {} end
-  local ok_schema, schema_err = schema.validate("page", msg.Content)
-  if not ok_schema then return codec.error("INVALID_INPUT", "Content failed schema", { errors = schema_err }) end
   local content_len = validation.estimate_json_length(msg.Content)
   local ok_size, err_size = validation.check_size(content_len, MAX_CONTENT_BYTES, "Content")
   if not ok_size then return codec.error("INVALID_INPUT", err_size, { field = "Content" }) end
+  local ok_schema, schema_err = schema.validate("page", msg.Content)
+  if not ok_schema then return codec.error("INVALID_INPUT", "Content failed schema", { errors = schema_err }) end
   local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], "draft")
   state.drafts[key] = { content = msg.Content, updatedAt = os.date("!%Y-%m-%dT%H:%M:%SZ") }
   return codec.ok({ draftId = key })

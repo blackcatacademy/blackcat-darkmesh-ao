@@ -19,6 +19,9 @@ local HTTP_SIGNER_HEADER = os.getenv("ARWEAVE_HTTP_SIGNER_HEADER") or "X-Arweave
 local HTTP_RETRIES = tonumber(os.getenv("ARWEAVE_HTTP_RETRIES") or "3")
 local HTTP_BACKOFF_MS = tonumber(os.getenv("ARWEAVE_HTTP_BACKOFF_MS") or "200")
 local MAX_MANIFEST_BYTES = tonumber(os.getenv("ARWEAVE_MAX_MANIFEST_BYTES") or "262144") -- 256 KiB
+local HTTP_MAX_BODY = tonumber(os.getenv("ARWEAVE_HTTP_MAX_BODY") or "1048576") -- 1 MiB
+local EXPECT_RESPONSE_HASH = os.getenv("ARWEAVE_EXPECT_RESPONSE_HASH")
+local FORCE_ERROR = os.getenv("ARWEAVE_FORCE_ERROR") == "1"
 
 local function next_tx()
   counter = counter + 1
@@ -206,7 +209,9 @@ if MODE == "http" then
     end
     local hash = sha256(serialized) or fallback_checksum(serialized)
     local httpStatus, response_path
-    if HTTP_REAL and ENDPOINT and has_curl() and not (os.getenv("ARWEAVE_HTTP_DRYRUN") == "1") then
+    if FORCE_ERROR then
+      httpStatus = 500
+    elseif HTTP_REAL and ENDPOINT and has_curl() and not (os.getenv("ARWEAVE_HTTP_DRYRUN") == "1") then
       if not signer_exists() then
         log_request(tx, {
           endpoint = ENDPOINT or "<missing-endpoint>",
@@ -233,12 +238,18 @@ if MODE == "http" then
         f:close()
         if #body == 0 then
           log_request(tx, { warning = "empty_response" })
+        elseif HTTP_MAX_BODY and #body > HTTP_MAX_BODY then
+          log_request(tx, { error = "response_too_large", size = #body })
+          return nil, "http_response_too_large"
         else
           local resp_hash = sha256(body)
           if not resp_hash then
             log_request(tx, { warning = "response_hash_failed" })
           else
             log_request(tx, { responseHash = resp_hash })
+            if EXPECT_RESPONSE_HASH and resp_hash ~= EXPECT_RESPONSE_HASH then
+              return nil, "response_hash_mismatch"
+            end
           end
         end
       end

@@ -3,7 +3,7 @@
 -- uses that; otherwise falls back to the embedded validator below.
 
 local Schema = {}
-local USE_PY = os.getenv("SCHEMA_VALIDATOR") == "python"
+local SCHEMA_MODE = os.getenv("SCHEMA_VALIDATOR") or "auto" -- auto|python|embedded
 
 -- Schemas embedded as Lua tables (converted from schemas/*.json)
 local SCHEMAS = {
@@ -55,9 +55,27 @@ local SCHEMAS = {
     type = "object",
     required = { "subject", "asset" },
     properties = {
-      subject = { type = "string" },
-      asset = { type = "string" },
-      policy = { type = "string" },
+      subject = { type = "string", minLength = 1, maxLength = 128 },
+      asset = { type = "string", minLength = 1, maxLength = 256 },
+      policy = { type = "string", minLength = 1, maxLength = 128 },
+    },
+  },
+  accessAsset = {
+    type = "object",
+    required = { "asset", "ref" },
+    properties = {
+      asset = { type = "string", minLength = 1, maxLength = 256 },
+      ref = { type = "string", minLength = 1, maxLength = 2048 },
+      visibility = { type = "string", enum = { "protected", "public" } }
+    },
+  },
+  registryConfig = {
+    type = "object",
+    required = {},
+    properties = {
+      version = { type = "string", minLength = 1, maxLength = 128 },
+      metadata = { type = "object" },
+      flags = { type = "object" },
     },
   },
 }
@@ -149,7 +167,7 @@ local function validate_against(schema, value, path, errors)
 end
 
 function Schema.validate(schema_name, value)
-  if USE_PY then
+  if SCHEMA_MODE ~= "embedded" then
     local ok, err = Schema.validate_python(schema_name, value)
     if ok ~= nil then return ok, err end -- nil means fallback to embedded
   end
@@ -167,6 +185,10 @@ end
 
 -- Python/jsonschema validator (optional). Returns nil if not usable.
 function Schema.validate_python(schema_name, value)
+  local has_py = os.execute("python3 -c \"import jsonschema\" >/dev/null 2>&1")
+  if has_py ~= true and has_py ~= 0 then
+    return nil, "python_jsonschema_missing"
+  end
   local schema_path = "schemas/" .. schema_name .. ".schema.json"
   local f = io.open(schema_path, "r")
   if not f then return nil, "schema_not_found" end
@@ -202,12 +224,15 @@ function Schema.validate_python(schema_name, value)
   end
   jf:write(json_encode(value))
   jf:close()
-  local cmd = string.format("python3 - <<'PY'\nimport json,sys\ntry:\n import jsonschema\nexcept ImportError:\n sys.exit(2)\nwith open(%q) as f: schema=json.load(f)\nwith open(%q) as f: inst=json.load(f)\ntry:\n jsonschema.validate(inst, schema)\n sys.exit(0)\nexcept jsonschema.ValidationError as e:\n print(e.message)\n sys.exit(1)\nPY", schema_path, tmp)
+  local cmd = string.format("python3 - <<'PY'\nimport json,sys,jsonschema\nwith open(%q) as f: schema=json.load(f)\nwith open(%q) as f: inst=json.load(f)\ntry:\n jsonschema.validate(inst, schema)\n sys.exit(0)\nexcept jsonschema.ValidationError:\n sys.exit(1)\nPY", schema_path, tmp)
   local ok = os.execute(cmd)
   os.remove(tmp)
-  if ok == 0 then return true end
-  if ok == 2 then return nil, "python_jsonschema_missing" end
-  return false, { "python_validator_failed" }
+  if ok == 0 or ok == true then return true end
+  -- If validation fails, treat as schema error; otherwise fallback
+  if ok == 256 or ok == false then
+    return false, { "python_validator_failed" }
+  end
+  return nil, "python_validator_unavailable"
 end
 
 return Schema

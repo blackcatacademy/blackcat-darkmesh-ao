@@ -6,6 +6,7 @@ local ids = require("ao.shared.ids")
 local auth = require("ao.shared.auth")
 local idem = require("ao.shared.idempotency")
 local audit = require("ao.shared.audit")
+local schema = require("ao.shared.schema")
 local metrics = require("ao.shared.metrics")
 
 local handlers = {}
@@ -78,6 +79,8 @@ function handlers.GrantEntitlement(msg)
   if not ok_len_asset then return codec.error("INVALID_INPUT", err_asset, { field = "Asset" }) end
   local ok_len_policy, err_policy = validation.check_length(msg.Policy, 64, "Policy")
   if not ok_len_policy then return codec.error("INVALID_INPUT", err_policy, { field = "Policy" }) end
+  local ok_schema, schema_err = schema.validate("entitlement", { subject = msg.Subject, asset = msg.Asset, policy = msg.Policy })
+  if not ok_schema then return codec.error("INVALID_INPUT", "Policy failed schema", { errors = schema_err }) end
   local policy_size = validation.estimate_json_length(msg.Policy)
   local ok_size, err_size = validation.check_size(policy_size, MAX_POLICY_BYTES, "Policy")
   if not ok_size then return codec.error("INVALID_INPUT", err_size, { field = "Policy" }) end

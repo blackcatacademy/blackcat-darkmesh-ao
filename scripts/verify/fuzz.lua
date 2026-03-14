@@ -6,6 +6,7 @@ local catalog = require("ao.catalog.process")
 local site = require("ao.site.process")
 local ar = require("ao.shared.arweave")
 local audit = require("ao.shared.audit")
+local auth = require("ao.shared.auth")
 
 local function with_req(fields)
   fields["Request-Id"] = fields["Request-Id"] or tostring(math.random())
@@ -44,6 +45,55 @@ do
   if tx ~= nil or err ~= "too_large" then
     error("expected too_large manifest rejection")
   end
+end
+
+-- Force Arweave HTTP error via env flag
+do
+  package.loaded["ao.shared.arweave"] = nil
+  os.setenv("ARWEAVE_MODE", "http")
+  os.setenv("ARWEAVE_HTTP_REAL", "1")
+  os.setenv("ARWEAVE_FORCE_ERROR", "1")
+  local ar2 = require("ao.shared.arweave")
+  local tx, err = ar2.put_snapshot({ dummy = "ok" })
+  if err ~= "http_error" then
+    error("expected http_error with force flag")
+  end
+  os.setenv("ARWEAVE_FORCE_ERROR", nil)
+  package.loaded["ao.shared.arweave"] = nil
+end
+
+-- Auth ed25519 verification round-trip
+do
+  -- generate keypair
+  os.execute("openssl genpkey -algorithm ed25519 -out /tmp/ao-ed.key >/dev/null 2>&1")
+  os.execute("openssl pkey -in /tmp/ao-ed.key -pubout -out /tmp/ao-ed.pub >/dev/null 2>&1")
+  local target = "PublishVersion|site-x|rid-x"
+  os.execute(string.format("printf %%s %q > /tmp/ao-msg", target))
+  os.execute("openssl pkeyutl -sign -inkey /tmp/ao-ed.key -rawin -in /tmp/ao-msg -out /tmp/ao-sig >/dev/null 2>&1")
+  local sig_hex = io.popen("xxd -p /tmp/ao-sig"):read("*l")
+  os.setenv("AUTH_SIGNATURE_TYPE", "ed25519")
+  os.setenv("AUTH_SIGNATURE_PUBLIC", "/tmp/ao-ed.pub")
+  os.setenv("AUTH_REQUIRE_SIGNATURE", "1")
+  package.loaded["ao.shared.auth"] = nil
+  local auth2 = require("ao.shared.auth")
+  local ok, err = auth2.require_signature({ Action = "PublishVersion", ["Site-Id"] = "site-x", ["Request-Id"] = "rid-x", Signature = sig_hex })
+  if not ok then error("ed25519 signature should verify: " .. tostring(err)) end
+  local ok2, err2 = auth2.require_signature({ Action = "PublishVersion", ["Site-Id"] = "site-x", ["Request-Id"] = "rid-x", Signature = "deadbeef" })
+  if ok2 then error("bad signature should fail") end
+  os.setenv("AUTH_REQUIRE_SIGNATURE", nil)
+  os.setenv("AUTH_SIGNATURE_TYPE", nil)
+  os.setenv("AUTH_SIGNATURE_PUBLIC", nil)
+  package.loaded["ao.shared.auth"] = nil
+end
+
+-- Concurrent publish/version set simulation
+do
+  local siteId = "conc-site"
+  local site = require("ao.site.process")
+  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = siteId, ["Page-Id"] = "p1", Content = { title = "T" }, ["Actor-Role"] = "editor" }))
+  local ok1 = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = siteId, Version = "v1", ["Actor-Role"] = "publisher" }))
+  local conflict = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = siteId, Version = "v2", ExpectedVersion = "old", ["Actor-Role"] = "publisher" }))
+  if conflict.status ~= "ERROR" then error("Expected VERSION_CONFLICT on second publish") end
 end
 
 -- Audit rotation/prune: set tiny rotate and emit many records

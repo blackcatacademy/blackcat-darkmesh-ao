@@ -8,6 +8,7 @@ local idem = require("ao.shared.idempotency")
 local ids = require("ao.shared.ids")
 local audit = require("ao.shared.audit")
 local metrics = require("ao.shared.metrics")
+local schema = require("ao.shared.schema")
 
 local handlers = {}
 local allowed_actions = {
@@ -93,6 +94,8 @@ function handlers.RegisterSite(msg)
   if msg.Config ~= nil then
     local ok_type_cfg, err_type_cfg = validation.assert_type(msg.Config, "table", "Config")
     if not ok_type_cfg then return codec.error("INVALID_INPUT", err_type_cfg, { field = "Config" }) end
+    local ok_schema, schema_err = schema.validate("registryConfig", msg.Config)
+    if not ok_schema then return codec.error("INVALID_INPUT", "Config failed schema", { errors = schema_err }) end
   end
   local config_len = validation.estimate_json_length(config)
   local ok_size, err_size = validation.check_size(config_len, MAX_CONFIG_BYTES, "Config")
