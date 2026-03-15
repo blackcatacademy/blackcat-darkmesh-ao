@@ -198,12 +198,13 @@ function handlers.SearchCatalog(msg)
   local q = msg.Query and msg.Query:lower() or ""
   local sort = msg.Sort or "relevance"
   local results = {}
-  local facets = {
+local facets = {
     categories = {},
     availability = { available = 0, unavailable = 0 },
     price = { lt25 = 0, lt100 = 0, gte100 = 0 },
     currency = {},
     locales = {},
+    carriers = {},
   }
   local prefix = "product:" .. msg["Site-Id"] .. ":"
   for key, product in pairs(state.products) do
@@ -234,6 +235,9 @@ function handlers.SearchCatalog(msg)
         if available then facets.availability.available = facets.availability.available + 1 else facets.availability.unavailable = facets.availability.unavailable + 1 end
         if payload.categoryId then
           facets.categories[payload.categoryId] = (facets.categories[payload.categoryId] or 0) + 1
+        end
+        if payload.carrier then
+          facets.carriers[payload.carrier] = (facets.carriers[payload.carrier] or 0) + 1
         end
         local price_num = tonumber(price or 0) or 0
         if price_num < 25 then facets.price.lt25 = facets.price.lt25 + 1
