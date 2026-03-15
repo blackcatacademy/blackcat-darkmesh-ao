@@ -23,8 +23,24 @@ local function assert_status(resp, status, label)
   assert_eq(resp.status, status, label .. " status")
 end
 
+local SIG_SECRET = os.getenv("AUTH_SIGNATURE_SECRET")
+local openssl_ok, openssl = pcall(require, "openssl")
+
+local function hmac_sign(action, site_id, request_id)
+  if not (SIG_SECRET and SIG_SECRET ~= "" and openssl_ok and openssl.hmac and openssl.hex) then
+    return nil
+  end
+  local target = string.format("%s|%s|%s", action or "", site_id or "", request_id or "")
+  local raw = openssl.hmac.digest("sha256", target, SIG_SECRET, true)
+  return openssl.hex(raw)
+end
+
 local function with_req(fields)
   fields["Request-Id"] = fields["Request-Id"] or tostring(math.random())
+  if SIG_SECRET then
+    local sig = hmac_sign(fields.Action, fields["Site-Id"], fields["Request-Id"])
+    if sig then fields.Signature = sig end
+  end
   return fields
 end
 
