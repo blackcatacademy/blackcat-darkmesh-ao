@@ -262,6 +262,9 @@ function handlers.ApplyOrderEvent(msg)
     if ev.orderId then
       local o = state.orders[ev.orderId] or {}
       o.paymentStatus = ev.status or o.paymentStatus
+      if ev.status == "disputed" then
+        o.status = o.status or "disputed"
+      end
       o.updatedAt = os.time()
       state.orders[ev.orderId] = o
     end
