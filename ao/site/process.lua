@@ -21,6 +21,8 @@ local allowed_actions = {
   "PublishVersion",
   "ArchivePage",
   "RecordOrder",
+  "GetOrder",
+  "ListOrders",
 }
 
 local role_policy = {
@@ -29,6 +31,8 @@ local role_policy = {
   PublishVersion = { "publisher", "admin" },
   ArchivePage = { "publisher", "admin" },
   RecordOrder = { "support", "admin" },
+  GetOrder = { "support", "admin" },
+  ListOrders = { "support", "admin" },
 }
 
 -- pseudo-state for scaffolding
@@ -287,6 +291,57 @@ function handlers.RecordOrder(msg)
     totalAmount = msg.TotalAmount,
     currency = msg.Currency,
     vatRate = msg.VatRate,
+  })
+end
+
+function handlers.GetOrder(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Order-Id" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Order-Id", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local site_orders = state.orders[msg["Site-Id"]] or {}
+  local order = site_orders[msg["Order-Id"]]
+  if not order then
+    return codec.error("NOT_FOUND", "Order not found", { orderId = msg["Order-Id"] })
+  end
+  return codec.ok({
+    siteId = msg["Site-Id"],
+    orderId = msg["Order-Id"],
+    status = order.status,
+    totalAmount = order.totalAmount,
+    currency = order.currency,
+    vatRate = order.vatRate,
+    updatedAt = order.updatedAt,
+    reason = order.reason,
+  })
+end
+
+function handlers.ListOrders(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Status", "Page", "PageSize", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local page = tonumber(msg.Page or 1) or 1
+  local page_size = tonumber(msg.PageSize or 20) or 20
+  local site_orders = state.orders[msg["Site-Id"]] or {}
+  local items = {}
+  for oid, o in pairs(site_orders) do
+    if not msg.Status or msg.Status == o.status then
+      table.insert(items, { orderId = oid, status = o.status, totalAmount = o.totalAmount, currency = o.currency, vatRate = o.vatRate, updatedAt = o.updatedAt })
+    end
+  end
+  table.sort(items, function(a, b) return tostring(a.updatedAt or "") > tostring(b.updatedAt or "") end)
+  local start = (page - 1) * page_size + 1
+  local slice = {}
+  for i = start, math.min(#items, start + page_size - 1) do
+    table.insert(slice, items[i])
+  end
+  return codec.ok({
+    siteId = msg["Site-Id"],
+    total = #items,
+    page = page,
+    pageSize = page_size,
+    items = slice,
   })
 end
 

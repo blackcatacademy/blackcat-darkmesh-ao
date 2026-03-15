@@ -79,3 +79,11 @@ WantedBy=multi-user.target
 
 ## Lint/Supply Chain
 - Pin Lua rocks in your deploy image; run `luacheck`/`stylua` if available. Use `RUN_DEPS_CHECK=1` preflight to fail when critical rocks are missing.
+
+## Key rotation SOP (ed25519)
+- Schedule: rotate every 90 days or immediately on suspected compromise.
+- Generate: `openssl genpkey -algorithm ed25519 -out /secure/write-ed25519.key` and `openssl pkey -in ... -pubout -out /etc/ao/keys/write-ed25519.pub` (similarly for registry).
+- Record: store `sha256sum /etc/ao/keys/*.pub` in ops vault with date.
+- Deploy: update env (`WRITE_SIG_PUBLIC` / `AUTH_SIGNATURE_PUBLIC`) and restart services.
+- Validate: run health + signature tests; remove old pubkey only after validation.
+- Never store private keys in repo/CI; keep in secure KMS or offline.
