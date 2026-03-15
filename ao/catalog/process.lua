@@ -32,6 +32,8 @@ local GA4_MEASUREMENT_ID = os.getenv "CATALOG_GA4_MEASUREMENT_ID"
 local PAYMENT_WEBHOOK_SECRET = os.getenv "CATALOG_PAYMENT_WEBHOOK_SECRET"
 local CARRIER_WEBHOOK_SECRET = os.getenv "CATALOG_CARRIER_WEBHOOK_SECRET"
 local RETURN_LABEL_BASE = os.getenv "CATALOG_RETURN_LABEL_BASE" or CARRIER_LABEL_BASE
+local CARRIER_LABEL_API_URL = os.getenv "CATALOG_CARRIER_LABEL_API_URL"
+local CARRIER_LABEL_API_KEY = os.getenv "CATALOG_CARRIER_LABEL_API_KEY"
 local JWT_HMAC_SECRET = os.getenv "CATALOG_JWT_SECRET" or os.getenv "JWT_SECRET"
 local INVOICE_SIGN_SECRET = os.getenv "CATALOG_INVOICE_SIGN_SECRET"
 local PDF_RENDER_CMD = os.getenv "CATALOG_PDF_RENDER_CMD" or "cat" -- expects: CMD input.html output.pdf
@@ -618,7 +620,7 @@ local function build_label(carrier, service, weight)
     status = "label_created",
   }
   -- optional remote label creation
-  if CARRIER_API_URL and json_ok then
+  if CARRIER_LABEL_API_URL and json_ok then
     local payload = {
       carrier = carrier,
       service = service,
@@ -626,7 +628,22 @@ local function build_label(carrier, service, weight)
       shipmentId = shipment_id,
       weight = weight,
     }
-    http_post_json(CARRIER_API_URL .. "/label", payload)
+    local resp, err = http_post_json(CARRIER_LABEL_API_URL, payload, {
+      Authorization = CARRIER_LABEL_API_KEY and ("Bearer " .. CARRIER_LABEL_API_KEY) or nil,
+    })
+    if resp and type(resp) == "table" then
+      label.labelUrl = resp.labelUrl or label.labelUrl
+      label.tracking = resp.tracking or label.tracking
+      label.trackingUrl = resp.trackingUrl or label.trackingUrl
+    end
+  elseif CARRIER_API_URL and json_ok then
+    http_post_json(CARRIER_API_URL .. "/label", {
+      carrier = carrier,
+      service = service,
+      tracking = tracking,
+      shipmentId = shipment_id,
+      weight = weight,
+    })
   end
   return label
 end
