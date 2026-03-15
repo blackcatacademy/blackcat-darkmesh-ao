@@ -34,7 +34,7 @@ local MAX_POLICY_BYTES = tonumber(os.getenv("ACCESS_MAX_POLICY_BYTES") or "") or
 function handlers.HasEntitlement(msg)
   local ok, missing = validation.require_fields(msg, { "Subject", "Asset" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Subject", "Asset", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Subject", "Asset", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_sub, err_sub = validation.check_length(msg.Subject, 128, "Subject")
   if not ok_len_sub then return codec.error("INVALID_INPUT", err_sub, { field = "Subject" }) end
@@ -53,7 +53,7 @@ end
 function handlers.GetProtectedAssetRef(msg)
   local ok, missing = validation.require_fields(msg, { "Asset" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Asset", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Asset", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_asset, err_asset = validation.check_length(msg.Asset, 256, "Asset")
   if not ok_len_asset then return codec.error("INVALID_INPUT", err_asset, { field = "Asset" }) end
@@ -71,7 +71,7 @@ end
 function handlers.GrantEntitlement(msg)
   local ok, missing = validation.require_fields(msg, { "Subject", "Asset", "Policy" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Subject", "Asset", "Policy", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Subject", "Asset", "Policy", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_sub, err_sub = validation.check_length(msg.Subject, 128, "Subject")
   if not ok_len_sub then return codec.error("INVALID_INPUT", err_sub, { field = "Subject" }) end
@@ -97,7 +97,7 @@ end
 function handlers.RevokeEntitlement(msg)
   local ok, missing = validation.require_fields(msg, { "Subject", "Asset" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Subject", "Asset", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Subject", "Asset", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_sub, err_sub = validation.check_length(msg.Subject, 128, "Subject")
   if not ok_len_sub then return codec.error("INVALID_INPUT", err_sub, { field = "Subject" }) end
@@ -116,7 +116,7 @@ end
 function handlers.PutProtectedAssetRef(msg)
   local ok, missing = validation.require_fields(msg, { "Asset", "Ref" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Asset", "Ref", "Visibility", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Asset", "Ref", "Visibility", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_asset, err_asset = validation.check_length(msg.Asset, 256, "Asset")
   if not ok_len_asset then return codec.error("INVALID_INPUT", err_asset, { field = "Asset" }) end
