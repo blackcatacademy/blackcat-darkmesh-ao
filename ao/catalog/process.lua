@@ -37,6 +37,10 @@ local allowed_actions = {
   "SetTaxRules",
   "SetShippingRules",
   "QuoteOrder",
+  "StartCheckout",
+  "CompleteCheckout",
+  "SetInventory",
+  "GetInventory",
 }
 
 local role_policy = {
@@ -60,13 +64,17 @@ local role_policy = {
   SetTaxRules = { "catalog-admin", "admin" },
   SetShippingRules = { "catalog-admin", "admin" },
   QuoteOrder = { "catalog-admin", "support", "admin" },
+  StartCheckout = { "catalog-admin", "support", "admin" },
+  CompleteCheckout = { "catalog-admin", "support", "admin" },
+  SetInventory = { "catalog-admin", "admin" },
+  GetInventory = { "catalog-admin", "support", "admin" },
 }
 
 local state = {
   products = {}, -- product:<site>:<sku> -> { payload }
   categories = {}, -- category:<site>:<id> -> { payload, products = {sku}}
   active_versions = {}, -- site -> version
-  inventory = {}, -- site -> sku -> { quantity }
+  inventory = {}, -- siteId -> warehouse -> { sku -> qty }
   reservations = {}, -- orderId -> { siteId, items = { { sku, qty } }, released=false }
   orders = {}, -- orderId -> order record
   shipments = {}, -- shipmentId -> { status, tracking, carrier, eta, orderId }
@@ -78,6 +86,7 @@ local state = {
   variants = {}, -- siteId -> parentSku -> { variants = { { sku, attrs, price } } }
   tax_rules = {}, -- siteId -> list { country, region?, rate }
   shipping_rules = {}, -- siteId -> list { country, min_total, max_total, rate, carrier, service }
+  checkouts = {}, -- checkoutId -> { siteId, items, address, quote, status }
 }
 
 local MAX_PAYLOAD_BYTES = tonumber(os.getenv "CATALOG_MAX_PAYLOAD_BYTES" or "") or (64 * 1024)
@@ -598,10 +607,11 @@ end
 
 local function adjust_inventory(siteId, items, sign)
   state.inventory[siteId] = state.inventory[siteId] or {}
+  local inv = state.inventory[siteId]
   for _, item in ipairs(items or {}) do
-    local inv = state.inventory[siteId][item.sku] or { quantity = 0 }
-    inv.quantity = math.max(0, inv.quantity + sign * (item.qty or 0))
-    state.inventory[siteId][item.sku] = inv
+    local wh = item.warehouse or "default"
+    inv[wh] = inv[wh] or {}
+    inv[wh][item.sku] = math.max(0, (inv[wh][item.sku] or 0) + sign * (item.qty or 0))
   end
 end
 
@@ -1312,13 +1322,17 @@ function handlers.QuoteOrder(msg)
     if qty <= 0 then
       return codec.error("INVALID_INPUT", "Qty must be > 0", { item = item })
     end
-    -- inventory check
-    local inv = state.inventory[msg["Site-Id"]] and state.inventory[msg["Site-Id"]][item.Sku]
-    if inv and inv.quantity and inv.quantity < qty then
+    -- inventory check across warehouses
+    local inv = state.inventory[msg["Site-Id"]] or {}
+    local available = 0
+    for _, wh in pairs(inv) do
+      available = available + (wh[item.Sku] or 0)
+    end
+    if available < qty then
       return codec.error(
         "OUT_OF_STOCK",
         "Insufficient inventory",
-        { sku = item.Sku, available = inv.quantity }
+        { sku = item.Sku, available = available }
       )
     end
     local quote = apply_pricing(msg["Site-Id"], item.Sku, currency, msg.Promo)
@@ -1327,16 +1341,13 @@ function handlers.QuoteOrder(msg)
     end
     local line_sub = quote.price * qty
     subtotal = subtotal + line_sub
-    table.insert(
-      line_items,
-      {
-        sku = item.Sku,
-        qty = qty,
-        unit = quote.price,
-        currency = quote.currency,
-        subtotal = line_sub,
-      }
-    )
+    table.insert(line_items, {
+      sku = item.Sku,
+      qty = qty,
+      unit = quote.price,
+      currency = quote.currency,
+      subtotal = line_sub,
+    })
   end
   local ship = pick_shipping(msg["Site-Id"], address, subtotal)
   local tax_rate = pick_tax_rate(msg["Site-Id"], address)
@@ -1353,6 +1364,181 @@ function handlers.QuoteOrder(msg)
     total = total,
     promo = msg.Promo,
   }
+end
+
+-- Inventory per warehouse -------------------------------------------------
+function handlers.SetInventory(msg)
+  local ok, missing =
+    validation.require_fields(msg, { "Site-Id", "Warehouse-Id", "Sku", "Quantity" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Warehouse-Id",
+    "Sku",
+    "Quantity",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local qty = tonumber(msg.Quantity)
+  if not qty or qty < 0 then
+    return codec.error("INVALID_INPUT", "Quantity must be >= 0", { field = "Quantity" })
+  end
+  state.inventory[msg["Site-Id"]] = state.inventory[msg["Site-Id"]] or {}
+  state.inventory[msg["Site-Id"]][msg["Warehouse-Id"]] = state.inventory[msg["Site-Id"]][msg["Warehouse-Id"]]
+    or {}
+  state.inventory[msg["Site-Id"]][msg["Warehouse-Id"]][msg.Sku] = qty
+  audit.record(
+    "catalog",
+    "SetInventory",
+    msg,
+    nil,
+    { siteId = msg["Site-Id"], warehouse = msg["Warehouse-Id"], sku = msg.Sku, quantity = qty }
+  )
+  return codec.ok {
+    siteId = msg["Site-Id"],
+    warehouse = msg["Warehouse-Id"],
+    sku = msg.Sku,
+    quantity = qty,
+  }
+end
+
+function handlers.GetInventory(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Sku" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    { "Action", "Request-Id", "Site-Id", "Sku", "Actor-Role", "Schema-Version", "Signature" }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local inv = state.inventory[msg["Site-Id"]] or {}
+  local warehouses = {}
+  local total = 0
+  for wh, skus in pairs(inv) do
+    local q = skus[msg.Sku] or 0
+    if q > 0 then
+      warehouses[wh] = q
+      total = total + q
+    end
+  end
+  return codec.ok { siteId = msg["Site-Id"], sku = msg.Sku, total = total, warehouses = warehouses }
+end
+
+-- Checkout skeleton -------------------------------------------------------
+local function reserve_inventory(site_id, items)
+  local inv = state.inventory[site_id] or {}
+  local changes = {}
+  for _, item in ipairs(items) do
+    local needed = item.qty
+    for wh, skus in pairs(inv) do
+      local available = skus[item.sku] or 0
+      if available > 0 then
+        local take = math.min(available, needed)
+        skus[item.sku] = available - take
+        needed = needed - take
+        table.insert(changes, { warehouse = wh, sku = item.sku, qty = take })
+        if needed == 0 then
+          break
+        end
+      end
+    end
+    if needed > 0 then
+      -- rollback
+      for _, c in ipairs(changes) do
+        inv[c.warehouse][c.sku] = (inv[c.warehouse][c.sku] or 0) + c.qty
+      end
+      return false, "INSUFFICIENT_STOCK"
+    end
+  end
+  return true, changes
+end
+
+local function restore_inventory(site_id, changes)
+  local inv = state.inventory[site_id] or {}
+  for _, c in ipairs(changes or {}) do
+    inv[c.warehouse] = inv[c.warehouse] or {}
+    inv[c.warehouse][c.sku] = (inv[c.warehouse][c.sku] or 0) + c.qty
+  end
+end
+
+function handlers.StartCheckout(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Items", "Address", "Email" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local quote_resp = handlers.QuoteOrder(msg)
+  if quote_resp.status ~= "OK" then
+    return quote_resp
+  end
+  local items = {}
+  for _, item in ipairs(msg.Items) do
+    table.insert(items, { sku = item.Sku, qty = tonumber(item.Qty) or 0 })
+  end
+  local ok_reserve, changes = reserve_inventory(msg["Site-Id"], items)
+  if not ok_reserve then
+    return codec.error("OUT_OF_STOCK", "Insufficient inventory during reserve")
+  end
+  local checkout_id = string.format("chk-%d", os.time() * 1000 + math.random(0, 999))
+  state.checkouts[checkout_id] = {
+    siteId = msg["Site-Id"],
+    items = items,
+    address = msg.Address,
+    email = msg.Email,
+    quote = quote_resp.payload,
+    status = "pending_payment",
+    reserve = changes,
+  }
+  return codec.ok {
+    checkoutId = checkout_id,
+    total = quote_resp.payload.total,
+    currency = quote_resp.payload.currency,
+  }
+end
+
+function handlers.CompleteCheckout(msg)
+  local ok, missing = validation.require_fields(msg, { "Checkout-Id", "Payment-Method" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    {
+      "Action",
+      "Request-Id",
+      "Checkout-Id",
+      "Payment-Method",
+      "Actor-Role",
+      "Schema-Version",
+      "Signature",
+    }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local chk = state.checkouts[msg["Checkout-Id"]]
+  if not chk then
+    return codec.error("NOT_FOUND", "Checkout not found", { checkoutId = msg["Checkout-Id"] })
+  end
+  if chk.status ~= "pending_payment" then
+    return codec.error("INVALID_STATE", "Checkout already completed", { status = chk.status })
+  end
+  -- simulate payment success always
+  chk.status = "paid"
+  chk.payment =
+    { method = msg["Payment-Method"], status = "succeeded", paidAt = os.date "!%Y-%m-%dT%H:%M:%SZ" }
+  audit.record("catalog", "CompleteCheckout", msg, nil, { checkoutId = msg["Checkout-Id"] })
+  return codec.ok { checkoutId = msg["Checkout-Id"], status = chk.status, payment = chk.payment }
 end
 
 local function route(msg)
