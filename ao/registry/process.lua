@@ -18,6 +18,8 @@ local allowed_actions = {
   "BindDomain",
   "SetActiveVersion",
   "GrantRole",
+  "UpdateTrustResolvers",
+  "GetTrustedResolvers",
 }
 
 local role_policy = {
@@ -25,6 +27,8 @@ local role_policy = {
   BindDomain = { "admin", "registry-admin" },
   SetActiveVersion = { "admin", "registry-admin" },
   GrantRole = { "admin", "registry-admin" },
+  UpdateTrustResolvers = { "admin", "registry-admin" },
+  GetTrustedResolvers = { "admin", "registry-admin" },
 }
 
 -- pseudo-state kept in-memory for now; AO runtime would persist this.
@@ -33,6 +37,7 @@ local state = {
   domains = {},        -- host => siteId
   active_versions = {},-- siteId => versionId
   roles = {},          -- siteId => map[user] = role
+  trust = { resolvers = {}, manifestTx = nil, updatedAt = nil },
 }
 
 local MAX_CONFIG_BYTES = tonumber(os.getenv("REGISTRY_MAX_CONFIG_BYTES") or "") or (16 * 1024)
@@ -202,6 +207,30 @@ function handlers.GrantRole(msg)
     siteId = msg["Site-Id"],
     subject = msg.Subject,
     role = msg.Role,
+  })
+end
+
+function handlers.UpdateTrustResolvers(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Manifest-Tx", "Resolvers", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  if msg.Resolvers and type(msg.Resolvers) ~= "table" then
+    return codec.error("INVALID_INPUT", "Resolvers must be array")
+  end
+  local list = msg.Resolvers or {}
+  state.trust.resolvers = list
+  state.trust.manifestTx = msg["Manifest-Tx"]
+  state.trust.updatedAt = now_iso()
+  audit.record("registry", "UpdateTrustResolvers", msg, nil, { count = #list })
+  return codec.ok({ updatedAt = state.trust.updatedAt, count = #list, manifestTx = state.trust.manifestTx })
+end
+
+function handlers.GetTrustedResolvers(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  return codec.ok({
+    manifestTx = state.trust.manifestTx,
+    updatedAt = state.trust.updatedAt,
+    resolvers = state.trust.resolvers,
   })
 end
 
