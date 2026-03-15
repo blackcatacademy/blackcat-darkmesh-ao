@@ -51,7 +51,7 @@ local MAX_CONTENT_BYTES = tonumber(os.getenv("SITE_MAX_CONTENT_BYTES") or "") or
 function handlers.ResolveRoute(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Path" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Path", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Path", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -74,7 +74,7 @@ end
 function handlers.GetPage(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Page-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Page-Id", "Version", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Page-Id", "Version", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -101,7 +101,7 @@ end
 function handlers.GetLayout(msg)
   local ok, missing = validation.require_fields(msg, { "Layout-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Layout-Id", "Version", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Layout-Id", "Version", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_layout, err_layout = validation.check_length(msg["Layout-Id"], 128, "Layout-Id")
   if not ok_len_layout then return codec.error("INVALID_INPUT", err_layout, { field = "Layout-Id" }) end
@@ -125,7 +125,7 @@ end
 function handlers.GetNavigation(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Menu-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Menu-Id", "Version", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Menu-Id", "Version", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -152,7 +152,7 @@ end
 function handlers.PutDraft(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Page-Id", "Content" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Page-Id", "Content", "Actor-Role", "Schema-Version", "ExpectedVersion" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Page-Id", "Content", "Actor-Role", "Schema-Version", "ExpectedVersion", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -176,7 +176,7 @@ end
 function handlers.UpsertRoute(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Path", "Page-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Path", "Page-Id", "Layout-Id", "Type", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Path", "Page-Id", "Layout-Id", "Type", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -204,7 +204,7 @@ end
 function handlers.PublishVersion(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Version" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Version", "ExpectedVersion", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Version", "ExpectedVersion", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -251,7 +251,7 @@ end
 function handlers.ArchivePage(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Page-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Page-Id", "Version", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Page-Id", "Version", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -273,7 +273,7 @@ function handlers.RecordOrder(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Order-Id", "Status" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
   local ok_extra, extras = validation.require_no_extras(msg, {
-    "Action", "Request-Id", "Site-Id", "Order-Id", "Status", "TotalAmount", "Currency", "VatRate", "Actor-Role", "Schema-Version"
+    "Action", "Request-Id", "Site-Id", "Order-Id", "Status", "TotalAmount", "Currency", "VatRate", "Actor-Role", "Schema-Version", "Signature"
   })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   state.orders[msg["Site-Id"]] = state.orders[msg["Site-Id"]] or {}
@@ -297,7 +297,7 @@ end
 function handlers.GetOrder(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Order-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Order-Id", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Order-Id", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local site_orders = state.orders[msg["Site-Id"]] or {}
   local order = site_orders[msg["Order-Id"]]
@@ -319,7 +319,7 @@ end
 function handlers.ListOrders(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Status", "Page", "PageSize", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Status", "Page", "PageSize", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local page = tonumber(msg.Page or 1) or 1
   local page_size = tonumber(msg.PageSize or 20) or 20

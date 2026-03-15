@@ -186,7 +186,7 @@ do
   site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-1", ["Page-Id"] = "home", Content = { title = "Hello", blocks = { { type = "paragraph", text = "Hello" } } }, ["Actor-Role"] = "editor" }))
   site.route(with_req({ Action = "UpsertRoute", ["Site-Id"] = "site-1", Path = "/", ["Page-Id"] = "home", ["Layout-Id"] = "layout-1", ["Actor-Role"] = "editor" }))
   local publish = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-1", Version = "v2", ["Actor-Role"] = "publisher" }))
-  assert_eq(publish.status, "OK", "publish status")
+  assert_status(publish, "OK", "publish status")
   assert_truthy(publish.payload.manifestTx, "publish manifestTx")
   assert_truthy(publish.payload.manifestHash, "publish manifestHash")
   local ar = require("ao.shared.arweave")
