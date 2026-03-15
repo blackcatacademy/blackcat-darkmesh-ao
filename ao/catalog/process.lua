@@ -276,27 +276,34 @@ local function http_post_json(url, payload)
   if not ok_enc or not body then
     return nil, "ENCODE_FAILED"
   end
+  local tmp = os.tmpname()
+  local f = io.open(tmp, "w")
+  if not f then
+    return nil, "TMP_OPEN_FAILED"
+  end
+  f:write(body)
+  f:close()
   local auth = ""
   if CARRIER_API_TOKEN and CARRIER_API_TOKEN ~= "" then
     auth = "-H 'Authorization: Bearer " .. CARRIER_API_TOKEN .. "' "
   end
   local cmd = string.format(
-    "curl -sS -X POST %s -H 'Content-Type: application/json' %s --data-binary @-",
+    "curl -sS -X POST %s -H 'Content-Type: application/json' %s --data-binary @%s",
     url,
-    auth
+    auth,
+    tmp
   )
-  local proc = io.popen(cmd, "w")
-  if not proc then
-    return nil, "CURL_WRITE_FAILED"
-  end
-  proc:write(body)
-  proc:close()
-  local reader = io.popen(cmd:gsub("--data%-binary @%-", ""), "r")
+  local reader = io.popen(cmd, "r")
   if not reader then
+    os.remove(tmp)
     return nil, "CURL_READ_FAILED"
   end
   local out = reader:read "*a"
-  reader:close()
+  local ok_close, why, code = reader:close()
+  os.remove(tmp)
+  if not ok_close then
+    return nil, "CURL_EXIT_" .. tostring(code or why)
+  end
   return out, nil
 end
 
@@ -1344,6 +1351,12 @@ function handlers.UpsertProduct(msg)
   if not ok_size then
     return codec.error("INVALID_INPUT", err_size, { field = "Payload" })
   end
+  if msg.Payload.taxClass and type(msg.Payload.taxClass) ~= "string" then
+    return codec.error("INVALID_INPUT", "taxClass must be string", { field = "Payload.taxClass" })
+  end
+  if msg.Payload.taxClass and #msg.Payload.taxClass > 64 then
+    return codec.error("INVALID_INPUT", "taxClass too long", { field = "Payload.taxClass" })
+  end
   local ok_schema, schema_err = schema.validate("product", msg.Payload)
   if not ok_schema then
     return codec.error("INVALID_INPUT", "Payload failed schema", { errors = schema_err })
@@ -1668,6 +1681,17 @@ function handlers.SetTaxRules(msg)
   if not ok_type then
     return codec.error("INVALID_INPUT", err_type, { field = "Rules" })
   end
+  for _, r in ipairs(msg.Rules) do
+    if r.taxClass and type(r.taxClass) ~= "string" then
+      return codec.error("INVALID_INPUT", "taxClass must be string", { rule = r })
+    end
+    if r.taxClass and #r.taxClass > 64 then
+      return codec.error("INVALID_INPUT", "taxClass too long", { rule = r })
+    end
+    if r.priority and type(r.priority) ~= "number" then
+      return codec.error("INVALID_INPUT", "priority must be number", { rule = r })
+    end
+  end
   state.tax_rules[msg["Site-Id"]] = msg.Rules
   audit.record("catalog", "SetTaxRules", msg, nil, { siteId = msg["Site-Id"], count = #msg.Rules })
   return codec.ok { siteId = msg["Site-Id"], count = #msg.Rules }
@@ -1702,16 +1726,23 @@ end
 
 local function pick_tax_rate(site_id, address, tax_class)
   local rules = state.tax_rules[site_id] or state.tax_rates[site_id] or {}
+  local best_rate = 0
+  local best_score = -1
   for _, r in ipairs(rules) do
-    if
-      (not r.country or r.country == address.Country)
+    local match = (not r.country or r.country == address.Country)
       and (not r.region or r.region == address.Region)
       and (not r.taxClass or r.taxClass == tax_class)
-    then
-      return tonumber(r.rate or r.Rate) or 0
+    if match then
+      local priority = tonumber(r.priority or r.Priority) or 0
+      local specificity = (r.country and 1 or 0) + (r.region and 1 or 0) + (r.taxClass and 1 or 0)
+      local score = priority * 10 + specificity
+      if score > best_score then
+        best_score = score
+        best_rate = tonumber(r.rate or r.Rate) or 0
+      end
     end
   end
-  return 0
+  return best_rate
 end
 
 local function pick_shipping(site_id, address, total, weight)
