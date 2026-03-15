@@ -103,6 +103,7 @@ local allowed_actions = {
   "DeleteWebhook",
   "SignPayload",
   "VerifySignature",
+  "ExportCatalogFeed",
 }
 
 local role_policy = {
@@ -166,6 +167,7 @@ local role_policy = {
   DeleteWebhook = { "admin", "catalog-admin" },
   SignPayload = { "admin", "catalog-admin" },
   VerifySignature = { "admin", "catalog-admin" },
+  ExportCatalogFeed = { "catalog-admin", "support", "admin", "viewer" },
 }
 
 local state = {
@@ -1406,6 +1408,58 @@ function handlers.DeleteWebhook(msg)
   end
   audit.record("catalog", "DeleteWebhook", msg, nil, { webhookId = msg["Webhook-Id"] })
   return codec.ok { deleted = msg["Webhook-Id"] }
+end
+
+function handlers.ExportCatalogFeed(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Cursor",
+    "Limit",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local site = msg["Site-Id"]
+  if not site then
+    return codec.error("INVALID_INPUT", "Site-Id required")
+  end
+  local cursor = msg.Cursor or ""
+  local limit = tonumber(msg.Limit) or 200
+  if limit < 1 then
+    limit = 1
+  end
+  if limit > 500 then
+    limit = 500
+  end
+  local prefix = "product:" .. site .. ":"
+  local items = {}
+  local keys = {}
+  for key, _ in pairs(state.products) do
+    if key:sub(1, #prefix) == prefix then
+      table.insert(keys, key)
+    end
+  end
+  table.sort(keys)
+  local start_index = 1
+  if cursor ~= "" then
+    for i, k in ipairs(keys) do
+      if k == cursor then
+        start_index = i + 1
+        break
+      end
+    end
+  end
+  for i = start_index, math.min(#keys, start_index + limit - 1) do
+    local key = keys[i]
+    table.insert(items, { key = key, payload = state.products[key].payload })
+  end
+  local next_cursor = (#keys > start_index + limit - 1) and keys[start_index + limit - 1] or nil
+  return codec.ok { siteId = site, items = items, nextCursor = next_cursor, total = #items }
 end
 
 function handlers.ApplyOrderEvent(msg)
