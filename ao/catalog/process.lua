@@ -110,9 +110,15 @@ local allowed_actions = {
   "VerifySignature",
   "ExportCatalogFeed",
   "ExportSearchFeed",
+  "ExportCategoryFeed",
   "DeleteProduct",
+  "DeleteCategory",
   "PurgeCache",
   "ExportMerchantFeed",
+  "SetStockPolicy",
+  "ListLowStock",
+  "GetCategory",
+  "ListCategories",
 }
 
 local role_policy = {
@@ -178,9 +184,15 @@ local role_policy = {
   VerifySignature = { "admin", "catalog-admin" },
   ExportCatalogFeed = { "catalog-admin", "support", "admin", "viewer" },
   ExportSearchFeed = { "catalog-admin", "support", "admin", "viewer" },
+  ExportCategoryFeed = { "catalog-admin", "support", "admin", "viewer" },
   DeleteProduct = { "catalog-admin", "editor", "admin" },
+  DeleteCategory = { "catalog-admin", "editor", "admin" },
   PurgeCache = { "catalog-admin", "admin", "support" },
   ExportMerchantFeed = { "catalog-admin", "support", "admin" },
+  SetStockPolicy = { "catalog-admin", "admin" },
+  ListLowStock = { "catalog-admin", "admin", "support" },
+  GetCategory = { "catalog-admin", "support", "admin", "viewer" },
+  ListCategories = { "catalog-admin", "support", "admin", "viewer" },
 }
 
 local state = {
@@ -212,6 +224,9 @@ local state = {
   event_log = {}, -- siteId -> list of { ts, sku, event }
   webhooks = {}, -- siteId -> id -> { url, secret, events }
   deletions = {}, -- siteId -> list of { key, deletedAt }
+  category_deletions = {}, -- siteId -> list of { key, deletedAt }
+  stock_policies = {}, -- siteId -> sku -> { allow_backorder, preorder_at, low_stock_threshold }
+  stock_alerts = {}, -- siteId -> list of { sku, total, threshold, ts }
 }
 
 local function gen_id(prefix)
@@ -1476,6 +1491,96 @@ function handlers.ExportCatalogFeed(msg)
   return codec.ok { siteId = site, items = items, nextCursor = next_cursor, total = #items }
 end
 
+function handlers.ExportCategoryFeed(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Cursor",
+    "Limit",
+    "UpdatedAfter",
+    "IncludeDeleted",
+    "Path",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local site = msg["Site-Id"]
+  if not site then
+    return codec.error("INVALID_INPUT", "Site-Id required")
+  end
+  local updated_after = tonumber(msg.UpdatedAfter) or 0
+  local cursor = msg.Cursor or ""
+  local limit = tonumber(msg.Limit) or 200
+  if limit < 1 then
+    limit = 1
+  end
+  if limit > 500 then
+    limit = 500
+  end
+  local prefix = "category:" .. site .. ":"
+  local keys = {}
+  for key, cat in pairs(state.categories) do
+    if key:sub(1, #prefix) == prefix and (cat.updatedAt or 0) >= updated_after then
+      table.insert(keys, key)
+    end
+  end
+  table.sort(keys)
+  local start_index = 1
+  if cursor ~= "" then
+    for i, k in ipairs(keys) do
+      if k == cursor then
+        start_index = i + 1
+        break
+      end
+    end
+  end
+  local items = {}
+  for i = start_index, math.min(#keys, start_index + limit - 1) do
+    local key = keys[i]
+    local cat = state.categories[key]
+    table.insert(items, {
+      key = key,
+      payload = cat.payload,
+      products = cat.products,
+      updatedAt = cat.updatedAt,
+      categoryId = key:match "category:[^:]+:(.+)",
+    })
+  end
+  if msg.IncludeDeleted and state.category_deletions[site] then
+    for _, d in ipairs(state.category_deletions[site]) do
+      if (d.deletedAt or 0) >= updated_after then
+        table.insert(items, { key = d.key, deletedAt = d.deletedAt, deleted = true })
+      end
+    end
+  end
+  local next_cursor = (#keys > start_index + limit - 1) and keys[start_index + limit - 1] or nil
+  if msg.Path then
+    local f = io.open(msg.Path, "w")
+    if f and json_ok then
+      for _, item in ipairs(items) do
+        local ok_line, line = pcall(cjson.encode, item)
+        if ok_line and line then
+          f:write(line)
+          f:write "\n"
+        end
+      end
+      f:close()
+    end
+  end
+  return codec.ok {
+    siteId = site,
+    items = items,
+    nextCursor = next_cursor,
+    total = #items,
+    updatedAfter = updated_after,
+    includeDeleted = msg.IncludeDeleted or false,
+  }
+end
+
 function handlers.ExportSearchFeed(msg)
   local ok_extra, extras = validation.require_no_extras(msg, {
     "Action",
@@ -2334,8 +2439,146 @@ function handlers.UpsertCategory(msg)
   state.categories[key] = {
     payload = msg.Payload or {},
     products = msg.Products or state.categories[key] and state.categories[key].products or {},
+    updatedAt = os.time(),
   }
   return codec.ok { categoryId = msg["Category-Id"] }
+end
+
+function handlers.DeleteCategory(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Category-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Category-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
+  if not ok_len_site then
+    return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" })
+  end
+  local ok_len_cat, err_cat = validation.check_length(msg["Category-Id"], 128, "Category-Id")
+  if not ok_len_cat then
+    return codec.error("INVALID_INPUT", err_cat, { field = "Category-Id" })
+  end
+  local key = ids.category_key(msg["Site-Id"], msg["Category-Id"])
+  state.categories[key] = nil
+  state.category_deletions[msg["Site-Id"]] = state.category_deletions[msg["Site-Id"]] or {}
+  table.insert(state.category_deletions[msg["Site-Id"]], { key = key, deletedAt = os.time() })
+  audit.record("catalog", "DeleteCategory", msg, nil, { categoryId = msg["Category-Id"] })
+  return codec.ok { deleted = msg["Category-Id"] }
+end
+
+function handlers.GetCategory(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Category-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    {
+      "Action",
+      "Request-Id",
+      "Site-Id",
+      "Category-Id",
+      "Actor-Role",
+      "Schema-Version",
+      "Signature",
+    }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local key = ids.category_key(msg["Site-Id"], msg["Category-Id"])
+  local cat = state.categories[key]
+  if not cat then
+    return codec.error("NOT_FOUND", "Category not found", { categoryId = msg["Category-Id"] })
+  end
+  return codec.ok {
+    siteId = msg["Site-Id"],
+    categoryId = msg["Category-Id"],
+    payload = cat.payload,
+    products = cat.products,
+    updatedAt = cat.updatedAt,
+  }
+end
+
+function handlers.ListCategories(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Cursor",
+    "Limit",
+    "UpdatedAfter",
+    "IncludeDeleted",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local site = msg["Site-Id"]
+  local updated_after = tonumber(msg.UpdatedAfter) or 0
+  local cursor = msg.Cursor or ""
+  local limit = tonumber(msg.Limit) or 200
+  if limit < 1 then
+    limit = 1
+  end
+  if limit > 500 then
+    limit = 500
+  end
+  local prefix = "category:" .. site .. ":"
+  local keys = {}
+  for key, cat in pairs(state.categories) do
+    if key:sub(1, #prefix) == prefix and (cat.updatedAt or 0) >= updated_after then
+      table.insert(keys, key)
+    end
+  end
+  table.sort(keys)
+  local start_index = 1
+  if cursor ~= "" then
+    for i, k in ipairs(keys) do
+      if k == cursor then
+        start_index = i + 1
+        break
+      end
+    end
+  end
+  local items = {}
+  for i = start_index, math.min(#keys, start_index + limit - 1) do
+    local key = keys[i]
+    local cat = state.categories[key]
+    table.insert(items, {
+      key = key,
+      categoryId = key:match "category:[^:]+:(.+)",
+      payload = cat.payload,
+      products = cat.products,
+      updatedAt = cat.updatedAt,
+    })
+  end
+  if msg.IncludeDeleted and state.category_deletions[site] then
+    for _, d in ipairs(state.category_deletions[site]) do
+      if (d.deletedAt or 0) >= updated_after then
+        table.insert(items, { key = d.key, deletedAt = d.deletedAt, deleted = true })
+      end
+    end
+  end
+  local next_cursor = (#keys > start_index + limit - 1) and keys[start_index + limit - 1] or nil
+  return codec.ok { siteId = site, items = items, nextCursor = next_cursor, total = #items }
 end
 
 function handlers.PublishCatalogVersion(msg)
@@ -2915,6 +3158,15 @@ function handlers.SetInventory(msg)
   state.inventory[msg["Site-Id"]][msg["Warehouse-Id"]] = state.inventory[msg["Site-Id"]][msg["Warehouse-Id"]]
     or {}
   state.inventory[msg["Site-Id"]][msg["Warehouse-Id"]][msg.Sku] = qty
+  -- compute total for alerts
+  local total = 0
+  for _, skus in pairs(state.inventory[msg["Site-Id"]]) do
+    total = total + (skus[msg.Sku] or 0)
+  end
+  local policy = state.stock_policies[msg["Site-Id"]]
+      and state.stock_policies[msg["Site-Id"]][msg.Sku]
+    or {}
+  push_low_stock(msg["Site-Id"], msg.Sku, total, policy.low_stock_threshold)
   audit.record(
     "catalog",
     "SetInventory",
@@ -2952,13 +3204,115 @@ function handlers.GetInventory(msg)
       total = total + q
     end
   end
-  return codec.ok { siteId = msg["Site-Id"], sku = msg.Sku, total = total, warehouses = warehouses }
+  local policy = state.stock_policies[msg["Site-Id"]]
+    and state.stock_policies[msg["Site-Id"]][msg.Sku]
+  return codec.ok {
+    siteId = msg["Site-Id"],
+    sku = msg.Sku,
+    total = total,
+    warehouses = warehouses,
+    policy = policy,
+  }
+end
+
+-- Stock policy (backorder/preorder thresholds) ----------------------------
+function handlers.SetStockPolicy(msg)
+  local ok, missing =
+    validation.require_fields(msg, { "Site-Id", "Sku", "Allow-Backorder", "Low-Stock-Threshold" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Sku",
+    "Allow-Backorder",
+    "Preorder-At",
+    "Low-Stock-Threshold",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local allow_backorder = msg["Allow-Backorder"] == true or msg["Allow-Backorder"] == "true"
+  local threshold = tonumber(msg["Low-Stock-Threshold"]) or 0
+  if threshold < 0 then
+    return codec.error(
+      "INVALID_INPUT",
+      "Low-Stock-Threshold must be >=0",
+      { field = "Low-Stock-Threshold" }
+    )
+  end
+  local preorder_at = msg["Preorder-At"]
+  if preorder_at and type(preorder_at) ~= "string" then
+    return codec.error(
+      "INVALID_INPUT",
+      "Preorder-At must be ISO date string",
+      { field = "Preorder-At" }
+    )
+  end
+  state.stock_policies[msg["Site-Id"]] = state.stock_policies[msg["Site-Id"]] or {}
+  state.stock_policies[msg["Site-Id"]][msg.Sku] = {
+    allow_backorder = allow_backorder,
+    preorder_at = preorder_at,
+    low_stock_threshold = threshold,
+  }
+  audit.record(
+    "catalog",
+    "SetStockPolicy",
+    msg,
+    nil,
+    { sku = msg.Sku, allow_backorder = allow_backorder, threshold = threshold }
+  )
+  return codec.ok {
+    siteId = msg["Site-Id"],
+    sku = msg.Sku,
+    allowBackorder = allow_backorder,
+    preorderAt = preorder_at,
+    lowStockThreshold = threshold,
+  }
+end
+
+local function push_low_stock(site_id, sku, total, threshold)
+  if threshold and threshold > 0 and total <= threshold then
+    state.stock_alerts[site_id] = state.stock_alerts[site_id] or {}
+    table.insert(state.stock_alerts[site_id], {
+      sku = sku,
+      total = total,
+      threshold = threshold,
+      ts = os.time(),
+    })
+  end
+end
+
+function handlers.ListLowStock(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    { "Action", "Request-Id", "Site-Id", "Clear", "Actor-Role", "Schema-Version", "Signature" }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local alerts = state.stock_alerts[msg["Site-Id"]] or {}
+  local clear = msg.Clear == true or msg.Clear == "true"
+  if clear then
+    state.stock_alerts[msg["Site-Id"]] = {}
+  end
+  return codec.ok { siteId = msg["Site-Id"], alerts = alerts }
 end
 
 -- Checkout skeleton -------------------------------------------------------
 local function reserve_inventory(site_id, items)
   local inv = state.inventory[site_id] or {}
   local changes = {}
+  local backorders = {}
   for _, item in ipairs(items) do
     local needed = item.qty
     for wh, skus in pairs(inv) do
@@ -2974,14 +3328,26 @@ local function reserve_inventory(site_id, items)
       end
     end
     if needed > 0 then
-      -- rollback
-      for _, c in ipairs(changes) do
-        inv[c.warehouse][c.sku] = (inv[c.warehouse][c.sku] or 0) + c.qty
+      local policy = state.stock_policies[site_id] and state.stock_policies[site_id][item.sku] or {}
+      if policy.allow_backorder then
+        table.insert(backorders, { sku = item.sku, qty = needed, preorder_at = policy.preorder_at })
+      else
+        -- rollback
+        for _, c in ipairs(changes) do
+          inv[c.warehouse][c.sku] = (inv[c.warehouse][c.sku] or 0) + c.qty
+        end
+        return false, "INSUFFICIENT_STOCK"
       end
-      return false, "INSUFFICIENT_STOCK"
     end
+    -- low stock alert after deduction
+    local total_after = 0
+    for _, skus in pairs(inv) do
+      total_after = total_after + (skus[item.sku] or 0)
+    end
+    local policy = state.stock_policies[site_id] and state.stock_policies[site_id][item.sku] or {}
+    push_low_stock(site_id, item.sku, total_after, policy.low_stock_threshold)
   end
-  return true, changes
+  return true, changes, backorders
 end
 
 local function restore_inventory(site_id, changes)
@@ -3032,7 +3398,7 @@ function handlers.StartCheckout(msg)
   for _, item in ipairs(msg.Items) do
     table.insert(items, { sku = item.Sku, qty = tonumber(item.Qty) or 0 })
   end
-  local ok_reserve, changes = reserve_inventory(msg["Site-Id"], items)
+  local ok_reserve, changes, backorders = reserve_inventory(msg["Site-Id"], items)
   if not ok_reserve then
     return codec.error("OUT_OF_STOCK", "Insufficient inventory during reserve")
   end
@@ -3054,6 +3420,7 @@ function handlers.StartCheckout(msg)
     },
     status = "pending_payment",
     reserve = changes,
+    backorders = backorders,
     risk = risk_score {
       quote = {
         subtotal = cart.subtotal,
@@ -3086,6 +3453,7 @@ function handlers.StartCheckout(msg)
     paymentIntent = payment and payment.paymentId,
     paymentStatus = payment and payment.status or "pending_payment",
     risk = state.checkouts[checkout_id].risk,
+    backorders = backorders,
   }
 end
 
@@ -3766,7 +4134,7 @@ function handlers.CheckoutPurchaseOrder(msg)
   for _, line in ipairs(po.items) do
     table.insert(items, { sku = line.sku, qty = line.qty })
   end
-  local ok_reserve, changes = reserve_inventory(po.siteId, items)
+  local ok_reserve, changes, backorders = reserve_inventory(po.siteId, items)
   if not ok_reserve then
     return codec.error("OUT_OF_STOCK", "Insufficient inventory")
   end
@@ -3788,6 +4156,7 @@ function handlers.CheckoutPurchaseOrder(msg)
     },
     status = "pending_payment",
     reserve = changes,
+    backorders = backorders,
     poId = po.poId,
     risk = risk_score { quote = { total = po.total, shipping = po.shipping }, address = po.address },
   }
