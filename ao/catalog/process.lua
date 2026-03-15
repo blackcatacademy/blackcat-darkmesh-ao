@@ -3789,6 +3789,21 @@ local function forget_subject(site_id, subject)
     end
     state.telemetry[site_id] = filtered
   end
+  -- scrub shipments linked to subject's orders
+  for _, sh in pairs(state.shipments) do
+    if sh.orderId and state.orders[sh.orderId] and state.orders[sh.orderId].email == subject then
+      sh.address = nil
+      scrubbed = scrubbed + 1
+    end
+  end
+  -- scrub returns linked to subject's orders
+  for _, ret in pairs(state.returns) do
+    if ret.orderId and state.orders[ret.orderId] and state.orders[ret.orderId].email == subject then
+      ret.address = nil
+      ret.reason = nil
+      scrubbed = scrubbed + 1
+    end
+  end
   return scrubbed
 end
 
