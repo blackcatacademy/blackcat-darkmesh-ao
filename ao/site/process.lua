@@ -209,6 +209,9 @@ function handlers.ResolveRoute(msg)
   if not route then
     return codec.error("NOT_FOUND", "Route not found", { path = msg.Path })
   end
+  if route.warnings then
+    -- bubble layout warnings if present
+  end
   local perf = state.perf_vitals[msg["Site-Id"]]
   local budgets = state.perf_budgets[msg["Site-Id"]]
   if perf and budgets then
@@ -233,6 +236,7 @@ function handlers.ResolveRoute(msg)
     layoutId = route.layoutId,
     type = route.type or "page",
     cache = cache_policy,
+    warnings = route.warnings,
   }
 end
 
@@ -297,6 +301,7 @@ function handlers.GetPage(msg)
     version = version,
     locale = locale,
     content = content,
+    warnings = page.warnings,
   }
 end
 
@@ -339,6 +344,14 @@ function handlers.GetLayout(msg)
       "Layout not found",
       { layoutId = msg["Layout-Id"], version = version }
     )
+  end
+  if layout.content then
+    for _, comp in ipairs(layout.content) do
+      if comp.image then
+        comp.image.loading = comp.image.loading or "lazy"
+        comp.image.placeholder = comp.image.placeholder or "blur"
+      end
+    end
   end
   return codec.ok {
     layoutId = msg["Layout-Id"],
@@ -856,7 +869,8 @@ function handlers.PublishVersion(msg)
       local page_id = parts[3]
       local locale = parts[5]
       local target_key = ids.page_key(site, page_id, msg.Version, locale)
-      state.pages[target_key] = { content = draft.content, locale = locale }
+      state.pages[target_key] =
+        { content = draft.content, locale = locale, warnings = draft.warnings }
       table.insert(snapshots, { pageId = page_id, content = draft.content, locale = locale })
     end
   end
