@@ -717,6 +717,10 @@ function handlers.SearchCatalog(msg)
   end
   local q = msg.Query and msg.Query:lower() or ""
   local sort = msg.Sort or "relevance"
+  local tokens = {}
+  for t in q:gmatch "%S+" do
+    table.insert(tokens, t)
+  end
   local results = {}
   local facets = {
     categories = {},
@@ -800,6 +804,7 @@ function handlers.SearchCatalog(msg)
           or false
         if ok_price and ok_locale and ok_currency and ok_available and ok_carrier and ok_cat then
           local score = 0
+          local events = state.events[msg["Site-Id"]] and state.events[msg["Site-Id"]][sku] or {}
           if q ~= "" then
             if sku:lower():find("^" .. q, 1, false) then
               score = score + 5
@@ -820,7 +825,20 @@ function handlers.SearchCatalog(msg)
             if fuzzy_hit then
               score = score + 1
             end
+            for _, tok in ipairs(tokens) do
+              if (payload.brand or ""):lower():find(tok, 1, true) then
+                score = score + 2
+              end
+              if payload.tags and type(payload.tags) == "table" then
+                for _, tag in ipairs(payload.tags) do
+                  if type(tag) == "string" and tag:lower() == tok then
+                    score = score + 1
+                  end
+                end
+              end
+            end
           end
+          score = score + (events.purchases or 0) * 2 + (events.views or 0) * 0.1
           if msg.Locale and locale == msg.Locale then
             score = score + 1
           end
@@ -846,6 +864,12 @@ function handlers.SearchCatalog(msg)
     end
     if sort == "name" then
       return tostring(a.name) < tostring(b.name)
+    end
+    if sort == "popularity" then
+      if (a.score or 0) ~= (b.score or 0) then
+        return (a.score or 0) > (b.score or 0)
+      end
+      return (a.price or 0) < (b.price or 0)
     end
     if sort == "available" then
       if a.available ~= b.available then
