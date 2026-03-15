@@ -976,14 +976,19 @@ function handlers.ForceUnlockDraft(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
+  local reason_map = {
+    stale_lock = "Lock expired or owner offline",
+    user_request = "User requested override",
+    admin_override = "Administrator override",
+    migration = "System migration",
+  }
   state.draft_locks[msg["Draft-Id"]] = nil
-  audit.record(
-    "site",
-    "ForceUnlockDraft",
-    msg,
-    nil,
-    { draftId = msg["Draft-Id"], reason = msg.Reason or "unspecified", code = msg["Reason-Code"] }
-  )
+  audit.record("site", "ForceUnlockDraft", msg, nil, {
+    draftId = msg["Draft-Id"],
+    reason = msg.Reason or "unspecified",
+    code = msg["Reason-Code"],
+    resolvedReason = reason_map[msg["Reason-Code"]] or msg.Reason,
+  })
   state.draft_audit[msg["Draft-Id"]] = state.draft_audit[msg["Draft-Id"]] or {}
   table.insert(state.draft_audit[msg["Draft-Id"]], {
     ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
@@ -992,8 +997,16 @@ function handlers.ForceUnlockDraft(msg)
     action = "force_unlock",
     reason = msg.Reason,
     code = msg["Reason-Code"],
+    resolvedReason = reason_map[msg["Reason-Code"]] or msg.Reason,
   })
-  return codec.ok { draftId = msg["Draft-Id"], unlocked = true, forced = true, reason = msg.Reason }
+  return codec.ok {
+    draftId = msg["Draft-Id"],
+    unlocked = true,
+    forced = true,
+    reason = msg.Reason,
+    resolvedReason = reason_map[msg["Reason-Code"]] or msg.Reason,
+    code = msg["Reason-Code"],
+  }
 end
 
 function handlers.RenewDraftLock(msg)

@@ -804,7 +804,8 @@ end
 
 local function track_event(site_id, subject, sku, event)
   state.events[site_id] = state.events[site_id] or {}
-  local stats = state.events[site_id][sku] or { views = 0, add_to_cart = 0, purchases = 0 }
+  local stats = state.events[site_id][sku]
+    or { views = 0, add_to_cart = 0, purchases = 0, last_ts = 0 }
   if event == "view" then
     stats.views = stats.views + 1
   elseif event == "add_to_cart" then
@@ -812,6 +813,7 @@ local function track_event(site_id, subject, sku, event)
   elseif event == "purchase" then
     stats.purchases = stats.purchases + 1
   end
+  stats.last_ts = os.time()
   state.events[site_id][sku] = stats
 
   if subject then
@@ -836,6 +838,25 @@ local function track_event(site_id, subject, sku, event)
   end
 
   return stats
+end
+
+local function recency_weight(site_id, sku)
+  local stats = state.events[site_id] and state.events[site_id][sku]
+  local last_ts = stats and stats.last_ts
+  if not last_ts then
+    return 1
+  end
+  local age_hours = math.max(0, (os.time() - last_ts) / 3600)
+  if age_hours <= 24 then
+    return 1.5
+  end
+  if age_hours <= 72 then
+    return 1.2
+  end
+  if age_hours <= 168 then
+    return 1.0
+  end
+  return 0.8
 end
 
 local function typo_match(text, tokens)
@@ -1582,7 +1603,8 @@ function handlers.SearchCatalog(msg)
               end
             end
           end
-          score = score + (events.purchases or 0) * 2 + (events.views or 0) * 0.1
+          local rw = recency_weight(msg["Site-Id"], sku)
+          score = score + ((events.purchases or 0) * 2 + (events.views or 0) * 0.1) * rw
           if msg.Locale and locale == msg.Locale then
             score = score + 1
           end
@@ -1874,6 +1896,7 @@ function handlers.Bestsellers(msg)
   local ranked = {}
   for sku, s in pairs(scores) do
     local score = (s.purchases or 0) * 4 + (s.add_to_cart or 0) * 2 + (s.views or 0) * 0.2
+    score = score * recency_weight(msg["Site-Id"], sku)
     if score > 0 then
       local pkey = ids.product_key(msg["Site-Id"], sku)
       if state.products[pkey] then
@@ -1896,6 +1919,9 @@ function handlers.Bestsellers(msg)
       table.insert(lines, string.format("%s,%s", r.sku, r.score or 0))
     end
     return codec.ok { siteId = msg["Site-Id"], format = "csv", body = table.concat(lines, "\n") }
+  end
+  if msg.Format == "json" then
+    return codec.ok { siteId = msg["Site-Id"], items = ranked, total = #ranked, format = "json" }
   end
   return codec.ok { siteId = msg["Site-Id"], items = ranked, total = #ranked, format = "json" }
 end
