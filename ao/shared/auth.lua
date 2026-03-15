@@ -167,6 +167,21 @@ function Auth.require_signature(msg)
   end
 end
 
+function Auth.verify_outbox_hmac(msg)
+  local secret = os.getenv("OUTBOX_HMAC_SECRET")
+  if not secret or secret == "" then return true end
+  local provided = msg.hmac or msg.Hmac
+  if not provided then return false, "missing_outbox_hmac" end
+  local crypto_ok, crypto = pcall(require, "ao.shared.crypto")
+  if not crypto_ok then return false, "crypto_missing" end
+  local payload = (msg["Site-Id"] or "") .. "|" .. (msg["Page-Id"] or msg["Order-Id"] or "") .. "|" .. (msg.Version or msg["Manifest-Tx"] or msg.Amount or "")
+  local expected = crypto.hmac_sha256_hex(payload, secret)
+  if not expected or expected:lower() ~= tostring(provided):lower() then
+    return false, "outbox_hmac_mismatch"
+  end
+  return true
+end
+
 local function rate_key(msg)
   local site = msg["Site-Id"] or "global"
   local actor = msg.Subject or msg["Actor-Id"] or msg["Actor-Role"] or "anon"

@@ -30,6 +30,11 @@ jobs:
           RUN_DEPS_CHECK: 1
         run: scripts/verify/preflight.sh
 
+      - name: Checksum alert (audit/queue/wal)
+        env:
+          AUDIT_LOG_DIR: arweave/manifests
+        run: scripts/verify/checksum_alert.sh
+
       - name: Secret scan (gitleaks)
         run: gitleaks detect --no-git -v
 

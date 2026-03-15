@@ -229,6 +229,11 @@ local function route(msg)
     return codec.error("MISSING_ACTION", "Action is required")
   end
 
+  local ok_hmac, hmac_err = auth.verify_outbox_hmac(msg)
+  if not ok_hmac then
+    return codec.error("FORBIDDEN", hmac_err)
+  end
+
   local ok_role, role_err = auth.require_role_for_action(msg, role_policy)
   if not ok_role then
     return codec.error("FORBIDDEN", role_err)

@@ -174,6 +174,36 @@ do
   if not ok_env then error("envelope schema should validate minimal payload: " .. tostring(errs[1])) end
 end
 
+-- Concurrent PublishVersion vs SetActiveVersion with envelope/schema validation
+do
+  local reg = require("ao.registry.process")
+  local siteProc = require("ao.site.process")
+  local schema = require("ao.shared.schema")
+  reg.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "conc-schema", ["Actor-Role"] = "admin" }))
+  for i = 1, 15 do
+    local ver = "sv" .. i
+    local env_ok = schema.validate_envelope({
+      action = "PublishPageVersion",
+      requestId = "rid-" .. ver,
+      actor = "pub",
+      tenant = "t",
+      timestamp = "2026-03-15T00:00:00Z",
+      nonce = "n-" .. ver,
+      signatureRef = "s-" .. ver,
+      payload = { siteId = "conc-schema", pageId = "p", versionId = ver, manifestTx = "tx-" .. ver }
+    })
+    if not env_ok then error("envelope schema failed during fuzz") end
+    siteProc.route(with_req({ Action = "PutDraft", ["Site-Id"] = "conc-schema", ["Page-Id"] = "p", Content = { title = ver }, ["Actor-Role"] = "editor" }))
+    if math.random() < 0.5 then
+      siteProc.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "conc-schema", Version = ver, ["Actor-Role"] = "publisher" }))
+    else
+      reg.route(with_req({ Action = "SetActiveVersion", ["Site-Id"] = "conc-schema", Version = ver, ["Actor-Role"] = "registry-admin" }))
+    end
+  end
+  local conf2 = reg.route(with_req({ Action = "GetSiteConfig", ["Site-Id"] = "conc-schema" }))
+  if conf2.status ~= "OK" then error("site config missing after schema fuzz") end
+end
+
 -- Rate limit sqlite smoke
 do
   os.setenv("AUTH_RATE_LIMIT_SQLITE", "/tmp/ao-rate-fuzz.db")
