@@ -21,6 +21,15 @@ local allowed_actions = {
   "GetLayout",
   "GetNavigation",
   "PutDraft",
+  "AddDraftComment",
+  "RequestPublish",
+  "ApprovePublish",
+  "SchedulePublish",
+  "LockDraft",
+  "UnlockDraft",
+  "RegisterContentType",
+  "SetPerfBudgets",
+  "RecordWebVital",
   "UpsertRoute",
   "UpsertLayout",
   "RegisterAsset",
@@ -35,6 +44,15 @@ local allowed_actions = {
 
 local role_policy = {
   PutDraft = { "editor", "publisher", "admin" },
+  AddDraftComment = { "editor", "publisher", "admin" },
+  RequestPublish = { "editor", "publisher", "admin" },
+  ApprovePublish = { "publisher", "admin" },
+  SchedulePublish = { "publisher", "admin" },
+  LockDraft = { "editor", "publisher", "admin" },
+  UnlockDraft = { "editor", "publisher", "admin" },
+  RegisterContentType = { "admin" },
+  SetPerfBudgets = { "admin" },
+  RecordWebVital = { "viewer", "support", "editor", "publisher", "admin" },
   UpsertRoute = { "editor", "publisher", "admin" },
   UpsertLayout = { "editor", "publisher", "admin" },
   RegisterAsset = { "editor", "publisher", "admin" },
@@ -58,6 +76,12 @@ local state = {
   orders = {}, -- siteId -> orderId -> { status, totalAmount, currency, vatRate, updatedAt }
   assets = {}, -- siteId -> assetId -> metadata
   locales = {}, -- siteId -> { default = "en", supported = { "en" } }
+  draft_comments = {}, -- draftKey -> { { author, body, ts } }
+  draft_locks = {}, -- draftKey -> { subject, ts, ttl }
+  publish_schedules = {}, -- siteId -> list { pageId, version, locale, publishAt, expireAt }
+  content_types = {}, -- siteId -> { name -> schema }
+  perf_budgets = {}, -- siteId -> { lcp_ms, cls, tbt_ms }
+  perf_vitals = {}, -- siteId -> { last = { metric, value, ts } }
 }
 
 local MAX_CONTENT_BYTES = tonumber(os.getenv "SITE_MAX_CONTENT_BYTES" or "") or (64 * 1024)
@@ -137,6 +161,9 @@ function handlers.ResolveRoute(msg)
   if not route then
     return codec.error("NOT_FOUND", "Route not found", { path = msg.Path })
   end
+  local cache_policy = state.edge_cache
+    and state.edge_cache[msg["Site-Id"]]
+    and state.edge_cache[msg["Site-Id"]][route.path or msg.Path]
   return codec.ok {
     siteId = msg["Site-Id"],
     path = msg.Path,
@@ -144,6 +171,7 @@ function handlers.ResolveRoute(msg)
     pageId = route.pageId,
     layoutId = route.layoutId,
     type = route.type or "page",
+    cache = cache_policy,
   }
 end
 
@@ -365,8 +393,38 @@ function handlers.PutDraft(msg)
     content = msg.Content,
     updatedAt = os.date "!%Y-%m-%dT%H:%M:%SZ",
     locale = locale,
+    status = "draft",
+    publishAt = msg.PublishAt,
+    expireAt = msg.ExpireAt,
   }
   return codec.ok { draftId = key, warnings = a11y_warnings, locale = locale }
+end
+
+function handlers.AddDraftComment(msg)
+  local ok, missing = validation.require_fields(msg, { "Draft-Id", "Author", "Body" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Draft-Id",
+    "Author",
+    "Body",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  state.draft_comments[msg["Draft-Id"]] = state.draft_comments[msg["Draft-Id"]] or {}
+  table.insert(state.draft_comments[msg["Draft-Id"]], {
+    author = msg.Author,
+    body = msg.Body,
+    ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
+  })
+  return codec.ok { draftId = msg["Draft-Id"], count = #state.draft_comments[msg["Draft-Id"]] }
 end
 
 function handlers.UpsertRoute(msg)
@@ -720,6 +778,130 @@ function handlers.ArchivePage(msg)
     state.pages[fallback].archived = true
   end
   return codec.ok { pageId = msg["Page-Id"], version = version, locale = locale, archived = true }
+end
+
+-- Authoring workflow -----------------------------------------------------
+local function assert_lock(draft_id, subject)
+  local lock = state.draft_locks[draft_id]
+  if not lock then
+    return true
+  end
+  local ttl = lock.ttl or 900
+  if os.time() - (lock.ts or 0) > ttl then
+    state.draft_locks[draft_id] = nil
+    return true
+  end
+  if lock.subject == subject then
+    lock.ts = os.time()
+    return true
+  end
+  return false, "LOCKED_BY_OTHER"
+end
+
+function handlers.LockDraft(msg)
+  local ok, missing = validation.require_fields(msg, { "Draft-Id", "Subject" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local allowed, reason = assert_lock(msg["Draft-Id"], msg.Subject)
+  if not allowed then
+    return codec.error("CONFLICT", reason)
+  end
+  state.draft_locks[msg["Draft-Id"]] = { subject = msg.Subject, ts = os.time(), ttl = 900 }
+  return codec.ok { draftId = msg["Draft-Id"], subject = msg.Subject }
+end
+
+function handlers.UnlockDraft(msg)
+  local ok, missing = validation.require_fields(msg, { "Draft-Id", "Subject" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local lock = state.draft_locks[msg["Draft-Id"]]
+  if lock and lock.subject ~= msg.Subject then
+    return codec.error("FORBIDDEN", "Only lock owner can unlock")
+  end
+  state.draft_locks[msg["Draft-Id"]] = nil
+  return codec.ok { draftId = msg["Draft-Id"], unlocked = true }
+end
+
+function handlers.RequestPublish(msg)
+  local ok, missing = validation.require_fields(msg, { "Draft-Id", "Requested-By" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local draft = state.drafts[msg["Draft-Id"]]
+  if not draft then
+    return codec.error("NOT_FOUND", "Draft not found")
+  end
+  draft.status = "in_review"
+  draft.requestedBy = msg["Requested-By"]
+  draft.requestedAt = os.date "!%Y-%m-%dT%H:%M:%SZ"
+  return codec.ok { draftId = msg["Draft-Id"], status = draft.status }
+end
+
+function handlers.ApprovePublish(msg)
+  local ok, missing = validation.require_fields(msg, { "Draft-Id", "Approved-By" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local draft = state.drafts[msg["Draft-Id"]]
+  if not draft then
+    return codec.error("NOT_FOUND", "Draft not found")
+  end
+  draft.status = "approved"
+  draft.approvedBy = msg["Approved-By"]
+  draft.approvedAt = os.date "!%Y-%m-%dT%H:%M:%SZ"
+  return codec.ok { draftId = msg["Draft-Id"], status = draft.status }
+end
+
+function handlers.SchedulePublish(msg)
+  local ok, missing =
+    validation.require_fields(msg, { "Site-Id", "Page-Id", "Version", "Publish-At" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local locale = pick_locale(msg["Site-Id"], msg.Locale)
+  state.publish_schedules[msg["Site-Id"]] = state.publish_schedules[msg["Site-Id"]] or {}
+  table.insert(state.publish_schedules[msg["Site-Id"]], {
+    pageId = msg["Page-Id"],
+    version = msg.Version,
+    locale = locale,
+    publishAt = msg["Publish-At"],
+    expireAt = msg["Expire-At"],
+  })
+  return codec.ok { siteId = msg["Site-Id"], count = #state.publish_schedules[msg["Site-Id"]] }
+end
+
+function handlers.RegisterContentType(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Name", "Schema" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  state.content_types[msg["Site-Id"]] = state.content_types[msg["Site-Id"]] or {}
+  state.content_types[msg["Site-Id"]][msg.Name] = msg.Schema
+  return codec.ok { siteId = msg["Site-Id"], name = msg.Name }
+end
+
+function handlers.SetPerfBudgets(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Budgets" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  state.perf_budgets[msg["Site-Id"]] = msg.Budgets
+  return codec.ok { siteId = msg["Site-Id"], budgets = msg.Budgets }
+end
+
+function handlers.RecordWebVital(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Metric", "Value" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  state.perf_vitals[msg["Site-Id"]] = {
+    metric = msg.Metric,
+    value = msg.Value,
+    ts = os.time(),
+  }
+  return codec.ok { siteId = msg["Site-Id"], metric = msg.Metric }
 end
 
 function handlers.RecordOrder(msg)
