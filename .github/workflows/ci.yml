@@ -20,17 +20,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y lua5.4 luarocks
 
-      - name: "Install required rocks (Lua 5.4: cjson/luv/lsqlite3/luaossl)"
+      - name: "Install required rocks (Lua 5.4: lua-cjson/luv/lsqlite3/luaossl)"
         run: |
-          rocks=(
-            "cjson 2.1.0-1"
-            "luv 1.51.0-1"
-            "lsqlite3 0.9.5-1"
-            "luaossl 20230929-0"
-          )
-          for entry in "${rocks[@]}"; do
-            set -- $entry
-            luarocks --lua-version=5.4 install --local "$1" "$2" || exit 1
+          rocks=(lua-cjson luv lsqlite3 luaossl)
+          for rock in "${rocks[@]}"; do
+            luarocks --lua-version=5.4 install --local "$rock" || exit 1
           done
           echo "$HOME/.luarocks/bin" >> $GITHUB_PATH
 
