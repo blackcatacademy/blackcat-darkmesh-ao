@@ -114,6 +114,8 @@ local function publish_alert(entry, msg)
     ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
     entry = entry,
     message = msg,
+    retryCount = entry.retryCount,
+    lastError = entry.lastError,
   }
   if PUBLISH_ALERT_PATH then
     local f = io.open(PUBLISH_ALERT_PATH, "a")
@@ -491,6 +493,7 @@ function handlers.PutDraft(msg)
         table.insert(changed_fields, k)
       end
     end
+    previous.versions = previous.versions or {}
     if msg.Merge == true and type(previous.content) == "table" then
       for k, v in pairs(msg.Content) do
         if type(v) == "table" and type(previous.content[k]) == "table" then
@@ -503,12 +506,16 @@ function handlers.PutDraft(msg)
         end
       end
     end
+    for _, field in ipairs(changed_fields) do
+      previous.versions[field] = (previous.versions[field] or 0) + 1
+    end
     state.draft_audit[key] = state.draft_audit[key] or {}
     table.insert(state.draft_audit[key], {
       ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
       actor = msg.Subject or msg["Actor-Role"],
       fields = changed_fields,
       conflicts = conflicts,
+      versions = previous.versions,
     })
   end
   state.drafts[key] = {
@@ -1137,6 +1144,8 @@ function handlers.RunPublishScheduler(msg)
             locale = entry.locale,
             action = "publish",
             status = entry.status,
+            retryCount = entry.retryCount,
+            lastError = entry.lastError,
           })
           entry.status = "published"
           entry.lastError = nil
@@ -1150,6 +1159,8 @@ function handlers.RunPublishScheduler(msg)
             locale = entry.locale,
             action = "missing_draft",
             status = entry.status,
+            retryCount = entry.retryCount,
+            lastError = entry.lastError,
           })
           entry.retryCount = (entry.retryCount or 0) + 1
           entry.lastError = "draft_missing"
@@ -1174,6 +1185,7 @@ function handlers.RunPublishScheduler(msg)
               action = "failed_retry",
               retryCount = entry.retryCount,
               lastError = entry.lastError,
+              status = entry.status,
             })
           end
         end
