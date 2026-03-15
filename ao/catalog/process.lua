@@ -35,6 +35,7 @@ local RETURN_LABEL_BASE = os.getenv "CATALOG_RETURN_LABEL_BASE" or CARRIER_LABEL
 local JWT_HMAC_SECRET = os.getenv "CATALOG_JWT_SECRET" or os.getenv "JWT_SECRET"
 local INVOICE_SIGN_SECRET = os.getenv "CATALOG_INVOICE_SIGN_SECRET"
 local PDF_RENDER_CMD = os.getenv "CATALOG_PDF_RENDER_CMD" or "cat" -- expects: CMD input.html output.pdf
+local FEED_EXPORT_PATH = os.getenv "CATALOG_FEED_EXPORT_PATH"
 
 local handlers = {}
 local allowed_actions = {
@@ -104,6 +105,7 @@ local allowed_actions = {
   "SignPayload",
   "VerifySignature",
   "ExportCatalogFeed",
+  "ExportSearchFeed",
 }
 
 local role_policy = {
@@ -168,6 +170,7 @@ local role_policy = {
   SignPayload = { "admin", "catalog-admin" },
   VerifySignature = { "admin", "catalog-admin" },
   ExportCatalogFeed = { "catalog-admin", "support", "admin", "viewer" },
+  ExportSearchFeed = { "catalog-admin", "support", "admin", "viewer" },
 }
 
 local state = {
@@ -1460,6 +1463,93 @@ function handlers.ExportCatalogFeed(msg)
   end
   local next_cursor = (#keys > start_index + limit - 1) and keys[start_index + limit - 1] or nil
   return codec.ok { siteId = site, items = items, nextCursor = next_cursor, total = #items }
+end
+
+function handlers.ExportSearchFeed(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Cursor",
+    "Limit",
+    "UpdatedAfter",
+    "Path",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local site = msg["Site-Id"]
+  if not site then
+    return codec.error("INVALID_INPUT", "Site-Id required")
+  end
+  local updated_after = tonumber(msg.UpdatedAfter) or 0
+  local limit = tonumber(msg.Limit) or 500
+  if limit < 1 then
+    limit = 1
+  end
+  if limit > 2000 then
+    limit = 2000
+  end
+  local cursor = msg.Cursor or ""
+  local prefix = "product:" .. site .. ":"
+  local keys = {}
+  for key, product in pairs(state.products) do
+    if key:sub(1, #prefix) == prefix then
+      local updated = product.payload.updatedAt or product.payload.updated_at or 0
+      if updated >= updated_after then
+        table.insert(keys, { key = key, updated = updated })
+      end
+    end
+  end
+  table.sort(keys, function(a, b)
+    if a.updated == b.updated then
+      return a.key < b.key
+    end
+    return (a.updated or 0) > (b.updated or 0)
+  end)
+  local start_index = 1
+  if cursor ~= "" then
+    for i, row in ipairs(keys) do
+      if row.key == cursor then
+        start_index = i + 1
+        break
+      end
+    end
+  end
+  local items = {}
+  for i = start_index, math.min(#keys, start_index + limit - 1) do
+    local row = keys[i]
+    table.insert(
+      items,
+      { key = row.key, updatedAt = row.updated, payload = state.products[row.key].payload }
+    )
+  end
+  local next_cursor = (#keys > start_index + limit - 1) and keys[start_index + limit - 1].key or nil
+  -- optional NDJSON export
+  if msg.Path or FEED_EXPORT_PATH then
+    local path = msg.Path or FEED_EXPORT_PATH
+    local f = io.open(path, "w")
+    if f and json_ok then
+      for _, item in ipairs(items) do
+        local ok_line, line = pcall(cjson.encode, item)
+        if ok_line and line then
+          f:write(line)
+          f:write "\n"
+        end
+      end
+      f:close()
+    end
+  end
+  return codec.ok {
+    siteId = site,
+    items = items,
+    nextCursor = next_cursor,
+    total = #items,
+    updatedAfter = updated_after,
+  }
 end
 
 function handlers.ApplyOrderEvent(msg)
