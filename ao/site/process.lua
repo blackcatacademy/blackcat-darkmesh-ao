@@ -12,6 +12,7 @@ local schema = require "ao.shared.schema"
 local assets = require "ao.shared.assets"
 local a11y = require "ao.shared.a11y"
 local i18n = require "ao.shared.i18n"
+local layout_components = require "ao.shared.layout_components"
 
 local handlers = {}
 local allowed_actions = {

@@ -1,4 +1,7 @@
 -- Catalog process handlers: products, categories, listings.
+-- luacheck: ignore parse_header mark_webhook_seen record_shipment_event notify_customer purge_cache
+-- luacheck: ignore resize_and_store add_price_window parse_set is_eu is_vat_id_valid dimensional_weight
+-- luacheck: ignore push_low_stock deliver_stock_alert forget_subject pick_tax_rule
 
 local codec = require "ao.shared.codec"
 local validation = require "ao.shared.validation"
@@ -23,6 +26,7 @@ local INVOICE_PDF_DIR = os.getenv "CATALOG_INVOICE_PDF_DIR"
 local INVOICE_NUMBER_WITH_YEAR = os.getenv "CATALOG_INVOICE_YEAR" ~= "0"
 local INVOICE_S3_BUCKET = os.getenv "CATALOG_INVOICE_S3_BUCKET"
 local HTTP_TIMEOUT = tonumber(os.getenv "CATALOG_HTTP_TIMEOUT" or "") or 5
+local HTTP_CONNECT_TIMEOUT = tonumber(os.getenv "CATALOG_HTTP_CONNECT_TIMEOUT" or "") or 2
 local S3_TIMEOUT = tonumber(os.getenv "CATALOG_S3_TIMEOUT" or "") or 10
 local S3_RETRIES = tonumber(os.getenv "CATALOG_S3_RETRIES" or "") or 2
 local EVENT_LOG_LIMIT = tonumber(os.getenv "CATALOG_EVENT_LOG_LIMIT" or "") or 5000
@@ -46,10 +50,25 @@ local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" or os.getenv "CDN_PURGE_
 local RMA_WEBHOOK = os.getenv "CATALOG_RMA_WEBHOOK"
 local STRIPE_SECRET = os.getenv "CATALOG_STRIPE_SECRET"
 local STRIPE_WEBHOOK_SECRET = os.getenv "CATALOG_STRIPE_WEBHOOK_SECRET"
+local STRIPE_WEBHOOK_ID = os.getenv "CATALOG_STRIPE_WEBHOOK_ID"
+local STRIPE_VERIFY_EVENT = os.getenv "CATALOG_STRIPE_VERIFY_EVENT" == "1"
 local PAYPAL_WEBHOOK_ID = os.getenv "CATALOG_PAYPAL_WEBHOOK_ID"
 local PAYPAL_WEBHOOK_SECRET = os.getenv "CATALOG_PAYPAL_WEBHOOK_SECRET"
+local PAYPAL_CERT_HOST = os.getenv "CATALOG_PAYPAL_CERT_HOST" or "paypal.com"
+local PAYPAL_CERT_CACHE_SEC = tonumber(os.getenv "CATALOG_PAYPAL_CERT_CACHE_SEC" or "") or 3600
+local CARRIER_WEBHOOK_TOLERANCE = tonumber(os.getenv "CATALOG_CARRIER_WEBHOOK_TOLERANCE" or "")
+  or 600
 local ADYEN_HMAC_KEY = os.getenv "CATALOG_ADYEN_HMAC_KEY"
-local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" -- optional, e.g. "curl -X POST https://api.fastly.com/service/... -H 'Fastly-Key: ...' -H 'Surrogate-Key: %s'"
+local CDN_SURROGATE_CMD = os.getenv "CATALOG_CDN_SURROGATE_CMD"
+-- optional, e.g. "curl -sS -X POST https://api.fastly.com/service/... -H 'Fastly-Key: ...' -H 'Surrogate-Key: %s'"
+local IMAGE_RESIZE_CMD = os.getenv "CATALOG_IMAGE_RESIZE_CMD" -- e.g. "vipsthumbnail %s --size %dx%d -o %s"
+local IMAGE_STORE_DIR = os.getenv "CATALOG_IMAGE_STORE_DIR"
+local IMAGE_FORMATS = os.getenv "CATALOG_IMAGE_FORMATS" or "webp,avif,jpg"
+local IMAGE_SIZES = os.getenv "CATALOG_IMAGE_SIZES" or "320x320,640x640,1280x1280"
+local IMAGE_S3_BUCKET = os.getenv "CATALOG_IMAGE_S3_BUCKET"
+local IMAGE_S3_PREFIX = os.getenv "CATALOG_IMAGE_S3_PREFIX" or ""
+local IMAGE_PUBLIC_BASE = os.getenv "CATALOG_IMAGE_PUBLIC_BASE"
+local US_NEXUS_STATES = os.getenv "CATALOG_US_NEXUS_STATES" or ""
 local RETENTION_DAYS = tonumber(os.getenv "CATALOG_RETENTION_DAYS" or "") or 30
 local SEARCH_SYNONYMS_PATH = os.getenv "CATALOG_SEARCH_SYNONYMS_PATH"
 local SEARCH_STOPWORDS_PATH = os.getenv "CATALOG_SEARCH_STOPWORDS_PATH"
@@ -58,6 +77,31 @@ local NOTIFY_RETRIES = tonumber(os.getenv "CATALOG_NOTIFY_RETRIES" or "") or 2
 local NOTIFY_BACKOFF_MS = tonumber(os.getenv "CATALOG_NOTIFY_BACKOFF_MS" or "") or 200
 local IMPORT_MAX_ROWS = tonumber(os.getenv "CATALOG_IMPORT_MAX_ROWS" or "") or 5000
 local THREE_DS_URL = os.getenv "CATALOG_3DS_URL" or "https://3ds.example.com/challenge/"
+local WEBHOOK_REPLAY_WINDOW = tonumber(os.getenv "CATALOG_WEBHOOK_REPLAY_WINDOW" or "") or 600
+local CHALLENGE_TTL = tonumber(os.getenv "CATALOG_3DS_TTL" or "") or 900
+local MERCHANT_COUNTRY = (os.getenv "CATALOG_MERCHANT_COUNTRY" or "US"):upper()
+
+local openssl_ok, openssl = pcall(require, "openssl")
+local sodium_ok, sodium = pcall(require, "sodium")
+if not sodium_ok then
+  sodium_ok, sodium = pcall(require, "luasodium")
+end
+
+-- forward declarations to satisfy luacheck
+local parse_header
+local mark_webhook_seen
+local record_shipment_event
+local notify_customer
+local purge_cache
+local resize_and_store
+local add_price_window
+local parse_set
+local is_eu
+local is_vat_id_valid
+local dimensional_weight
+local push_low_stock
+local deliver_stock_alert
+local forget_subject
 
 local handlers = {}
 local allowed_actions = {
@@ -147,6 +191,7 @@ local allowed_actions = {
   "ListNotificationFailures",
   "ImportCatalogCSV",
   "BulkPriceUpdate",
+  "Complete3DSChallenge",
 }
 
 local role_policy = {
@@ -231,6 +276,7 @@ local role_policy = {
   ListNotificationFailures = { "admin", "catalog-admin", "support" },
   ImportCatalogCSV = { "catalog-admin", "admin" },
   BulkPriceUpdate = { "catalog-admin", "admin" },
+  Complete3DSChallenge = { "catalog-admin", "support", "admin" },
 }
 
 local state = {
@@ -242,9 +288,11 @@ local state = {
   orders = {}, -- orderId -> order record
   shipments = {}, -- shipmentId -> { status, tracking, carrier, eta, orderId }
   returns = {}, -- returnId -> { status, reason, orderId }
+  assets = {}, -- siteId -> sku -> { original, variants = { {url, w, h, fmt} } }
   shipping_rates = {}, -- siteId -> list of rate rows
   tax_rates = {}, -- siteId -> list of tax rows
   price_lists = {}, -- siteId -> currency -> { sku -> price }
+  price_windows = {}, -- siteId -> currency -> { { region, valid_from, valid_to, prices = {sku=price} } }
   promos = {}, -- code -> { type = "percent"|"amount", value, skus }
   variants = {}, -- siteId -> parentSku -> { variants = { { sku, attrs, price } } }
   tax_rules = {}, -- siteId -> list { country, region?, rate }
@@ -255,7 +303,7 @@ local state = {
   payments = {}, -- paymentId -> { status, amount, currency, method, siteId, orderId, checkoutId, requiresAction }
   telemetry = {}, -- buffered events for export
   companies = {}, -- companyId -> { name, users = { [userId] = role } }
-  purchase_orders = {}, -- poId -> { siteId, companyId, items, address, currency, subtotal, tax, shipping, total, status, approvals = {} }
+  purchase_orders = {}, -- poId -> { siteId, companyId, items, totals, status, approvals = {} }
   invoices = {}, -- invoiceId -> { orderId, siteId, total, currency, lines, issuedAt, status }
   invoice_seq = {}, -- siteId -> last number
   invoice_seq_year = {}, -- siteId -> year -> last number
@@ -271,10 +319,218 @@ local state = {
   search_stopwords = {}, -- siteId -> set of stopwords
   notification_failures = {}, -- siteId -> list of { type, target, payload, attempts, ts }
   payment_attempts = {}, -- paymentId -> list of events
+  webhook_seen = {}, -- id -> ts for replay protection
+  provider_events = {}, -- provider -> id -> ts
+  stripe_idempotency = {}, -- idemKey -> { paymentId, status }
+  paypal_certs = {}, -- url -> { pem, fetchedAt }
 }
 
 local function gen_id(prefix)
   return string.format("%s-%d-%04d", prefix, os.time(), math.random(0, 9999))
+end
+
+local function hex_encode(bytes)
+  if not bytes then
+    return nil
+  end
+  if openssl_ok and openssl.hex then
+    return openssl.hex(bytes)
+  end
+  if sodium_ok then
+    if sodium.to_hex then
+      return sodium.to_hex(bytes)
+    end
+    if sodium.bin2hex then
+      return sodium.bin2hex(bytes)
+    end
+  end
+  return (bytes:gsub(".", function(c)
+    return string.format("%02x", string.byte(c))
+  end))
+end
+
+local function hmac_sha256_hex(data, key)
+  if not key or key == "" then
+    return nil, "missing_key"
+  end
+  if openssl_ok and openssl.hmac then
+    local raw = openssl.hmac.digest("sha256", data, key, true)
+    return hex_encode(raw)
+  end
+  if sodium_ok and sodium.crypto_auth then
+    local raw = sodium.crypto_auth(data, key)
+    return hex_encode(raw)
+  end
+  return nil, "hmac_unavailable"
+end
+
+local function mark_event_seen(provider, event_id, ts)
+  if not provider or not event_id then
+    return true
+  end
+  ts = ts or os.time()
+  state.provider_events[provider] = state.provider_events[provider] or {}
+  local last = state.provider_events[provider][event_id]
+  if last and (ts - last) <= WEBHOOK_REPLAY_WINDOW then
+    return false, "event_replayed"
+  end
+  state.provider_events[provider][event_id] = ts
+  return true
+end
+
+local function stripe_fetch_event(event_id)
+  if not STRIPE_SECRET or STRIPE_SECRET == "" or not event_id then
+    return nil, "missing_secret"
+  end
+  local url = string.format("https://api.stripe.com/v1/events/%s", event_id)
+  local cmd = string.format(
+    "curl -sS --max-time %d --connect-timeout %d -u '%s:' %s",
+    HTTP_TIMEOUT,
+    HTTP_CONNECT_TIMEOUT,
+    STRIPE_SECRET,
+    url
+  )
+  local reader = io.popen(cmd, "r")
+  if not reader then
+    return nil, "curl_failed"
+  end
+  local body = reader:read "*a"
+  local ok_close = reader:close()
+  if not ok_close then
+    return nil, "curl_exit"
+  end
+  if not json_ok then
+    return body
+  end
+  local ok_dec, obj = pcall(cjson.decode, body)
+  if ok_dec then
+    return obj
+  end
+  return nil, "decode_failed"
+end
+
+local function hostname_from_url(url)
+  if not url or url == "" then
+    return nil
+  end
+  return url:match "^https?://([^/]+)"
+end
+
+local function fetch_paypal_cert(cert_url)
+  if not cert_url or cert_url == "" then
+    return nil, "no_cert_url"
+  end
+  local cached = state.paypal_certs[cert_url]
+  if cached and (os.time() - cached.fetchedAt) < PAYPAL_CERT_CACHE_SEC then
+    return cached.pem
+  end
+  local host = hostname_from_url(cert_url)
+  if not host or not host:match(PAYPAL_CERT_HOST:gsub("%.", "%%.") .. "$") then
+    return nil, "cert_host_blocked"
+  end
+  local cmd = string.format(
+    "curl -sS --max-time %d --connect-timeout %d '%s'",
+    HTTP_TIMEOUT,
+    HTTP_CONNECT_TIMEOUT,
+    cert_url
+  )
+  local reader = io.popen(cmd, "r")
+  if not reader then
+    return nil, "curl_failed"
+  end
+  local pem = reader:read "*a"
+  local ok_close = reader:close()
+  if not ok_close or not pem or pem == "" then
+    return nil, "curl_exit"
+  end
+  state.paypal_certs[cert_url] = { pem = pem, fetchedAt = os.time() }
+  return pem
+end
+
+local function verify_paypal_cert_signature(signed, signature_b64, cert_pem)
+  if not signature_b64 or signature_b64 == "" then
+    return false, "missing_signature"
+  end
+  local tmp_sig = os.tmpname()
+  local tmp_cert = os.tmpname()
+  local tmp_data = os.tmpname()
+  local fdata = io.open(tmp_data, "w")
+  if not fdata then
+    return false, "tmp_data_failed"
+  end
+  fdata:write(signed)
+  fdata:close()
+  local tmp_b64 = os.tmpname()
+  local fb = io.open(tmp_b64, "w")
+  if not fb then
+    os.remove(tmp_data)
+    return false, "tmp_b64_failed"
+  end
+  fb:write(signature_b64)
+  fb:close()
+  local dec_rc = os.execute(string.format("base64 -d %s > %s", tmp_b64, tmp_sig))
+  os.remove(tmp_b64)
+  if dec_rc ~= true and dec_rc ~= 0 then
+    os.remove(tmp_data)
+    os.remove(tmp_sig)
+    return false, "base64_decode_failed"
+  end
+  local fcert = io.open(tmp_cert, "w")
+  if not fcert then
+    os.remove(tmp_data)
+    if tmp_sig then
+      os.remove(tmp_sig)
+    end
+    return false, "tmp_cert_failed"
+  end
+  fcert:write(cert_pem)
+  fcert:close()
+  local cmd =
+    string.format("openssl dgst -sha256 -verify %s -signature %s %s", tmp_cert, tmp_sig, tmp_data)
+  local rc = os.execute(cmd)
+  os.remove(tmp_data)
+  if tmp_sig then
+    os.remove(tmp_sig)
+  end
+  os.remove(tmp_cert)
+  return rc == true or rc == 0, rc
+end
+
+local function cache_stripe_idempotency(msg, result)
+  local idem_key = msg.IdempotencyKey or parse_header(msg.Headers, "Idempotency-Key")
+  if idem_key and idem_key ~= "" then
+    state.stripe_idempotency[idem_key] = result
+  end
+end
+
+local function check_stripe_idempotency(msg)
+  local idem_key = msg.IdempotencyKey or parse_header(msg.Headers, "Idempotency-Key")
+  if idem_key and state.stripe_idempotency[idem_key] then
+    return state.stripe_idempotency[idem_key]
+  end
+end
+
+local function validate_payment_event(ev, pay)
+  if
+    ev.currency
+    and pay.currency
+    and tostring(ev.currency):upper() ~= tostring(pay.currency):upper()
+  then
+    return false, "currency_mismatch"
+  end
+  if ev.amount and pay.amount and ev.amount > (pay.amount + 0.01) then
+    return false, "amount_exceeds"
+  end
+  if ev.type == "refund_succeeded" or ev.refundAmount then
+    local refund_amt = ev.amount or ev.refundAmount or pay.refundAmount or 0
+    if refund_amt > pay.amount then
+      return false, "refund_gt_payment"
+    end
+  end
+  if ev.orderId and pay.orderId and ev.orderId ~= pay.orderId then
+    return false, "order_mismatch"
+  end
+  return true
 end
 
 local MAX_PAYLOAD_BYTES = tonumber(os.getenv "CATALOG_MAX_PAYLOAD_BYTES" or "") or (64 * 1024)
@@ -495,7 +751,8 @@ local function record_telemetry(kind, data)
   })
 end
 
-local function http_post_json(url, payload)
+local function http_post_json(url, payload, opts)
+  opts = opts or {}
   if not json_ok then
     return nil, "JSON_ENCODE_DISABLED"
   end
@@ -510,15 +767,40 @@ local function http_post_json(url, payload)
   end
   f:write(body)
   f:close()
-  local auth = ""
-  if CARRIER_API_TOKEN and CARRIER_API_TOKEN ~= "" then
-    auth = "-H 'Authorization: Bearer " .. CARRIER_API_TOKEN .. "' "
+
+  local header_flags = "-H 'Content-Type: application/json'"
+  if opts.headers then
+    for k, v in pairs(opts.headers) do
+      if v and v ~= "" then
+        header_flags = header_flags .. string.format(" -H '%s: %s'", k, v)
+      end
+    end
   end
+  if opts.Authorization then
+    header_flags = header_flags .. string.format(" -H 'Authorization: %s'", opts.Authorization)
+  end
+  if opts.bearer then
+    header_flags = header_flags .. string.format(" -H 'Authorization: Bearer %s'", opts.bearer)
+  end
+  if
+    not opts.Authorization
+    and not opts.bearer
+    and CARRIER_API_TOKEN
+    and CARRIER_API_URL
+    and url:find(CARRIER_API_URL, 1, true)
+  then
+    header_flags = header_flags
+      .. string.format(" -H 'Authorization: Bearer %s'", CARRIER_API_TOKEN)
+  end
+
+  local timeout = opts.timeout or HTTP_TIMEOUT
+  local connect_timeout = opts.connect_timeout or HTTP_CONNECT_TIMEOUT
   local cmd = string.format(
-    "curl -sS --max-time %d -X POST %s -H 'Content-Type: application/json' %s --data-binary @%s",
-    HTTP_TIMEOUT,
+    "curl -sS --max-time %d --connect-timeout %d -X POST %s %s --data-binary @%s",
+    timeout,
+    connect_timeout,
+    header_flags,
     url,
-    auth,
     tmp
   )
   local reader = io.popen(cmd, "r")
@@ -532,6 +814,15 @@ local function http_post_json(url, payload)
   if not ok_close then
     return nil, "CURL_EXIT_" .. tostring(code or why)
   end
+  if opts.decode == false then
+    return out, nil
+  end
+  if json_ok then
+    local ok_dec, obj = pcall(cjson.decode, out)
+    if ok_dec then
+      return obj, nil
+    end
+  end
   return out, nil
 end
 
@@ -539,7 +830,7 @@ local function s3_copy_with_retry(path, bucket)
   if not bucket or bucket == "" then
     return false
   end
-  for attempt = 1, (S3_RETRIES + 1) do
+  for _ = 1, (S3_RETRIES + 1) do
     local cmd = string.format(
       "aws s3 cp %s s3://%s/ --no-progress --expected-size %d --cli-read-timeout %d --cli-connect-timeout %d",
       path,
@@ -616,7 +907,7 @@ local function risk_score(checkout)
   return math.min(100, score)
 end
 
-local function build_label(carrier, service, weight)
+local function build_label(carrier, service, weight, dims)
   local shipment_id = gen_id "ship"
   local tracking = string.format("trk-%s-%04d", carrier or "std", math.random(0, 9999))
   local label_url = string.format("%s%s.pdf", CARRIER_LABEL_BASE, shipment_id)
@@ -629,6 +920,7 @@ local function build_label(carrier, service, weight)
     carrier = carrier,
     service = service,
     weight = weight,
+    dimensions = dims,
     status = "label_created",
   }
   -- optional remote label creation
@@ -640,7 +932,7 @@ local function build_label(carrier, service, weight)
       shipmentId = shipment_id,
       weight = weight,
     }
-    local resp, err = http_post_json(CARRIER_LABEL_API_URL, payload, {
+    local resp = http_post_json(CARRIER_LABEL_API_URL, payload, {
       Authorization = CARRIER_LABEL_API_KEY and ("Bearer " .. CARRIER_LABEL_API_KEY) or nil,
     })
     if resp and type(resp) == "table" then
@@ -743,6 +1035,58 @@ function handlers.GetProduct(msg)
     variants = state.variants[msg["Site-Id"]] and state.variants[msg["Site-Id"]][msg.Sku],
     stats = state.events[msg["Site-Id"]] and state.events[msg["Site-Id"]][msg.Sku],
   }
+end
+
+local function calculate_tax_breakdown(site_id, address, cart, shipping_rate)
+  local tax = 0
+  local line_taxes = {}
+  local subtotal_ex = 0
+  local reverse_charge = false
+  local nexus_states = parse_set(US_NEXUS_STATES)
+  local us_taxable = true
+  if address.Country == "US" and next(nexus_states) and address.Region then
+    us_taxable = nexus_states[address.Region:upper()] == true
+  end
+  if
+    is_eu(MERCHANT_COUNTRY)
+    and is_eu(address.Country)
+    and address.Country:upper() ~= MERCHANT_COUNTRY
+    and is_vat_id_valid(address.VatId or address.VAT or address.VATID)
+  then
+    reverse_charge = true
+  end
+  for _, line in ipairs(cart.lines) do
+    local rule, rate = pick_tax_rule(site_id, address, line.taxClass)
+    local incl = (line.taxInclusive == true) or (rule and rule.taxInclusive == true)
+    local line_net = line.line_total
+    local lt = 0
+    if rate > 0 and not reverse_charge and us_taxable then
+      if incl then
+        local divisor = 1 + rate / 100
+        line_net = line.line_total / divisor
+        lt = line.line_total - line_net
+      else
+        lt = line.line_total * rate / 100
+      end
+    end
+    subtotal_ex = subtotal_ex + line_net
+    tax = tax + lt
+    table.insert(line_taxes, {
+      sku = line.sku,
+      tax = lt,
+      taxRate = rate,
+      taxInclusive = incl,
+    })
+  end
+  local shipping_tax = 0
+  if shipping_rate and shipping_rate > 0 then
+    local rule, rate = pick_tax_rule(site_id, address, nil)
+    local taxable = not (rule and rule.shippingTaxable == false)
+    if rate > 0 and taxable and not reverse_charge and us_taxable then
+      shipping_tax = shipping_rate * rate / 100
+    end
+  end
+  return tax, line_taxes, subtotal_ex, shipping_tax, reverse_charge
 end
 
 function handlers.ListCategoryProducts(msg)
@@ -1403,6 +1747,25 @@ local function verify_shared_secret(msg, secret)
     return true
   end
   local sig = msg.Signature or msg.signature or msg.auth or msg["X-Signature"]
+  local ts = msg.Timestamp or msg["X-Timestamp"]
+  local raw = msg.RawBody
+  if raw and sig then
+    local expected = hmac_sha256_hex((ts or "") .. "." .. raw, secret)
+    if not expected or expected:lower() ~= tostring(sig):lower() then
+      return false
+    end
+    if ts then
+      local tnum = tonumber(ts) or 0
+      if math.abs(os.time() - tnum) > CARRIER_WEBHOOK_TOLERANCE then
+        return false
+      end
+      local ok_seen = mark_webhook_seen("carrier:" .. (sig or "") .. ":" .. (ts or ""), tnum)
+      if not ok_seen then
+        return false
+      end
+    end
+    return true
+  end
   if not sig then
     return false
   end
@@ -1475,6 +1838,18 @@ function handlers.HandleCarrierWebhook(msg)
   if not verify_shared_secret(msg, CARRIER_WEBHOOK_SECRET) then
     return codec.error("FORBIDDEN", "Invalid webhook signature")
   end
+  if
+    msg.Timestamp
+    and math.abs(os.time() - (tonumber(msg.Timestamp) or 0)) > CARRIER_WEBHOOK_TOLERANCE
+  then
+    return codec.error("FORBIDDEN", "Stale webhook")
+  end
+  if msg.EventId then
+    local ok_seen, err = mark_event_seen("carrier", msg.EventId, tonumber(msg.Timestamp))
+    if not ok_seen then
+      return codec.error("CONFLICT", "Duplicate webhook", { reason = err })
+    end
+  end
   state.shipments[msg["Shipment-Id"]] = state.shipments[msg["Shipment-Id"]] or {}
   local sh = state.shipments[msg["Shipment-Id"]]
   sh.status = msg.Status or sh.status
@@ -1487,19 +1862,36 @@ function handlers.HandleCarrierWebhook(msg)
     { source = "carrier", tracking = sh.tracking }
   )
   if sh.orderId and state.orders[sh.orderId] then
+    local order = state.orders[sh.orderId]
     if sh.status == "delivered" then
-      state.orders[sh.orderId].status = "delivered"
+      order.status = "delivered"
       notify_customer(
         "shipment.delivered",
         { orderId = sh.orderId, shipmentId = msg["Shipment-Id"] }
       )
-    elseif sh.status == "exception" or sh.status == "delayed" then
-      state.orders[sh.orderId].status = "shipment_issue"
+    elseif sh.status == "out_for_delivery" then
+      order.status = order.status or "out_for_delivery"
+      notify_customer("shipment.out_for_delivery", {
+        orderId = sh.orderId,
+        shipmentId = msg["Shipment-Id"],
+        tracking = sh.tracking,
+      })
+    elseif sh.status == "exception" or sh.status == "delayed" or sh.status == "lost" then
+      order.status = "shipment_issue"
       notify_customer("shipment.issue", {
         orderId = sh.orderId,
         shipmentId = msg["Shipment-Id"],
         status = sh.status,
         tracking = sh.tracking,
+      })
+      state.notification_failures[sh.orderId] = state.notification_failures[sh.orderId] or {}
+      table.insert(state.notification_failures[sh.orderId], {
+        type = "shipment_issue",
+        target = CUSTOMER_WEBHOOK,
+        payload = sh,
+        attempts = 0,
+        ts = os.time(),
+        error = "carrier_" .. sh.status,
       })
     end
   end
@@ -2056,13 +2448,9 @@ function handlers.PurgeCache(msg)
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
   local path = msg.Path or "/*"
-  local result = { purged = path }
-  if CDN_PURGE_CMD and CDN_PURGE_CMD ~= "" then
-    local cmd = string.format(CDN_PURGE_CMD, path)
-    local rc = os.execute(cmd)
-    result.command = cmd
-    result.success = (rc == true or rc == 0)
-  end
+  local keys = msg.SurrogateKeys or {}
+  purge_cache { paths = { path }, keys = keys }
+  local result = { purged = path, surrogateKeys = keys }
   audit.record("catalog", "PurgeCache", msg, nil, { siteId = msg["Site-Id"], path = path })
   return codec.ok(result)
 end
@@ -2483,6 +2871,7 @@ function handlers.CreateShippingLabel(msg)
     "Order-Id",
     "Carrier",
     "Service",
+    "Dimensions",
     "Address",
     "Actor-Role",
     "Schema-Version",
@@ -2498,6 +2887,19 @@ function handlers.CreateShippingLabel(msg)
   if type(ship_to) ~= "table" or not ship_to.Country then
     return codec.error("INVALID_INPUT", "Address.Country required for label")
   end
+  local dims
+  if msg.Dimensions then
+    local d = msg.Dimensions
+    local function dim(name)
+      local v = d[name] or d[name:lower()] or d[name:upper()]
+      return v and tonumber(v) or nil
+    end
+    local L, W, H = dim "Length", dim "Width", dim "Height"
+    if not (L and W and H) then
+      return codec.error("INVALID_INPUT", "Dimensions require Length/Width/Height numbers")
+    end
+    dims = { length = L, width = W, height = H }
+  end
   local weight = 0
   if order.items then
     for _, it in ipairs(order.items) do
@@ -2506,7 +2908,7 @@ function handlers.CreateShippingLabel(msg)
       weight = weight + (payload.weight or payload.Weight or 0) * (it.qty or it.Qty or 1)
     end
   end
-  local label = build_label(carrier, service, weight)
+  local label = build_label(carrier, service, weight, dims)
   label.orderId = msg["Order-Id"]
   label.siteId = msg["Site-Id"]
   label.address = ship_to
@@ -2584,10 +2986,18 @@ function handlers.UpsertProduct(msg)
   local key = ids.product_key(msg["Site-Id"], msg.Sku)
   state.products[key] = { payload = msg.Payload, version = msg.Version }
   audit.record("catalog", "UpsertProduct", msg, nil, { sku = msg.Sku })
-  purge_paths {
-    "/p/" .. msg.Sku,
-    "/api/catalog/" .. msg.Sku,
+  purge_cache {
+    paths = {
+      "/p/" .. msg.Sku,
+      "/api/catalog/" .. msg.Sku,
+    },
+    keys = { "product:" .. msg.Sku },
   }
+  -- image pipeline
+  if msg.Payload.assets and msg.Payload.assets[1] and IMAGE_RESIZE_CMD then
+    local src = msg.Payload.assets[1]
+    resize_and_store(msg["Site-Id"], msg.Sku, src)
+  end
   return codec.ok { sku = msg.Sku }
 end
 
@@ -2608,9 +3018,12 @@ function handlers.DeleteProduct(msg)
   state.deletions[msg["Site-Id"]] = state.deletions[msg["Site-Id"]] or {}
   table.insert(state.deletions[msg["Site-Id"]], { key = key, deletedAt = os.time() })
   audit.record("catalog", "DeleteProduct", msg, nil, { sku = msg.Sku })
-  purge_paths {
-    "/p/" .. msg.Sku,
-    "/api/catalog/" .. msg.Sku,
+  purge_cache {
+    paths = {
+      "/p/" .. msg.Sku,
+      "/api/catalog/" .. msg.Sku,
+    },
+    keys = { "product:" .. msg.Sku },
   }
   return codec.ok { deleted = msg.Sku }
 end
@@ -2726,9 +3139,12 @@ function handlers.UpsertCategory(msg)
     products = msg.Products or state.categories[key] and state.categories[key].products or {},
     updatedAt = os.time(),
   }
-  purge_paths {
-    "/c/" .. msg["Category-Id"],
-    "/api/catalog/category/" .. msg["Category-Id"],
+  purge_cache {
+    paths = {
+      "/c/" .. msg["Category-Id"],
+      "/api/catalog/category/" .. msg["Category-Id"],
+    },
+    keys = { "category:" .. msg["Category-Id"] },
   }
   return codec.ok { categoryId = msg["Category-Id"] }
 end
@@ -2763,9 +3179,12 @@ function handlers.DeleteCategory(msg)
   state.category_deletions[msg["Site-Id"]] = state.category_deletions[msg["Site-Id"]] or {}
   table.insert(state.category_deletions[msg["Site-Id"]], { key = key, deletedAt = os.time() })
   audit.record("catalog", "DeleteCategory", msg, nil, { categoryId = msg["Category-Id"] })
-  purge_paths {
-    "/c/" .. msg["Category-Id"],
-    "/api/catalog/category/" .. msg["Category-Id"],
+  purge_cache {
+    paths = {
+      "/c/" .. msg["Category-Id"],
+      "/api/catalog/category/" .. msg["Category-Id"],
+    },
+    keys = { "category:" .. msg["Category-Id"] },
   }
   return codec.ok { deleted = msg["Category-Id"] }
 end
@@ -2944,14 +3363,19 @@ function handlers.SetPriceList(msg)
   if not ok_type then
     return codec.error("INVALID_INPUT", err_type, { field = "Prices" })
   end
-  state.price_lists[msg["Site-Id"]] = state.price_lists[msg["Site-Id"]] or {}
-  state.price_lists[msg["Site-Id"]][currency] = msg.Prices
+  local window = {
+    region = msg.Region,
+    valid_from = msg.ValidFrom,
+    valid_to = msg.ValidTo,
+    prices = msg.Prices,
+  }
+  add_price_window(msg["Site-Id"], currency, window)
   audit.record(
     "catalog",
     "SetPriceList",
     msg,
     nil,
-    { siteId = msg["Site-Id"], currency = currency }
+    { siteId = msg["Site-Id"], currency = currency, region = msg.Region }
   )
   return codec.ok { siteId = msg["Site-Id"], currency = currency, count = #msg.Prices }
 end
@@ -2990,7 +3414,96 @@ function handlers.AddPromo(msg)
   return codec.ok { code = msg.Code, type = typ, value = value }
 end
 
-local function apply_pricing(site_id, sku, currency, promo_code)
+local function price_match_region(window_region, target_region)
+  if not window_region or window_region == "" then
+    return true
+  end
+  if not target_region or target_region == "" then
+    return false
+  end
+  return window_region:upper() == target_region:upper()
+end
+
+local EU_COUNTRIES = {
+  AT = true,
+  BE = true,
+  BG = true,
+  CY = true,
+  CZ = true,
+  DE = true,
+  DK = true,
+  EE = true,
+  ES = true,
+  FI = true,
+  FR = true,
+  GR = true,
+  HR = true,
+  HU = true,
+  IE = true,
+  IT = true,
+  LT = true,
+  LU = true,
+  LV = true,
+  MT = true,
+  NL = true,
+  PL = true,
+  PT = true,
+  RO = true,
+  SE = true,
+  SI = true,
+  SK = true,
+}
+
+local function is_eu(country)
+  if not country then
+    return false
+  end
+  return EU_COUNTRIES[country:upper()] == true
+end
+
+local function is_vat_id_valid(id)
+  if not id or id == "" then
+    return false
+  end
+  -- basic check: country prefix + 8-12 alnum
+  return id:match "^[A-Z]{2}[A-Z0-9]{8,12}$" ~= nil
+end
+
+local function select_price(site_id, sku, currency, region)
+  local now = os.time()
+  local windows = state.price_windows[site_id]
+  if windows and windows[currency] then
+    local best = nil
+    for _, w in ipairs(windows[currency]) do
+      if price_match_region(w.region, region) then
+        local vf = w.valid_from
+          and validation.parse_iso8601
+          and validation.parse_iso8601(w.valid_from)
+        local vt = w.valid_to and validation.parse_iso8601 and validation.parse_iso8601(w.valid_to)
+        local ok_time = true
+        if vf and now < vf then
+          ok_time = false
+        end
+        if vt and now > vt then
+          ok_time = false
+        end
+        if ok_time and w.prices and w.prices[sku] then
+          best = w.prices[sku]
+          break
+        end
+      end
+    end
+    if best then
+      return best, currency
+    end
+  end
+  local pl = state.price_lists[site_id]
+  if pl and pl[currency] and pl[currency][sku] then
+    return pl[currency][sku], currency
+  end
+end
+
+local function apply_pricing(site_id, sku, currency, promo_code, region)
   local product_key = ids.product_key(site_id, sku)
   local product = state.products[product_key]
   if not product then
@@ -2998,26 +3511,24 @@ local function apply_pricing(site_id, sku, currency, promo_code)
   end
   local price = product.payload.price
   local base_currency = product.payload.currency or currency
-  local price_lists = state.price_lists[site_id]
-  if price_lists and price_lists[currency] and price_lists[currency][sku] then
-    price = price_lists[currency][sku]
-    base_currency = currency
+  local override, o_cur = select_price(site_id, sku, currency, region)
+  if override then
+    price = override
+    base_currency = o_cur
   end
   if promo_code and state.promos[promo_code] then
     local promo = state.promos[promo_code]
-    if #promo.skus == 0 then
-      -- applies to all
-    else
-      local applies = false
+    local applies = #promo.skus == 0
+    if not applies then
       for _, s in ipairs(promo.skus) do
         if s == sku then
           applies = true
           break
         end
       end
-      if not applies then
-        return { price = price, currency = base_currency }, nil
-      end
+    end
+    if not applies then
+      return { price = price, currency = base_currency }, nil
     end
     if promo.type == "percent" then
       price = price * (1 - promo.value / 100)
@@ -3040,6 +3551,7 @@ function handlers.QuotePrice(msg)
     "Sku",
     "Currency",
     "Promo",
+    "Region",
     "Actor-Role",
     "Schema-Version",
     "Signature",
@@ -3048,11 +3560,17 @@ function handlers.QuotePrice(msg)
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
   local currency = msg.Currency or "USD"
-  local quote, err = apply_pricing(msg["Site-Id"], msg.Sku, currency, msg.Promo)
+  local quote = apply_pricing(msg["Site-Id"], msg.Sku, currency, msg.Promo, msg.Region)
   if not quote then
     return codec.error("NOT_FOUND", "Product not found", { sku = msg.Sku })
   end
-  return codec.ok { sku = msg.Sku, price = quote.price, currency = quote.currency, promo = msg.Promo }
+  return codec.ok {
+    sku = msg.Sku,
+    price = quote.price,
+    currency = quote.currency,
+    promo = msg.Promo,
+    region = msg.Region,
+  }
 end
 
 -- Tax & shipping rules ----------------------------------------------------
@@ -3079,6 +3597,12 @@ function handlers.SetTaxRules(msg)
     if r.taxClass and #r.taxClass > 64 then
       return codec.error("INVALID_INPUT", "taxClass too long", { rule = r })
     end
+    if r.taxInclusive ~= nil and type(r.taxInclusive) ~= "boolean" then
+      return codec.error("INVALID_INPUT", "taxInclusive must be boolean", { rule = r })
+    end
+    if r.shippingTaxable ~= nil and type(r.shippingTaxable) ~= "boolean" then
+      return codec.error("INVALID_INPUT", "shippingTaxable must be boolean", { rule = r })
+    end
     if r.priority and type(r.priority) ~= "number" then
       return codec.error("INVALID_INPUT", "priority must be number", { rule = r })
     end
@@ -3093,6 +3617,12 @@ function handlers.SetTaxRules(msg)
     end
     if r.region and type(r.region) ~= "string" then
       return codec.error("INVALID_INPUT", "region must be string", { rule = r })
+    end
+    if r.zipPrefix and type(r.zipPrefix) ~= "string" then
+      return codec.error("INVALID_INPUT", "zipPrefix must be string", { rule = r })
+    end
+    if (r.zipFrom or r.zipTo) and (type(r.zipFrom) ~= "number" or type(r.zipTo) ~= "number") then
+      return codec.error("INVALID_INPUT", "zipFrom/zipTo must be number", { rule = r })
     end
   end
   state.tax_rules[msg["Site-Id"]] = msg.Rules
@@ -3127,25 +3657,40 @@ function handlers.SetShippingRules(msg)
   return codec.ok { siteId = msg["Site-Id"], count = #msg.Rules }
 end
 
-local function pick_tax_rate(site_id, address, tax_class)
+local function pick_tax_rule(site_id, address, tax_class)
   local rules = state.tax_rules[site_id] or state.tax_rates[site_id] or {}
-  local best_rate = 0
+  local best_rule = nil
   local best_score = -1
   for _, r in ipairs(rules) do
     local match = (not r.country or r.country == address.Country)
       and (not r.region or r.region == address.Region)
       and (not r.taxClass or r.taxClass == tax_class)
+    if match and r.zipPrefix and address.PostalCode then
+      match = address.PostalCode:sub(1, #r.zipPrefix) == r.zipPrefix
+    end
+    if match and r.zipFrom and r.zipTo and address.PostalCode then
+      local z = tonumber(address.PostalCode:match "%d+")
+      local zf, zt = tonumber(r.zipFrom), tonumber(r.zipTo)
+      if z and zf and zt then
+        match = z >= zf and z <= zt
+      end
+    end
     if match then
       local priority = tonumber(r.priority or r.Priority) or 0
       local specificity = (r.country and 1 or 0) + (r.region and 1 or 0) + (r.taxClass and 1 or 0)
       local score = priority * 10 + specificity
       if score > best_score then
         best_score = score
-        best_rate = tonumber(r.rate or r.Rate) or 0
+        best_rule = r
       end
     end
   end
-  return best_rate
+  return best_rule, best_rule and (tonumber(best_rule.rate or best_rule.Rate) or 0) or 0
+end
+
+local function pick_tax_rate(site_id, address, tax_class)
+  local _, rate = pick_tax_rule(site_id, address, tax_class)
+  return rate
 end
 
 local function pick_shipping(site_id, address, total, weight, dims)
@@ -3254,7 +3799,7 @@ local function compute_cart(site_id, items, currency, promo)
       return nil, "INVALID_QTY"
     end
     local sku = it.Sku or it.sku
-    local quote, err = apply_pricing(site_id, sku, currency, promo)
+    local quote, err = apply_pricing(site_id, sku, currency, promo, it.Region)
     if not quote then
       return nil, err or "NOT_FOUND"
     end
@@ -3270,6 +3815,7 @@ local function compute_cart(site_id, items, currency, promo)
       currency = quote.currency,
       line_total = line_total,
       taxClass = payload.taxClass or payload.TaxClass,
+      taxInclusive = payload.taxInclusive or payload.TaxInclusive,
     })
   end
   return { subtotal = subtotal, weight = weight, lines = lines }, nil
@@ -3328,26 +3874,23 @@ function handlers.QuoteOrder(msg)
     end
   end
   local ship = pick_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight)
-  local tax = 0
-  local line_taxes = {}
-  for _, line in ipairs(cart.lines) do
-    local tr = pick_tax_rate(msg["Site-Id"], address, line.taxClass)
-    local lt = line.line_total * tr / 100
-    tax = tax + lt
-    table.insert(line_taxes, { sku = line.sku, tax = lt, taxRate = tr })
-  end
-  local total = cart.subtotal + ship.rate + tax
+  local tax, line_taxes, subtotal_ex, ship_tax, reverse_charge =
+    calculate_tax_breakdown(msg["Site-Id"], address, cart, ship.rate)
+  local total = subtotal_ex + ship.rate + ship_tax + tax
   return codec.ok {
     siteId = msg["Site-Id"],
     currency = currency,
     items = cart.lines,
     subtotal = cart.subtotal,
+    subtotalExcl = subtotal_ex,
     weight = cart.weight,
     shipping = ship,
     tax = tax,
+    shippingTax = ship_tax,
     lineTaxes = line_taxes,
     total = total,
     promo = msg.Promo,
+    reverseCharge = reverse_charge,
   }
 end
 
@@ -3380,20 +3923,20 @@ function handlers.CalculateTax(msg)
   if not cart then
     return codec.error("INVALID_INPUT", cart_err or "Pricing failed")
   end
-  local tax = 0
-  local line_taxes = {}
-  for _, line in ipairs(cart.lines) do
-    local tr = pick_tax_rate(msg["Site-Id"], address, line.taxClass)
-    local lt = line.line_total * tr / 100
-    tax = tax + lt
-    table.insert(line_taxes, { sku = line.sku, tax = lt, taxRate = tr })
-  end
+  local shipping = pick_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight)
+  local tax, line_taxes, subtotal_ex, ship_tax, reverse_charge =
+    calculate_tax_breakdown(msg["Site-Id"], address, cart, shipping.rate)
   return codec.ok {
     siteId = msg["Site-Id"],
     subtotal = cart.subtotal,
+    subtotalExcl = subtotal_ex,
     tax = tax,
+    shippingTax = ship_tax,
     lineTaxes = line_taxes,
+    shipping = shipping,
+    total = subtotal_ex + shipping.rate + ship_tax + tax,
     currency = currency,
+    reverseCharge = reverse_charge,
   }
 end
 
@@ -3802,22 +4345,173 @@ local function reserve_inventory(site_id, items)
   return true, changes, backorders
 end
 
-local function restore_inventory(site_id, changes)
-  local inv = state.inventory[site_id] or {}
-  for _, c in ipairs(changes or {}) do
-    inv[c.warehouse] = inv[c.warehouse] or {}
-    inv[c.warehouse][c.sku] = (inv[c.warehouse][c.sku] or 0) + c.qty
+local function purge_cache(opts)
+  opts = opts or {}
+  local paths = opts.paths or opts
+  local keys = opts.keys or {}
+  if CDN_PURGE_CMD and CDN_PURGE_CMD ~= "" then
+    for _, p in ipairs(paths or {}) do
+      local cmd = string.format(CDN_PURGE_CMD, p)
+      os.execute(cmd .. " >/dev/null 2>&1")
+    end
+  end
+  if CDN_SURROGATE_CMD and CDN_SURROGATE_CMD ~= "" then
+    for _, k in ipairs(keys) do
+      local cmd = string.format(CDN_SURROGATE_CMD, k)
+      os.execute(cmd .. " >/dev/null 2>&1")
+    end
   end
 end
 
-local function purge_paths(paths)
-  if not CDN_PURGE_CMD or CDN_PURGE_CMD == "" then
+local function parse_sizes(str)
+  local sizes = {}
+  for token in tostring(str or ""):gmatch "[^,]+" do
+    local w, h = token:match "(%d+)x(%d+)"
+    if w and h then
+      table.insert(sizes, { tonumber(w), tonumber(h) })
+    end
+  end
+  return sizes
+end
+
+local function parse_formats(str)
+  local fmts = {}
+  for token in tostring(str or ""):gmatch "[^,]+" do
+    table.insert(fmts, token)
+  end
+  return fmts
+end
+
+local function parse_set(str)
+  local out = {}
+  for token in tostring(str or ""):gmatch "[^,; ]+" do
+    out[token:upper()] = true
+  end
+  return out
+end
+
+local function add_price_window(site_id, currency, window)
+  if not window or not currency or not site_id then
     return
   end
-  for _, p in ipairs(paths or {}) do
-    local cmd = string.format(CDN_PURGE_CMD, p)
-    os.execute(cmd .. " >/dev/null 2>&1")
+  state.price_windows[site_id] = state.price_windows[site_id] or {}
+  state.price_windows[site_id][currency] = state.price_windows[site_id][currency] or {}
+  table.insert(state.price_windows[site_id][currency], window)
+end
+
+local function ensure_dir(path)
+  if not path or path == "" then
+    return false
   end
+  os.execute(string.format("mkdir -p '%s'", path))
+  return true
+end
+
+local function fetch_file(src)
+  if not src or src == "" then
+    return nil, "missing_source"
+  end
+  if src:match "^https?://" then
+    local tmp = os.tmpname()
+    local cmd = string.format(
+      "curl -sS --max-time %d --connect-timeout %d '%s' -o %s",
+      HTTP_TIMEOUT,
+      HTTP_CONNECT_TIMEOUT,
+      src,
+      tmp
+    )
+    local rc = os.execute(cmd)
+    if rc == true or rc == 0 then
+      return tmp, nil, true
+    end
+    os.remove(tmp)
+    return nil, "download_failed"
+  end
+  -- local path
+  local f = io.open(src, "rb")
+  if not f then
+    return nil, "source_not_found"
+  end
+  f:close()
+  return src, nil, false
+end
+
+local function upload_image(path, relkey)
+  if not IMAGE_S3_BUCKET or IMAGE_S3_BUCKET == "" then
+    return nil
+  end
+  local prefix = IMAGE_S3_PREFIX
+  if prefix ~= "" and not prefix:match "/$" then
+    prefix = prefix .. "/"
+  end
+  local key = prefix .. relkey
+  local cmd = string.format(
+    "aws s3 cp %s s3://%s/%s --no-progress --cli-read-timeout %d --cli-connect-timeout %d",
+    path,
+    IMAGE_S3_BUCKET,
+    key,
+    S3_TIMEOUT,
+    S3_TIMEOUT
+  )
+  local rc = os.execute(cmd)
+  if rc == true or rc == 0 then
+    if IMAGE_PUBLIC_BASE and IMAGE_PUBLIC_BASE ~= "" then
+      local base = IMAGE_PUBLIC_BASE
+      if base:sub(-1) == "/" then
+        base = base:sub(1, -2)
+      end
+      return base .. "/" .. key
+    end
+    return "https://" .. IMAGE_S3_BUCKET .. ".s3.amazonaws.com/" .. key
+  end
+  return nil, "upload_failed"
+end
+
+local function resize_and_store(site_id, sku, src_path)
+  if not IMAGE_RESIZE_CMD or not IMAGE_STORE_DIR or IMAGE_STORE_DIR == "" then
+    return nil, "IMAGE_PIPELINE_DISABLED"
+  end
+  local local_path, ferr, tmp = fetch_file(src_path)
+  if not local_path then
+    return nil, ferr or "SOURCE_NOT_FOUND"
+  end
+  ensure_dir(IMAGE_STORE_DIR)
+  local sizes = parse_sizes(IMAGE_SIZES)
+  local fmts = parse_formats(IMAGE_FORMATS)
+  local dests = {}
+  for _, sz in ipairs(sizes) do
+    local w, h = sz[1], sz[2]
+    for _, fmt in ipairs(fmts) do
+      local out_dir = string.format("%s/%s/%s", IMAGE_STORE_DIR, fmt, sku)
+      ensure_dir(out_dir)
+      local outfile = string.format("%s/%dx%d.%s", out_dir, w, h, fmt)
+      local cmd = string.format(IMAGE_RESIZE_CMD, local_path, w, h, outfile)
+      os.execute(cmd .. " >/dev/null 2>&1")
+      local rel = outfile:gsub("^" .. IMAGE_STORE_DIR .. "/?", "")
+      local url, up_err = upload_image(outfile, rel)
+      table.insert(dests, {
+        url = url or outfile,
+        width = w,
+        height = h,
+        format = fmt,
+        uploaded = up_err == nil,
+      })
+    end
+  end
+  state.assets[site_id] = state.assets[site_id] or {}
+  state.assets[site_id][sku] = state.assets[site_id][sku] or {}
+  state.assets[site_id][sku].variants = dests
+  state.assets[site_id][sku].original = src_path
+  -- purge cached variants
+  local purge_list = { src_path }
+  for _, d in ipairs(dests) do
+    table.insert(purge_list, d.url)
+  end
+  purge_cache { paths = purge_list, keys = { "product:" .. sku, "images:" .. sku } }
+  if tmp then
+    os.remove(local_path)
+  end
+  return dests
 end
 
 local function forget_subject(site_id, subject)
@@ -3826,14 +4520,14 @@ local function forget_subject(site_id, subject)
   end
   local scrubbed = 0
   -- remove from recent list
-  for sub, items in pairs(state.recent) do
+  for sub in pairs(state.recent) do
     if sub == subject then
       state.recent[sub] = nil
       scrubbed = scrubbed + 1
     end
   end
   -- scrub checkouts
-  for id, chk in pairs(state.checkouts) do
+  for _, chk in pairs(state.checkouts) do
     if chk.siteId == site_id and chk.email == subject then
       chk.email = nil
       chk.address = nil
@@ -4029,6 +4723,39 @@ local function cleanup_retention()
     end
     state.shipment_events[ship] = filtered
   end
+  for key, ts in pairs(state.webhook_seen) do
+    if (ts or 0) < os.time() - WEBHOOK_REPLAY_WINDOW then
+      state.webhook_seen[key] = nil
+    end
+  end
+  for provider, events in pairs(state.provider_events) do
+    local filtered = {}
+    for id, ts in pairs(events) do
+      if (ts or 0) >= cutoff then
+        filtered[id] = ts
+      end
+    end
+    state.provider_events[provider] = filtered
+  end
+  for idem_key, res in pairs(state.stripe_idempotency) do
+    if
+      res
+      and res.nextAction
+      and res.nextAction.expiresAt
+      and res.nextAction.expiresAt < os.time()
+    then
+      state.stripe_idempotency[idem_key] = nil
+    end
+  end
+  for _, pay in pairs(state.payments) do
+    if
+      pay.status == "requires_action"
+      and pay.challengeExpiresAt
+      and pay.challengeExpiresAt < os.time()
+    then
+      pay.status = "failed"
+    end
+  end
 end
 
 local function parse_csv_line(line)
@@ -4113,9 +4840,9 @@ function handlers.StartCheckout(msg)
     }
   end
   local shipping = pick_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight, dims)
-  local tax_rate = pick_tax_rate(msg["Site-Id"], address)
-  local tax = cart.subtotal * tax_rate / 100
-  local total = cart.subtotal + shipping.rate + tax
+  local tax, _, subtotal_ex, ship_tax =
+    calculate_tax_breakdown(msg["Site-Id"], address, cart, shipping.rate)
+  local total = subtotal_ex + shipping.rate + ship_tax + tax
   local items = {}
   for _, item in ipairs(msg.Items) do
     table.insert(items, { sku = item.Sku, qty = tonumber(item.Qty) or 0 })
@@ -4132,9 +4859,10 @@ function handlers.StartCheckout(msg)
     email = msg.Email,
     quote = {
       subtotal = cart.subtotal,
+      subtotalExcl = subtotal_ex,
       weight = cart.weight,
-      taxRate = tax_rate,
       tax = tax,
+      shippingTax = ship_tax,
       shipping = shipping,
       total = total,
       currency = currency,
@@ -4181,7 +4909,7 @@ function handlers.StartCheckout(msg)
     total = total,
     currency = currency,
     tax = tax,
-    taxRate = tax_rate,
+    taxRate = subtotal_ex > 0 and (tax * 100 / subtotal_ex) or 0,
     shipping = shipping,
     paymentIntent = payment and payment.paymentId,
     paymentStatus = payment and payment.status or "pending_payment",
@@ -4255,6 +4983,43 @@ function handlers.CompleteCheckout(msg)
   }
 end
 
+function handlers.Complete3DSChallenge(msg)
+  local ok, missing = validation.require_fields(msg, { "Payment-Id", "Token" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Payment-Id",
+    "Token",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local pay = state.payments[msg["Payment-Id"]]
+  if not pay then
+    return codec.error("NOT_FOUND", "Payment not found")
+  end
+  if pay.status ~= "requires_action" then
+    return codec.error("INVALID_INPUT", "Payment not awaiting 3DS", { status = pay.status })
+  end
+  local expected = pay.challengeToken or ("3ds-" .. msg["Payment-Id"])
+  if msg.Token ~= expected then
+    return codec.error("FORBIDDEN", "Token mismatch")
+  end
+  if pay.challengeExpiresAt and os.time() > pay.challengeExpiresAt then
+    return codec.error("FORBIDDEN", "3DS token expired")
+  end
+  pay.status = "captured"
+  pay.capturedAt = os.time()
+  audit.record("catalog", "Complete3DSChallenge", msg, nil, { paymentId = pay.paymentId })
+  return codec.ok { paymentId = pay.paymentId, status = pay.status }
+end
+
 function handlers.CreatePaymentIntent(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Amount", "Currency", "Method" })
   if not ok then
@@ -4270,6 +5035,7 @@ function handlers.CreatePaymentIntent(msg)
     "Currency",
     "Method",
     "Require3DS",
+    "IdempotencyKey",
     "Actor-Role",
     "Schema-Version",
     "Signature",
@@ -4295,6 +5061,13 @@ function handlers.CreatePaymentIntent(msg)
     return codec.error("NOT_FOUND", "Order not found", { orderId = msg["Order-Id"] })
   end
   local provider = msg.Provider or "internal"
+  local idem_key = msg.IdempotencyKey
+  if provider == "stripe" and idem_key then
+    local cached = state.stripe_idempotency[idem_key]
+    if cached then
+      return codec.ok(cached)
+    end
+  end
   local record = create_payment_intent_internal {
     siteId = msg["Site-Id"],
     checkoutId = msg["Checkout-Id"],
@@ -4306,6 +5079,12 @@ function handlers.CreatePaymentIntent(msg)
     provider = provider,
     token = msg.Token,
   }
+  if record.requiresAction then
+    record.challengeToken = "3ds-" .. record.paymentId
+    record.challengeExpiresAt = os.time() + CHALLENGE_TTL
+    state.payments[record.paymentId].challengeToken = record.challengeToken
+    state.payments[record.paymentId].challengeExpiresAt = record.challengeExpiresAt
+  end
   audit.record(
     "catalog",
     "CreatePaymentIntent",
@@ -4315,15 +5094,22 @@ function handlers.CreatePaymentIntent(msg)
   )
   metrics.inc "catalog.CreatePaymentIntent.count"
   metrics.tick()
-  return codec.ok {
+  local resp = {
     paymentId = record.paymentId,
     status = record.status,
     provider = record.provider,
     clientSecret = record.clientSecret,
-    nextAction = record.requiresAction
-        and { type = "3ds_redirect", token = "3ds-" .. record.paymentId }
-      or nil,
+    nextAction = record.requiresAction and {
+      type = "3ds_redirect",
+      token = record.challengeToken,
+      url = THREE_DS_URL .. "?pid=" .. record.paymentId .. "&token=" .. record.challengeToken,
+      expiresAt = record.challengeExpiresAt,
+    } or nil,
   }
+  if provider == "stripe" and idem_key then
+    state.stripe_idempotency[idem_key] = resp
+  end
+  return codec.ok(resp)
 end
 
 function handlers.TokenizePaymentMethod(msg)
@@ -4455,15 +5241,104 @@ function handlers.RefundPayment(msg)
   return codec.ok { paymentId = pay.paymentId, status = pay.status, amount = amount }
 end
 
-local function verify_provider_webhook(provider)
-  if provider == "stripe" then
-    return STRIPE_WEBHOOK_SECRET ~= nil
-  elseif provider == "paypal" then
-    return PAYPAL_WEBHOOK_ID ~= nil
-  elseif provider == "adyen" then
-    return ADYEN_HMAC_KEY ~= nil
+local function parse_header(headers, key)
+  if not headers then
+    return nil
   end
-  return false
+  return headers[key] or headers[key:lower()] or headers[key:upper()]
+end
+
+local function mark_webhook_seen(cache_key, ts)
+  ts = ts or os.time()
+  local existing = state.webhook_seen[cache_key]
+  if existing and (ts - existing) <= WEBHOOK_REPLAY_WINDOW then
+    return false, "replay"
+  end
+  state.webhook_seen[cache_key] = ts
+  return true
+end
+
+local function verify_provider_webhook(provider, msg, raw_body)
+  raw_body = raw_body or ""
+  if provider == "stripe" then
+    if not STRIPE_WEBHOOK_SECRET or STRIPE_WEBHOOK_SECRET == "" then
+      return false, "stripe_secret_missing"
+    end
+    if STRIPE_WEBHOOK_ID and STRIPE_WEBHOOK_ID ~= "" then
+      local hook = msg["Webhook-Id"] or parse_header(msg.Headers, "Stripe-Webhook-Id")
+      if hook ~= STRIPE_WEBHOOK_ID then
+        return false, "stripe_webhook_id_mismatch"
+      end
+    end
+    local sig_header = msg.Signature or parse_header(msg.Headers, "Stripe-Signature")
+    if not sig_header then
+      return false, "missing_signature"
+    end
+    local t = sig_header:match "t=(%d+)"
+    local v1 = sig_header:match "v1=([0-9a-fA-F]+)"
+    if not t or not v1 then
+      return false, "signature_format"
+    end
+    local expected = hmac_sha256_hex(t .. "." .. raw_body, STRIPE_WEBHOOK_SECRET)
+    if not expected or expected:lower() ~= v1:lower() then
+      return false, "signature_mismatch"
+    end
+    local ts_num = tonumber(t) or 0
+    if math.abs(os.time() - ts_num) > WEBHOOK_REPLAY_WINDOW then
+      return false, "timestamp_out_of_window"
+    end
+    local ok_seen, err_seen = mark_webhook_seen("stripe:" .. v1, ts_num)
+    if not ok_seen then
+      return false, err_seen
+    end
+    return true
+  elseif provider == "paypal" then
+    if not PAYPAL_WEBHOOK_SECRET or PAYPAL_WEBHOOK_SECRET == "" then
+      return false, "paypal_secret_missing"
+    end
+    if PAYPAL_WEBHOOK_ID and PAYPAL_WEBHOOK_ID ~= "" then
+      local hook = msg["Webhook-Id"] or parse_header(msg.Headers, "Webhook-Id")
+      if hook ~= PAYPAL_WEBHOOK_ID then
+        return false, "paypal_webhook_id_mismatch"
+      end
+    end
+    local sig = msg.Signature or parse_header(msg.Headers, "PayPal-Transmission-Sig")
+    if not sig then
+      return false, "missing_signature"
+    end
+    local expected = hmac_sha256_hex(raw_body, PAYPAL_WEBHOOK_SECRET)
+    if not expected or expected:lower() ~= tostring(sig):lower() then
+      return false, "signature_mismatch"
+    end
+    local transmission_id = msg["Transmission-Id"]
+      or parse_header(msg.Headers, "PayPal-Transmission-Id")
+    local ts = tonumber(msg.Timestamp or parse_header(msg.Headers, "PayPal-Transmission-Time"))
+      or os.time()
+    local replay_key = transmission_id or sig
+    local ok_seen, err_seen = mark_webhook_seen("paypal:" .. replay_key, ts)
+    if not ok_seen then
+      return false, err_seen
+    end
+    return true
+  elseif provider == "adyen" then
+    if not ADYEN_HMAC_KEY or ADYEN_HMAC_KEY == "" then
+      return false, "adyen_secret_missing"
+    end
+    local sig = msg.Signature or parse_header(msg.Headers, "Hmac-Signature")
+    if not sig then
+      return false, "missing_signature"
+    end
+    local expected = hmac_sha256_hex(raw_body, ADYEN_HMAC_KEY)
+    if not expected or expected:lower() ~= tostring(sig):lower() then
+      return false, "signature_mismatch"
+    end
+    local ok_seen, err_seen = mark_webhook_seen("adyen:" .. sig, os.time())
+    if not ok_seen then
+      return false, err_seen
+    end
+    return true
+  end
+  return false, "provider_not_supported"
 end
 
 function handlers.HandlePaymentProviderWebhook(msg)
@@ -4476,6 +5351,9 @@ function handlers.HandlePaymentProviderWebhook(msg)
     "Request-Id",
     "Provider",
     "Event",
+    "RawBody",
+    "Headers",
+    "Timestamp",
     "Actor-Role",
     "Schema-Version",
     "Signature",
@@ -4483,37 +5361,186 @@ function handlers.HandlePaymentProviderWebhook(msg)
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
-  if not verify_provider_webhook(msg.Provider) then
-    return codec.error("FORBIDDEN", "Signature verification failed")
+  local raw_body = msg.RawBody
+  if not raw_body and json_ok then
+    local ok_enc, body = pcall(cjson.encode, msg.Event)
+    raw_body = ok_enc and body or ""
+  end
+  local sig_ok, sig_err = verify_provider_webhook(msg.Provider, msg, raw_body or "")
+  if not sig_ok then
+    metrics.inc "catalog.HandlePaymentProviderWebhook.verify_failed"
+    return codec.error("FORBIDDEN", "Signature verification failed", { reason = sig_err })
+  end
+  if msg.Provider:lower() == "paypal" then
+    -- PayPal deterministic signature with webhook id
+    local tid = msg["Transmission-Id"] or parse_header(msg.Headers, "PayPal-Transmission-Id") or ""
+    local tts = msg["Transmission-Time"]
+      or parse_header(msg.Headers, "PayPal-Transmission-Time")
+      or ""
+    local wid = msg["Webhook-Id"]
+      or parse_header(msg.Headers, "Webhook-Id")
+      or PAYPAL_WEBHOOK_ID
+      or ""
+    local signed = table.concat({ tid, tts, wid, raw_body or "" }, "|")
+    local expected = hmac_sha256_hex(signed, PAYPAL_WEBHOOK_SECRET)
+    local provided = msg.Signature or parse_header(msg.Headers, "PayPal-Transmission-Sig")
+    if not expected or not provided or expected:lower() ~= tostring(provided):lower() then
+      return codec.error(
+        "FORBIDDEN",
+        "Signature verification failed",
+        { reason = "paypal_sig_mismatch" }
+      )
+    end
+    local cert_url = parse_header(msg.Headers, "PayPal-Cert-Url")
+    if cert_url then
+      local host = hostname_from_url(cert_url)
+      if not host or not host:match(PAYPAL_CERT_HOST:gsub("%.", "%%.") .. "$") then
+        return codec.error("FORBIDDEN", "Cert host not allowed")
+      end
+      local cert_pem, cerr = fetch_paypal_cert(cert_url)
+      if not cert_pem then
+        return codec.error("FORBIDDEN", "Cert fetch failed", { reason = cerr })
+      end
+      local ok_cert, cert_err = verify_paypal_cert_signature(signed, provided, cert_pem)
+      if not ok_cert then
+        return codec.error("FORBIDDEN", "Cert signature invalid", { reason = cert_err })
+      end
+    end
   end
   local ev = msg.Event
   if type(ev) ~= "table" then
     return codec.error("INVALID_INPUT", "Event must be object")
   end
+  local provider = msg.Provider:lower()
+  -- normalize PayPal resource wrapper
+  if provider == "paypal" and ev.resource and type(ev.resource) == "table" then
+    ev = ev.resource
+  end
+  -- basic freshness check if provider sends creation time
+  if ev.created and math.abs(os.time() - (tonumber(ev.created) or 0)) > WEBHOOK_REPLAY_WINDOW then
+    return codec.error("FORBIDDEN", "Event too old", { created = ev.created })
+  end
+  if provider == "adyen" and ev.additionalData and ev.additionalData["hmacSignature"] then
+    -- Adyen already verified at webhook layer; prefer pspReference as id
+    ev.pspReference = ev.pspReference or ev.additionalData["pspReference"]
+    if ev.success == false or ev.success == "false" then
+      return codec.error("FORBIDDEN", "Adyen event not successful")
+    end
+  end
+  -- Ensure paymentId present early for idempotency cache write
+  local allowed_types = {
+    stripe = {
+      ["payment_intent.succeeded"] = "payment_succeeded",
+      ["payment_intent.payment_failed"] = "payment_failed",
+      ["charge.refunded"] = "refund_succeeded",
+    },
+    paypal = {
+      ["CHECKOUT.ORDER.APPROVED"] = "payment_succeeded",
+      ["PAYMENT.CAPTURE.COMPLETED"] = "payment_succeeded",
+      ["PAYMENT.CAPTURE.DENIED"] = "payment_failed",
+      ["PAYMENT.CAPTURE.REFUNDED"] = "refund_succeeded",
+    },
+    adyen = {
+      ["AUTHORISATION"] = "payment_succeeded",
+      ["CANCELLATION"] = "payment_failed",
+      ["REFUND"] = "refund_succeeded",
+    },
+  }
+  if allowed_types[provider] and ev.type then
+    ev.type = allowed_types[provider][ev.type] or ev.type
+  end
+  if allowed_types[provider] and not allowed_types[provider][ev.type or ""] then
+    return codec.error("INVALID_INPUT", "Event type not allowed", { type = ev.type })
+  end
+  if provider == "stripe" then
+    local cached = check_stripe_idempotency(msg)
+    if cached then
+      return codec.ok(cached)
+    end
+  end
   local pid = ev.paymentId or ev.payment_id
   if not pid then
     return codec.error("INVALID_INPUT", "paymentId missing in event")
+  end
+  if
+    not ev.id
+    and not ev.eventId
+    and not ev.event_id
+    and not ev.pspReference
+    and not ev.resourceId
+  then
+    return codec.error("INVALID_INPUT", "event id missing")
+  end
+  local event_id = ev.id or ev.eventId or ev.event_id or ev.pspReference or ev.resourceId
+  local ts = tonumber(msg.Timestamp) or os.time()
+  if event_id then
+    local ok_seen, err_seen = mark_event_seen(msg.Provider, event_id, ts)
+    if not ok_seen then
+      return codec.error("CONFLICT", "Duplicate webhook", { reason = err_seen, eventId = event_id })
+    end
+  end
+  if provider == "adyen" and ev.pspReference then
+    local ok_seen, err_seen = mark_event_seen("adyen_psp", ev.pspReference, ts)
+    if not ok_seen then
+      return codec.error("CONFLICT", "Duplicate PSP reference", { reason = err_seen })
+    end
   end
   local pay = state.payments[pid]
   if not pay then
     return codec.error("NOT_FOUND", "Payment not found")
   end
+  if msg.Provider:lower() == "stripe" then
+    pay.stripeIdempotencyKey = msg.IdempotencyKey or parse_header(msg.Headers, "Idempotency-Key")
+  end
+  local ok_evt, evt_err = validate_payment_event(ev, pay)
+  if not ok_evt then
+    return codec.error("INVALID_INPUT", "Event rejected", { reason = evt_err })
+  end
+  if provider == "stripe" and STRIPE_VERIFY_EVENT and ev.id then
+    local fetched, ferr = stripe_fetch_event(ev.id)
+    if not fetched or type(fetched) ~= "table" then
+      return codec.error("FORBIDDEN", "Stripe event fetch failed", { reason = ferr })
+    end
+    local obj = fetched.data and fetched.data.object or {}
+    local pi = obj.id or obj.payment_intent or obj.payment_intent_id
+    if pi and pi ~= pid then
+      return codec.error(
+        "FORBIDDEN",
+        "Stripe event payment mismatch",
+        { fetchedPayment = pi, expected = pid }
+      )
+    end
+    if obj.amount_received and obj.amount_received / 100 > pay.amount + 0.01 then
+      return codec.error("FORBIDDEN", "Stripe event amount mismatch")
+    end
+    if obj.currency and pay.currency and obj.currency:upper() ~= pay.currency:upper() then
+      return codec.error("FORBIDDEN", "Stripe event currency mismatch")
+    end
+  end
+  local before = pay.status
   if ev.type == "payment_succeeded" then
-    pay.status = "captured"
-    pay.capturedAt = os.time()
+    if before ~= "refunded" then
+      pay.status = "captured"
+      pay.capturedAt = os.time()
+    end
   elseif ev.type == "payment_failed" then
-    pay.status = "failed"
+    if before ~= "captured" and before ~= "refunded" then
+      pay.status = "failed"
+    end
   elseif ev.type == "refund_succeeded" then
     pay.status = "refunded"
-    pay.refundAmount = ev.amount or pay.amount
+    pay.refundAmount = ev.amount or ev.refundAmount or pay.amount
   end
-  audit.record(
-    "catalog",
-    "HandlePaymentProviderWebhook",
-    msg,
-    nil,
-    { paymentId = pid, status = pay.status }
-  )
+  audit.record("catalog", "HandlePaymentProviderWebhook", msg, nil, {
+    paymentId = pid,
+    status = pay.status,
+    provider = msg.Provider,
+    eventId = event_id,
+    statusBefore = before,
+  })
+  if provider == "stripe" then
+    cache_stripe_idempotency(msg, { paymentId = pid, status = pay.status })
+  end
   return codec.ok { paymentId = pid, status = pay.status }
 end
 
@@ -4660,9 +5687,40 @@ function handlers.ImportCatalogCSV(msg)
           currency = currency,
           description = idx.description and fields[idx.description] or nil,
           categoryId = idx.category and fields[idx.category] or nil,
+          taxClass = idx.taxclass and fields[idx.taxclass] or nil,
         }
+        if idx.weight and fields[idx.weight] then
+          payload.weight = tonumber(fields[idx.weight])
+        end
+        if idx.assets and fields[idx.assets] then
+          payload.assets = {}
+          for token in fields[idx.assets]:gmatch "[^,; ]+" do
+            table.insert(payload.assets, token)
+          end
+        end
+        if idx.attributes and fields[idx.attributes] and json_ok then
+          local ok_attr, attrs = pcall(cjson.decode, fields[idx.attributes])
+          if ok_attr and type(attrs) == "table" then
+            payload.attributes = attrs
+          end
+        end
         local key = ids.product_key(msg["Site-Id"], sku)
         state.products[key] = { payload = payload }
+        if idx.stock and fields[idx.stock] then
+          local qty = tonumber(fields[idx.stock]) or 0
+          state.inventory[msg["Site-Id"]] = state.inventory[msg["Site-Id"]] or {}
+          state.inventory[msg["Site-Id"]]["default"] = state.inventory[msg["Site-Id"]]["default"]
+            or {}
+          state.inventory[msg["Site-Id"]]["default"][sku] = qty
+        end
+        if (idx.region or idx.valid_from or idx.valid_to) and price then
+          add_price_window(msg["Site-Id"], currency, {
+            region = idx.region and fields[idx.region] or nil,
+            valid_from = idx.valid_from and fields[idx.valid_from] or nil,
+            valid_to = idx.valid_to and fields[idx.valid_to] or nil,
+            prices = { [sku] = price },
+          })
+        end
       end
     end
   end
@@ -4705,9 +5763,19 @@ function handlers.BulkPriceUpdate(msg)
     end
     local key = ids.product_key(msg["Site-Id"], row.Sku)
     if state.products[key] and state.products[key].payload then
-      state.products[key].payload.price = tonumber(row.Price)
-      if row.Currency then
-        state.products[key].payload.currency = row.Currency
+      local price = tonumber(row.Price)
+      if row.Region or row.ValidFrom or row.ValidTo then
+        add_price_window(msg["Site-Id"], row.Currency or state.products[key].payload.currency, {
+          region = row.Region,
+          valid_from = row.ValidFrom,
+          valid_to = row.ValidTo,
+          prices = { [row.Sku] = price },
+        })
+      else
+        state.products[key].payload.price = price
+        if row.Currency then
+          state.products[key].payload.currency = row.Currency
+        end
       end
       count = count + 1
     end
@@ -5437,7 +6505,7 @@ function handlers.ListInvoices(msg)
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
   local items = {}
-  for id, inv in pairs(state.invoices) do
+  for _, inv in pairs(state.invoices) do
     if not msg["Site-Id"] or inv.siteId == msg["Site-Id"] then
       if not msg["Order-Id"] or inv.orderId == msg["Order-Id"] then
         table.insert(items, inv)
