@@ -125,6 +125,12 @@ Handy CLI helpers:
 
 ### Ops runbook
 See `docs/RUNBOOK.md` for start/stop, health checks, key rotation, outbox HMAC, Arweave deploy verification, and incident response procedures.
+
+### Orders API (resolver-facing)
+- `RecordOrder` (support/admin) — stores status, totalAmount, currency, vatRate, reason, updatedAt.
+- `GetOrder` (support/admin) — returns stored order fields.
+- `ListOrders` (support/admin) — paginated list filtered by status; returns `siteId,total,page,pageSize,items[]` with status/amount/currency/vatRate/updatedAt.
+- Schemas: `schemas/order.schema.json` and `schemas/order-list.schema.json` are in the manifest.
 - Export only the collections you need: `python scripts/setup/schema_helper.py export --presets core,commerce,content --out dev/schema-bundles/prod.tar.gz`.
 - Deploy that prod bundle with arkb from a secured environment.
 

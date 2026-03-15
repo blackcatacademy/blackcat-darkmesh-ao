@@ -124,6 +124,38 @@ do
   local page = site.route(with_req({ Action = "GetPage", ["Site-Id"] = "site-1", ["Page-Id"] = "home" }))
   assert_eq(page.status, "OK", "get page status")
   assert_eq(page.payload.version, "v2", "page version active")
+
+  -- Order write/read/list contract
+  local rec = site.route(with_req({
+    Action = "RecordOrder",
+    ["Site-Id"] = "site-1",
+    ["Order-Id"] = "order-1",
+    Status = "paid",
+    TotalAmount = 19.99,
+    Currency = "EUR",
+    VatRate = 0.21,
+    ["Actor-Role"] = "support",
+  }))
+  assert_eq(rec.status, "OK", "record order status")
+  local get = site.route(with_req({
+    Action = "GetOrder",
+    ["Site-Id"] = "site-1",
+    ["Order-Id"] = "order-1",
+    ["Actor-Role"] = "support",
+  }))
+  assert_eq(get.status, "OK", "get order status")
+  assert_eq(get.payload.currency, "EUR", "order currency")
+  assert_eq(get.payload.vatRate, 0.21, "order vat")
+  local list = site.route(with_req({
+    Action = "ListOrders",
+    ["Site-Id"] = "site-1",
+    Status = "paid",
+    Page = 1,
+    PageSize = 10,
+    ["Actor-Role"] = "support",
+  }))
+  assert_eq(list.status, "OK", "list orders status")
+  assert_truthy(list.payload.items and list.payload.items[1], "list orders items present")
 end
 
 -- Site edge cases

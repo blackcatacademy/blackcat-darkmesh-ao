@@ -1,0 +1,7 @@
+{
+  "Action": "GetOrder",
+  "Request-Id": "rid-get-order-1",
+  "Site-Id": "site-get-1",
+  "Order-Id": "order-123",
+  "Actor-Role": "support"
+}
