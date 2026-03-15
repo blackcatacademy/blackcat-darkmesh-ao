@@ -31,6 +31,7 @@ local GA4_API_SECRET = os.getenv "CATALOG_GA4_API_SECRET"
 local GA4_MEASUREMENT_ID = os.getenv "CATALOG_GA4_MEASUREMENT_ID"
 local PAYMENT_WEBHOOK_SECRET = os.getenv "CATALOG_PAYMENT_WEBHOOK_SECRET"
 local CARRIER_WEBHOOK_SECRET = os.getenv "CATALOG_CARRIER_WEBHOOK_SECRET"
+local RETURN_LABEL_BASE = os.getenv "CATALOG_RETURN_LABEL_BASE" or CARRIER_LABEL_BASE
 
 local handlers = {}
 local allowed_actions = {
@@ -91,6 +92,8 @@ local allowed_actions = {
   "StreamTelemetry",
   "HandlePaymentWebhook",
   "HandleCarrierWebhook",
+  "UpdateReturnStatus",
+  "CreateReturnLabel",
 }
 
 local role_policy = {
@@ -127,6 +130,7 @@ local role_policy = {
   RequestReturn = { "support", "catalog-admin", "admin" },
   ApproveReturn = { "support", "catalog-admin", "admin" },
   RefundReturn = { "support", "catalog-admin", "admin" },
+  UpdateReturnStatus = { "support", "catalog-admin", "admin" },
   CalculateTax = { "catalog-admin", "support", "admin" },
   RateShopCarriers = { "catalog-admin", "support", "admin" },
   ExportTelemetry = { "admin", "catalog-admin" },
@@ -146,6 +150,7 @@ local role_policy = {
   StreamTelemetry = { "admin", "catalog-admin" },
   HandlePaymentWebhook = { "admin", "catalog-admin" },
   HandleCarrierWebhook = { "admin", "catalog-admin", "support" },
+  CreateReturnLabel = { "support", "catalog-admin", "admin" },
 }
 
 local state = {
@@ -2805,11 +2810,60 @@ function handlers.RequestReturn(msg)
     status = "requested",
     reason = msg.Reason,
     createdAt = os.time(),
+    restockFee = msg.RestockFee,
+    method = msg.Method or "dropoff",
   }
   audit.record("catalog", "RequestReturn", msg, nil, { returnId = return_id })
   metrics.inc "catalog.RequestReturn.count"
   metrics.tick()
   return codec.ok { returnId = return_id, status = "requested" }
+end
+
+function handlers.UpdateReturnStatus(msg)
+  local ok, missing = validation.require_fields(msg, { "Return-Id", "Status" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Return-Id",
+    "Status",
+    "Reason",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ret = state.returns[msg["Return-Id"]]
+  if not ret then
+    return codec.error("NOT_FOUND", "Return not found")
+  end
+  local allowed = {
+    requested = true,
+    authorized = true,
+    in_transit = true,
+    received = true,
+    inspected = true,
+    refunded = true,
+    rejected = true,
+  }
+  if not allowed[msg.Status] then
+    return codec.error("INVALID_INPUT", "Unsupported status")
+  end
+  ret.status = msg.Status
+  ret.reason = msg.Reason or ret.reason
+  ret.updatedAt = os.time()
+  audit.record(
+    "catalog",
+    "UpdateReturnStatus",
+    msg,
+    nil,
+    { returnId = ret.returnId, status = ret.status }
+  )
+  return codec.ok { returnId = ret.returnId, status = ret.status }
 end
 
 function handlers.ApproveReturn(msg)
@@ -2883,6 +2937,51 @@ function handlers.RefundReturn(msg)
   metrics.inc "catalog.RefundReturn.count"
   metrics.tick()
   return codec.ok { returnId = ret.returnId, status = ret.status, restocked = restock }
+end
+
+function handlers.CreateReturnLabel(msg)
+  local ok, missing = validation.require_fields(msg, { "Return-Id", "Carrier" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Return-Id",
+    "Carrier",
+    "Service",
+    "Address",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ret = state.returns[msg["Return-Id"]]
+  if not ret then
+    return codec.error("NOT_FOUND", "Return not found")
+  end
+  local carrier = msg.Carrier
+  local service = msg.Service or "standard"
+  local address = msg.Address or ret.address
+  if not address or not address.Country then
+    return codec.error("INVALID_INPUT", "Address.Country required", { field = "Address" })
+  end
+  local label = build_label(carrier, service, ret.weight or 0)
+  label.returnId = ret.returnId
+  label.address = address
+  label.base = RETURN_LABEL_BASE
+  state.shipments[label.shipmentId] = label
+  ret.returnLabel = label
+  audit.record(
+    "catalog",
+    "CreateReturnLabel",
+    msg,
+    nil,
+    { returnId = ret.returnId, shipmentId = label.shipmentId }
+  )
+  return codec.ok(label)
 end
 
 function handlers.ExportTelemetry(msg)
