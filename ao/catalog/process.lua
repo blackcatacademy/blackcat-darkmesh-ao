@@ -145,6 +145,7 @@ function handlers.SearchCatalog(msg)
     availability = { available = 0, unavailable = 0 },
     price = { lt25 = 0, lt100 = 0, gte100 = 0 },
     currency = {},
+    locales = {},
   }
   local prefix = "product:" .. msg["Site-Id"] .. ":"
   for key, product in pairs(state.products) do
@@ -175,6 +176,9 @@ function handlers.SearchCatalog(msg)
         else facets.price.gte100 = facets.price.gte100 + 1 end
         if payload.currency then
           facets.currency[payload.currency] = (facets.currency[payload.currency] or 0) + 1
+        end
+        if locale then
+          facets.locales[locale] = (facets.locales[locale] or 0) + 1
         end
         local ok_cat = (not msg["Category-Id"]) or (payload.categoryId == msg["Category-Id"]) or (payload.category and payload.category.id == msg["Category-Id"]) or false
         if ok_price and ok_locale and ok_available and ok_cat then
