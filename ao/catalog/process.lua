@@ -57,6 +57,7 @@ local STRIPE_VERIFY_EVENT = os.getenv "CATALOG_STRIPE_VERIFY_EVENT" == "1"
 local APPLE_PAY_MERCHANT_ID = os.getenv "CATALOG_APPLE_PAY_MERCHANT_ID" -- luacheck: ignore
 local GOOGLE_PAY_MERCHANT_ID = os.getenv "CATALOG_GOOGLE_PAY_MERCHANT_ID" -- luacheck: ignore
 local ADYEN_MERCHANT_ACCOUNT = os.getenv "CATALOG_ADYEN_MERCHANT_ACCOUNT" -- luacheck: ignore
+local PSP_MODE = os.getenv "CATALOG_PSP_MODE" or "sandbox" -- sandbox|live
 local PAYPAL_WEBHOOK_ID = os.getenv "CATALOG_PAYPAL_WEBHOOK_ID"
 local PAYPAL_WEBHOOK_SECRET = os.getenv "CATALOG_PAYPAL_WEBHOOK_SECRET"
 local PAYPAL_CERT_HOST = os.getenv "CATALOG_PAYPAL_CERT_HOST" or "paypal.com"
@@ -400,6 +401,38 @@ local function hmac_sha256_hex(data, key)
     return hex_encode(raw)
   end
   return nil, "hmac_unavailable"
+end
+
+-- PSP adapter shim -------------------------------------------------------
+local function psp_call(provider, action, payload)
+  -- This is a lightweight shim; replace with real SDK/API calls in production.
+  if provider == "stripe" then
+    if action == "create_intent" then
+      return {
+        providerPaymentId = "pi_" .. gen_id "stripe",
+        clientSecret = "cs_" .. gen_id "stripe",
+        requiresAction = payload.require3ds == true,
+        nextActionUrl = payload.require3ds and (THREE_DS_URL .. "?pid=" .. payload.id) or nil,
+      }
+    elseif action == "capture" then
+      return { status = "captured", capturedAt = os.time() }
+    elseif action == "refund" then
+      return { status = "refunded", refundedAt = os.time(), amount = payload.amount }
+    end
+  elseif provider == "adyen" or provider == "paypal" then
+    if action == "create_intent" then
+      return {
+        providerPaymentId = provider .. "_pay_" .. gen_id "ext",
+        clientSecret = "sec_" .. gen_id "ext",
+        requiresAction = false,
+      }
+    elseif action == "capture" then
+      return { status = "captured", capturedAt = os.time() }
+    elseif action == "refund" then
+      return { status = "refunded", refundedAt = os.time(), amount = payload.amount }
+    end
+  end
+  return { status = "ok" }
 end
 
 local function mark_event_seen(provider, event_id, ts)
@@ -765,6 +798,15 @@ local function create_payment_intent_internal(args)
   local payment_id = gen_id "pay"
   local requires_action = (args.require3ds == true) or SCA_FORCE
   local status = requires_action and "requires_action" or "authorized"
+  local provider_payload = psp_call(normalize_provider(args.provider), "create_intent", {
+    id = payment_id,
+    amount = args.amount,
+    currency = args.currency,
+    token = args.token,
+    require3ds = args.require3ds,
+    subject = args.subject,
+    mode = PSP_MODE,
+  })
   local record = {
     paymentId = payment_id,
     siteId = args.siteId,
@@ -777,9 +819,11 @@ local function create_payment_intent_internal(args)
     token = args.token,
     subject = args.subject,
     status = status,
-    requiresAction = requires_action,
-    clientSecret = "sec_" .. payment_id,
-    nextActionUrl = requires_action and (THREE_DS_URL .. payment_id) or nil,
+    requiresAction = provider_payload.requiresAction or requires_action,
+    providerPaymentId = provider_payload.providerPaymentId,
+    clientSecret = provider_payload.clientSecret or ("sec_" .. payment_id),
+    nextActionUrl = provider_payload.nextActionUrl
+      or (requires_action and (THREE_DS_URL .. payment_id) or nil),
     createdAt = os.time(),
   }
   state.payments[payment_id] = record
@@ -5488,8 +5532,16 @@ function handlers.CapturePayment(msg)
   if pay.requiresAction and not msg.ChallengeCompleted then
     return codec.error("REQUIRES_ACTION", "3DS challenge not completed")
   end
-  if pay.provider ~= "internal" and pay.token then
-    pay.providerCaptureId = "cap_" .. pay.paymentId
+  if pay.provider ~= "internal" then
+    local resp = psp_call(
+      pay.provider,
+      "capture",
+      { id = pay.providerPaymentId or pay.paymentId, amount = pay.amount }
+    )
+    if resp and resp.status ~= "captured" then
+      return codec.error("PROVIDER_ERROR", "Capture failed", { provider = pay.provider })
+    end
+    pay.providerCaptureId = resp.providerCaptureId
   end
   pay.status = "captured"
   pay.capturedAt = os.time()
