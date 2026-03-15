@@ -30,6 +30,8 @@ local HTTP_CONNECT_TIMEOUT = tonumber(os.getenv "CATALOG_HTTP_CONNECT_TIMEOUT" o
 local S3_TIMEOUT = tonumber(os.getenv "CATALOG_S3_TIMEOUT" or "") or 10
 local S3_RETRIES = tonumber(os.getenv "CATALOG_S3_RETRIES" or "") or 2
 local EVENT_LOG_LIMIT = tonumber(os.getenv "CATALOG_EVENT_LOG_LIMIT" or "") or 5000
+local RATE_LIMIT_WINDOW = tonumber(os.getenv "CATALOG_RATE_LIMIT_WINDOW" or "") or 60
+local RATE_LIMIT_MAX = tonumber(os.getenv "CATALOG_RATE_LIMIT_MAX" or "") or 120
 local GA4_ENDPOINT = os.getenv "CATALOG_GA4_ENDPOINT"
 local GA4_API_SECRET = os.getenv "CATALOG_GA4_API_SECRET"
 local GA4_MEASUREMENT_ID = os.getenv "CATALOG_GA4_MEASUREMENT_ID"
@@ -350,6 +352,7 @@ local state = {
   stock_alerts = {}, -- siteId -> list of { sku, total, threshold, ts }
   backorders = {}, -- siteId -> list of { sku, qty, preorder_at, eta_days, createdAt, source, ref }
   shipment_events = {}, -- shipmentId -> list of { ts, status, meta }
+  rate_limits = {}, -- key -> { count, window_start }
   search_synonyms = {}, -- siteId -> map term -> {synonyms}
   search_stopwords = {}, -- siteId -> set of stopwords
   notification_failures = {}, -- siteId -> list of { type, target, payload, attempts, ts }
@@ -734,6 +737,20 @@ local function track_event(site_id, subject, sku, event)
   end
 
   return stats
+end
+
+local function check_rate_limit(key)
+  local now = os.time()
+  local bucket = state.rate_limits[key]
+  if not bucket or now - bucket.window_start >= RATE_LIMIT_WINDOW then
+    state.rate_limits[key] = { count = 1, window_start = now }
+    return true
+  end
+  bucket.count = bucket.count + 1
+  if bucket.count > RATE_LIMIT_MAX then
+    return false
+  end
+  return true
 end
 
 local function normalize_provider(p)
@@ -5331,6 +5348,9 @@ function handlers.CreatePaymentIntent(msg)
   end
   if msg["Checkout-Id"] and not state.checkouts[msg["Checkout-Id"]] then
     return codec.error("NOT_FOUND", "Checkout not found", { checkoutId = msg["Checkout-Id"] })
+  end
+  if not check_rate_limit("pi:" .. (msg.Subject or msg["Site-Id"])) then
+    return codec.error("RATE_LIMITED", "Too many payment attempts")
   end
   if msg["Order-Id"] and not state.orders[msg["Order-Id"]] then
     return codec.error("NOT_FOUND", "Order not found", { orderId = msg["Order-Id"] })
