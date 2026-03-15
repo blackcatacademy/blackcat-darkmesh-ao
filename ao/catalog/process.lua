@@ -24,6 +24,8 @@ local allowed_actions = {
   "SetInventoryReservation",
   "SyncShipment",
   "SyncReturn",
+  "ApplyShipmentEvent",
+  "ApplyTrackingEvent",
   "GetShippingRates",
   "GetTaxRates",
   "ValidateAddress",
@@ -38,6 +40,8 @@ local role_policy = {
   SyncShipment = { "catalog-admin", "admin" },
   SyncReturn = { "catalog-admin", "admin" },
   ApplyOrderEvent = { "admin", "catalog-admin" },
+  ApplyShipmentEvent = { "admin", "catalog-admin", "support" },
+  ApplyTrackingEvent = { "admin", "catalog-admin", "support" },
   GetShippingRates = { "support", "admin", "catalog-admin" },
   GetTaxRates = { "support", "admin", "catalog-admin" },
   ValidateAddress = { "support", "admin" },
@@ -464,6 +468,38 @@ function handlers.GetShipment(msg)
   local sh = state.shipments[msg["Shipment-Id"]]
   if not sh then return codec.error("NOT_FOUND", "Shipment not found") end
   return codec.ok(sh)
+end
+
+function handlers.ApplyShipmentEvent(msg)
+  local ok, missing = validation.require_fields(msg, { "Shipment-Id", "Order-Id" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Shipment-Id", "Order-Id", "Carrier", "Service", "Label-Url", "Status", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  state.shipments[msg["Shipment-Id"]] = state.shipments[msg["Shipment-Id"]] or {}
+  local sh = state.shipments[msg["Shipment-Id"]]
+  sh.orderId = msg["Order-Id"]
+  sh.carrier = msg.Carrier or sh.carrier
+  sh.service = msg.Service or sh.service
+  sh.labelUrl = msg["Label-Url"] or sh.labelUrl
+  sh.status = msg.Status or sh.status or "pending"
+  audit.record("catalog", "ApplyShipmentEvent", msg, nil, { shipment = msg["Shipment-Id"] })
+  return codec.ok({ shipmentId = msg["Shipment-Id"], status = sh.status, carrier = sh.carrier, service = sh.service, labelUrl = sh.labelUrl })
+end
+
+function handlers.ApplyTrackingEvent(msg)
+  local ok, missing = validation.require_fields(msg, { "Shipment-Id", "Tracking" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Shipment-Id", "Tracking", "Carrier", "Eta", "Tracking-Url", "Status", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  state.shipments[msg["Shipment-Id"]] = state.shipments[msg["Shipment-Id"]] or {}
+  local sh = state.shipments[msg["Shipment-Id"]]
+  sh.tracking = msg.Tracking
+  sh.trackingUrl = msg["Tracking-Url"] or sh.trackingUrl
+  sh.eta = msg.Eta or sh.eta
+  sh.carrier = msg.Carrier or sh.carrier
+  sh.status = msg.Status or sh.status
+  audit.record("catalog", "ApplyTrackingEvent", msg, nil, { shipment = msg["Shipment-Id"], tracking = msg.Tracking })
+  return codec.ok({ shipmentId = msg["Shipment-Id"], tracking = sh.tracking, trackingUrl = sh.trackingUrl, eta = sh.eta, status = sh.status })
 end
 
 function handlers.UpsertProduct(msg)
