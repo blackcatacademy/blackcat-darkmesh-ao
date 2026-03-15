@@ -189,6 +189,7 @@ function handlers.SearchCatalog(msg)
               if d == 1 then score = score + 2 end
             end
           end
+          if msg.Locale and locale == msg.Locale then score = score + 1 end
           table.insert(results, { sku = sku, payload = payload, price = price, name = payload.name or sku, score = score, available = available })
         end
       end
