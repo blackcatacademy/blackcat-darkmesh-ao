@@ -38,6 +38,23 @@ Restart=always
 WantedBy=multi-user.target
 ```
 - Write: a similar `scripts/verify/checksum_daemon.sh` exists in the write repo (set `WRITE_WAL_PATH`, `AO_QUEUE_PATH`), run via supervisor if desired.
+## Write checksum daemon (deploy on write host)
+```
+[Unit]
+Description=Write checksum monitor
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/blackcat-darkmesh-write
+Environment=CHECKSUM_INTERVAL_SEC=300
+Environment=WRITE_WAL_PATH=/var/log/ao/write-wal.ndjson
+Environment=AO_QUEUE_PATH=/var/lib/ao/outbox-queue.ndjson
+ExecStart=/opt/blackcat-darkmesh-write/scripts/verify/checksum_daemon.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ## Outbox Integrity
 - Write emits HMAC on outbox events when `OUTBOX_HMAC_SECRET` is set; queue forwarder verifies HMAC before delivery.

@@ -13,6 +13,18 @@ local function with_req(fields)
   return fields
 end
 
+-- Mixed action replay: same Request-Id across registry + site should stick to first response
+do
+  local reg = require("ao.registry.process")
+  local site = require("ao.site.process")
+  local rid = "rid-mixed-replay"
+  reg.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "mix-replay", ["Actor-Role"] = "admin", ["Request-Id"] = rid }))
+  local again = reg.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "mix-replay", ["Actor-Role"] = "admin", ["Request-Id"] = rid }))
+  if again.status ~= "OK" then error("mixed replay should return stored OK") end
+  local siteReplay = site.route(with_req({ Action = "ResolveRoute", ["Site-Id"] = "mix-replay", Path = "/", ["Actor-Role"] = "editor", ["Request-Id"] = rid }))
+  -- resolve route will be missing, but should not be treated as a new requestId; earlier stored response reused if present
+end
+
 -- Fuzz pagination uniqueness
 do
   local siteId = "fuzz-site"
