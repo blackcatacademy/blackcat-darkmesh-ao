@@ -60,6 +60,7 @@ local APPLE_PAY_MERCHANT_ID = os.getenv "CATALOG_APPLE_PAY_MERCHANT_ID" -- luach
 local GOOGLE_PAY_MERCHANT_ID = os.getenv "CATALOG_GOOGLE_PAY_MERCHANT_ID" -- luacheck: ignore
 local ADYEN_MERCHANT_ACCOUNT = os.getenv "CATALOG_ADYEN_MERCHANT_ACCOUNT" -- luacheck: ignore
 local PSP_MODE = os.getenv "CATALOG_PSP_MODE" or "sandbox" -- sandbox|live
+local PSP_ALLOW_STUB = os.getenv "CATALOG_PSP_ALLOW_STUB" ~= "0"
 local PAYPAL_WEBHOOK_ID = os.getenv "CATALOG_PAYPAL_WEBHOOK_ID"
 local PAYPAL_WEBHOOK_SECRET = os.getenv "CATALOG_PAYPAL_WEBHOOK_SECRET"
 local PAYPAL_CERT_HOST = os.getenv "CATALOG_PAYPAL_CERT_HOST" or "paypal.com"
@@ -410,38 +411,94 @@ end
 
 -- PSP adapter shim -------------------------------------------------------
 local function psp_call(provider, action, payload)
-  -- TODO: replace shim with real REST/SDK calls once sandbox keys are provided.
-  -- Interface expectations:
-  --   create_intent -> { providerPaymentId, clientSecret, requiresAction?, nextActionUrl? }
-  --   capture       -> { status = "captured", providerCaptureId? }
-  --   refund        -> { status = "refunded", refundedAt?, amount? }
-  if provider == "stripe" then
-    if action == "create_intent" then
-      return {
-        providerPaymentId = "pi_" .. gen_id "stripe",
-        clientSecret = "cs_" .. gen_id "stripe",
-        requiresAction = payload.require3ds == true,
-        nextActionUrl = payload.require3ds and (THREE_DS_URL .. "?pid=" .. payload.id) or nil,
-      }
-    elseif action == "capture" then
-      return { status = "captured", capturedAt = os.time() }
-    elseif action == "refund" then
-      return { status = "refunded", refundedAt = os.time(), amount = payload.amount }
+  -- Pluggable PSP adapters. Currently sandbox stubs; replace with real REST/SDK calls when keys are provided.
+  -- Contract:
+  --   create_intent -> ok, { providerPaymentId, clientSecret, requiresAction?, nextActionUrl? } or nil, err
+  --   capture       -> ok, { status = "captured", providerCaptureId? } or nil, err
+  --   refund        -> ok, { status = "refunded", refundedAt?, amount? } or nil, err
+
+  local adapters = {}
+
+  adapters.stripe = function(act, p)
+    if not STRIPE_SECRET or STRIPE_SECRET == "" then
+      return nil, "PSP_NOT_CONFIGURED"
     end
-  elseif provider == "adyen" or provider == "paypal" then
-    if action == "create_intent" then
-      return {
-        providerPaymentId = provider .. "_pay_" .. gen_id "ext",
-        clientSecret = "sec_" .. gen_id "ext",
-        requiresAction = false,
-      }
-    elseif action == "capture" then
-      return { status = "captured", capturedAt = os.time() }
-    elseif action == "refund" then
-      return { status = "refunded", refundedAt = os.time(), amount = payload.amount }
+    if act == "create_intent" then
+      return true,
+        {
+          providerPaymentId = "pi_" .. gen_id "stripe",
+          clientSecret = "cs_" .. gen_id "stripe",
+          requiresAction = p.require3ds == true,
+          nextActionUrl = p.require3ds and (THREE_DS_URL .. "?pid=" .. p.id) or nil,
+        }
+    elseif act == "capture" then
+      return true, { status = "captured", capturedAt = os.time() }
+    elseif act == "refund" then
+      return true, { status = "refunded", refundedAt = os.time(), amount = p.amount }
     end
+    return nil, "UNSUPPORTED_ACTION"
   end
-  return { status = "ok" }
+
+  adapters.adyen = function(act, p)
+    if not ADYEN_HMAC_KEY or ADYEN_HMAC_KEY == "" then
+      return nil, "PSP_NOT_CONFIGURED"
+    end
+    if act == "create_intent" then
+      return true,
+        {
+          providerPaymentId = "adyen_" .. gen_id "adyen",
+          clientSecret = "sec_" .. gen_id "adyen",
+          requiresAction = false,
+        }
+    elseif act == "capture" then
+      return true, { status = "captured", capturedAt = os.time() }
+    elseif act == "refund" then
+      return true, { status = "refunded", refundedAt = os.time(), amount = p.amount }
+    end
+    return nil, "UNSUPPORTED_ACTION"
+  end
+
+  adapters.paypal = function(act, p)
+    if not PAYPAL_WEBHOOK_ID or not PAYPAL_WEBHOOK_SECRET then
+      return nil, "PSP_NOT_CONFIGURED"
+    end
+    if act == "create_intent" then
+      return true,
+        {
+          providerPaymentId = "pp_" .. gen_id "pp",
+          clientSecret = "sec_" .. gen_id "pp",
+          requiresAction = false,
+        }
+    elseif act == "capture" then
+      return true, { status = "captured", capturedAt = os.time() }
+    elseif act == "refund" then
+      return true, { status = "refunded", refundedAt = os.time(), amount = p.amount }
+    end
+    return nil, "UNSUPPORTED_ACTION"
+  end
+
+  adapters.default = function(act, p)
+    if not PSP_ALLOW_STUB then
+      return nil, "PSP_NOT_CONFIGURED"
+    end
+    if act == "create_intent" then
+      return true,
+        {
+          providerPaymentId = "int_" .. gen_id "psp",
+          clientSecret = "sec_" .. gen_id "psp",
+          requiresAction = p.require3ds == true,
+          nextActionUrl = p.require3ds and (THREE_DS_URL .. "?pid=" .. p.id) or nil,
+        }
+    elseif act == "capture" then
+      return true, { status = "captured", capturedAt = os.time() }
+    elseif act == "refund" then
+      return true, { status = "refunded", refundedAt = os.time(), amount = p.amount }
+    end
+    return nil, "UNSUPPORTED_ACTION"
+  end
+
+  local adapter = adapters[provider] or adapters.default
+  return adapter(action, payload)
 end
 
 local function mark_event_seen(provider, event_id, ts)
@@ -817,7 +874,7 @@ local function create_payment_intent_internal(args)
   local payment_id = gen_id "pay"
   local requires_action = (args.require3ds == true) or SCA_FORCE
   local status = requires_action and "requires_action" or "authorized"
-  local provider_payload = psp_call(normalize_provider(args.provider), "create_intent", {
+  local ok_psp, provider_payload = psp_call(normalize_provider(args.provider), "create_intent", {
     id = payment_id,
     amount = args.amount,
     currency = args.currency,
@@ -826,6 +883,23 @@ local function create_payment_intent_internal(args)
     subject = args.subject,
     mode = PSP_MODE,
   })
+  if not ok_psp then
+    -- fallback to internal stub if allowed
+    if PSP_ALLOW_STUB then
+      ok_psp, provider_payload = psp_call("internal", "create_intent", {
+        id = payment_id,
+        amount = args.amount,
+        currency = args.currency,
+        token = args.token,
+        require3ds = args.require3ds,
+        subject = args.subject,
+        mode = PSP_MODE,
+      })
+    end
+    if not ok_psp then
+      return nil, provider_payload or "PSP_ERROR"
+    end
+  end
   local record = {
     paymentId = payment_id,
     siteId = args.siteId,
@@ -834,7 +908,7 @@ local function create_payment_intent_internal(args)
     amount = args.amount,
     currency = args.currency,
     method = args.method,
-    provider = normalize_provider(args.provider),
+    provider = ok_psp and normalize_provider(args.provider) or "internal",
     token = args.token,
     subject = args.subject,
     status = status,
@@ -5571,13 +5645,17 @@ function handlers.CapturePayment(msg)
     return codec.error("REQUIRES_ACTION", "3DS challenge not completed")
   end
   if pay.provider ~= "internal" then
-    local resp = psp_call(
+    local ok_cap, resp = psp_call(
       pay.provider,
       "capture",
       { id = pay.providerPaymentId or pay.paymentId, amount = pay.amount }
     )
-    if resp and resp.status ~= "captured" then
-      return codec.error("PROVIDER_ERROR", "Capture failed", { provider = pay.provider })
+    if not ok_cap or (resp and resp.status ~= "captured") then
+      return codec.error(
+        "PROVIDER_ERROR",
+        "Capture failed",
+        { provider = pay.provider, reason = resp }
+      )
     end
     pay.providerCaptureId = resp.providerCaptureId
   end
