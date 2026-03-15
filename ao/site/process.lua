@@ -46,6 +46,7 @@ local allowed_actions = {
   "GetOrder",
   "ListOrders",
   "GetPublishLog",
+  "ExportPublishLog",
 }
 
 local role_policy = {
@@ -60,6 +61,7 @@ local role_policy = {
   ForceUnlockDraft = { "publisher", "admin" },
   RenewDraftLock = { "editor", "publisher", "admin" },
   GetDraftAudit = { "editor", "publisher", "admin", "support" },
+  ExportPublishLog = { "admin" },
   RegisterContentType = { "admin" },
   ListContentTypes = { "editor", "publisher", "admin" },
   SetPerfBudgets = { "admin" },
@@ -438,6 +440,16 @@ function handlers.PutDraft(msg)
     for k, v in pairs(msg.Content) do
       if previous.content[k] ~= v then
         table.insert(changed_fields, k)
+      end
+    end
+    if msg.Merge == true and type(previous.content) == "table" then
+      for k, v in pairs(msg.Content) do
+        if type(v) == "table" and type(previous.content[k]) == "table" then
+          for subk, subv in pairs(v) do
+            previous.content[k][subk] = subv
+          end
+          msg.Content[k] = previous.content[k]
+        end
       end
     end
     state.draft_audit[key] = state.draft_audit[key] or {}
@@ -903,6 +915,14 @@ function handlers.ForceUnlockDraft(msg)
     nil,
     { draftId = msg["Draft-Id"], reason = msg.Reason or "unspecified" }
   )
+  state.draft_audit[msg["Draft-Id"]] = state.draft_audit[msg["Draft-Id"]] or {}
+  table.insert(state.draft_audit[msg["Draft-Id"]], {
+    ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
+    actor = msg.Subject or msg["Actor-Role"],
+    fields = { "lock" },
+    action = "force_unlock",
+    reason = msg.Reason,
+  })
   return codec.ok { draftId = msg["Draft-Id"], unlocked = true, forced = true, reason = msg.Reason }
 end
 
@@ -1148,6 +1168,7 @@ function handlers.RunPublishScheduler(msg)
     expired = expired,
     remaining = state.publish_schedules,
     logSize = #state.publish_log,
+    statuses = state.publish_schedules,
   }
 end
 
@@ -1176,6 +1197,37 @@ function handlers.GetPublishLog(msg)
     end
   end
   return codec.ok { siteId = msg["Site-Id"], items = items, total = #items, offset = offset }
+end
+
+function handlers.ExportPublishLog(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local data = msg["Site-Id"] and {} or state.publish_log
+  if msg["Site-Id"] then
+    for _, item in ipairs(state.publish_log) do
+      if item.siteId == msg["Site-Id"] then
+        table.insert(data, item)
+      end
+    end
+  end
+  local path = os.getenv "SITE_PUBLISH_LOG_EXPORT"
+  if path then
+    local f = io.open(path, "a")
+    if f then
+      f:write(require("cjson").encode(data), "\n")
+      f:close()
+    end
+  end
+  return codec.ok { siteId = msg["Site-Id"], items = data, total = #data }
 end
 
 function handlers.GetDraftAudit(msg)

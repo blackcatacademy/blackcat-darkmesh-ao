@@ -1826,6 +1826,7 @@ function handlers.Bestsellers(msg)
     "Request-Id",
     "Site-Id",
     "Limit",
+    "Format",
     "Actor-Role",
     "Schema-Version",
     "Signature",
@@ -1860,7 +1861,14 @@ function handlers.Bestsellers(msg)
   while #ranked > limit do
     table.remove(ranked)
   end
-  return codec.ok { siteId = msg["Site-Id"], items = ranked, total = #ranked }
+  if msg.Format == "csv" then
+    local lines = { "sku,score" }
+    for _, r in ipairs(ranked) do
+      table.insert(lines, string.format("%s,%s", r.sku, r.score or 0))
+    end
+    return codec.ok { siteId = msg["Site-Id"], format = "csv", body = table.concat(lines, "\n") }
+  end
+  return codec.ok { siteId = msg["Site-Id"], items = ranked, total = #ranked, format = "json" }
 end
 
 function handlers.TrendingProducts(msg)
