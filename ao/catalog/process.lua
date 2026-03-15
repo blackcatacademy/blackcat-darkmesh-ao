@@ -1538,6 +1538,9 @@ function handlers.TrackCatalogEvent(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
+  if not check_rate_limit("event:" .. (msg.Subject or msg["Site-Id"])) then
+    return codec.error("RATE_LIMITED", "Too many events")
+  end
   local ok_extra, extras = validation.require_no_extras(msg, {
     "Action",
     "Request-Id",

@@ -896,12 +896,36 @@ function handlers.RecordWebVital(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
+  local budgets = state.perf_budgets[msg["Site-Id"]] or {}
+  local metric = msg.Metric
+  local value = msg.Value
+  if metric == "LCP" and budgets.lcp_ms and value > budgets.lcp_ms then
+    return codec.error(
+      "PERF_BUDGET_EXCEEDED",
+      "LCP over budget",
+      { lcp = value, budget = budgets.lcp_ms }
+    )
+  end
+  if metric == "CLS" and budgets.cls and value > budgets.cls then
+    return codec.error(
+      "PERF_BUDGET_EXCEEDED",
+      "CLS over budget",
+      { cls = value, budget = budgets.cls }
+    )
+  end
+  if metric == "TBT" and budgets.tbt_ms and value > budgets.tbt_ms then
+    return codec.error(
+      "PERF_BUDGET_EXCEEDED",
+      "TBT over budget",
+      { tbt = value, budget = budgets.tbt_ms }
+    )
+  end
   state.perf_vitals[msg["Site-Id"]] = {
-    metric = msg.Metric,
-    value = msg.Value,
+    metric = metric,
+    value = value,
     ts = os.time(),
   }
-  return codec.ok { siteId = msg["Site-Id"], metric = msg.Metric }
+  return codec.ok { siteId = msg["Site-Id"], metric = metric }
 end
 
 function handlers.RecordOrder(msg)
