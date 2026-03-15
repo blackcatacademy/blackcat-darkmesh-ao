@@ -120,7 +120,12 @@ function handlers.SearchCatalog(msg)
   local q = msg.Query and msg.Query:lower() or ""
   local sort = msg.Sort or "relevance"
   local results = {}
-  local facets = { categories = {}, availability = { available = 0, unavailable = 0 } }
+  local facets = {
+    categories = {},
+    availability = { available = 0, unavailable = 0 },
+    price = { lt25 = 0, lt100 = 0, gte100 = 0 },
+    currency = {},
+  }
   local prefix = "product:" .. msg["Site-Id"] .. ":"
   for key, product in pairs(state.products) do
     if key:sub(1, #prefix) == prefix then
@@ -143,6 +148,13 @@ function handlers.SearchCatalog(msg)
         if available then facets.availability.available = facets.availability.available + 1 else facets.availability.unavailable = facets.availability.unavailable + 1 end
         if payload.categoryId then
           facets.categories[payload.categoryId] = (facets.categories[payload.categoryId] or 0) + 1
+        end
+        local price_num = tonumber(price or 0) or 0
+        if price_num < 25 then facets.price.lt25 = facets.price.lt25 + 1
+        elseif price_num < 100 then facets.price.lt100 = facets.price.lt100 + 1
+        else facets.price.gte100 = facets.price.gte100 + 1 end
+        if payload.currency then
+          facets.currency[payload.currency] = (facets.currency[payload.currency] or 0) + 1
         end
         local ok_cat = (not msg["Category-Id"]) or (payload.categoryId == msg["Category-Id"]) or (payload.category and payload.category.id == msg["Category-Id"]) or false
         if ok_price and ok_locale and ok_available and ok_cat then
