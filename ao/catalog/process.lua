@@ -48,6 +48,7 @@ local PAYPAL_WEBHOOK_ID = os.getenv "CATALOG_PAYPAL_WEBHOOK_ID"
 local PAYPAL_WEBHOOK_SECRET = os.getenv "CATALOG_PAYPAL_WEBHOOK_SECRET"
 local ADYEN_HMAC_KEY = os.getenv "CATALOG_ADYEN_HMAC_KEY"
 local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" -- optional, e.g. "curl -X POST https://api.fastly.com/service/... -H 'Fastly-Key: ...' -H 'Surrogate-Key: %s'"
+local RETENTION_DAYS = tonumber(os.getenv "CATALOG_RETENTION_DAYS" or "") or 30
 
 local handlers = {}
 local allowed_actions = {
@@ -132,6 +133,7 @@ local allowed_actions = {
   "ListBackorders",
   "TokenizePaymentMethod",
   "HandlePaymentProviderWebhook",
+  "CleanupRetention",
 }
 
 local role_policy = {
@@ -211,6 +213,7 @@ local role_policy = {
   ListBackorders = { "catalog-admin", "admin", "support" },
   TokenizePaymentMethod = { "catalog-admin", "support", "admin" },
   HandlePaymentProviderWebhook = { "catalog-admin", "support", "admin" },
+  CleanupRetention = { "admin", "catalog-admin" },
 }
 
 local state = {
@@ -3680,6 +3683,55 @@ local function record_shipment_event(shipment_id, status, meta)
   })
 end
 
+local function cleanup_retention()
+  local cutoff = os.time() - (RETENTION_DAYS * 86400)
+  for site, evs in pairs(state.telemetry) do
+    local filtered = {}
+    for _, ev in ipairs(evs) do
+      if not ev.ts or ev.ts >= cutoff then
+        table.insert(filtered, ev)
+      end
+    end
+    state.telemetry[site] = filtered
+  end
+  for site, log in pairs(state.event_log) do
+    local filtered = {}
+    for _, ev in ipairs(log) do
+      if (ev.ts or 0) >= cutoff then
+        table.insert(filtered, ev)
+      end
+    end
+    state.event_log[site] = filtered
+  end
+  for site, alerts in pairs(state.stock_alerts) do
+    local filtered = {}
+    for _, a in ipairs(alerts) do
+      if (a.ts or 0) >= cutoff then
+        table.insert(filtered, a)
+      end
+    end
+    state.stock_alerts[site] = filtered
+  end
+  for site, list in pairs(state.backorders) do
+    local filtered = {}
+    for _, bo in ipairs(list) do
+      if (bo.createdAt or 0) >= cutoff then
+        table.insert(filtered, bo)
+      end
+    end
+    state.backorders[site] = filtered
+  end
+  for ship, events in pairs(state.shipment_events) do
+    local filtered = {}
+    for _, e in ipairs(events) do
+      if (e.ts or 0) >= cutoff then
+        table.insert(filtered, e)
+      end
+    end
+    state.shipment_events[ship] = filtered
+  end
+end
+
 local function deliver_stock_alert(site_id, alert)
   if not STOCK_ALERT_WEBHOOK or STOCK_ALERT_WEBHOOK == "" or not json_ok then
     return
@@ -4136,6 +4188,22 @@ function handlers.HandlePaymentProviderWebhook(msg)
     { paymentId = pid, status = pay.status }
   )
   return codec.ok { paymentId = pid, status = pay.status }
+end
+
+function handlers.CleanupRetention(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  cleanup_retention()
+  audit.record("catalog", "CleanupRetention", msg, nil, { retentionDays = RETENTION_DAYS })
+  return codec.ok { retentionDays = RETENTION_DAYS }
 end
 
 function handlers.RequestReturn(msg)
