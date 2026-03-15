@@ -50,6 +50,7 @@ local ADYEN_HMAC_KEY = os.getenv "CATALOG_ADYEN_HMAC_KEY"
 local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" -- optional, e.g. "curl -X POST https://api.fastly.com/service/... -H 'Fastly-Key: ...' -H 'Surrogate-Key: %s'"
 local RETENTION_DAYS = tonumber(os.getenv "CATALOG_RETENTION_DAYS" or "") or 30
 local SEARCH_SYNONYMS_PATH = os.getenv "CATALOG_SEARCH_SYNONYMS_PATH"
+local SEARCH_STOPWORDS_PATH = os.getenv "CATALOG_SEARCH_STOPWORDS_PATH"
 
 local handlers = {}
 local allowed_actions = {
@@ -252,6 +253,7 @@ local state = {
   backorders = {}, -- siteId -> list of { sku, qty, preorder_at, eta_days, createdAt, source, ref }
   shipment_events = {}, -- shipmentId -> list of { ts, status, meta }
   search_synonyms = {}, -- siteId -> map term -> {synonyms}
+  search_stopwords = {}, -- siteId -> set of stopwords
 }
 
 local function gen_id(prefix)
@@ -327,8 +329,33 @@ local function load_synonyms()
   end
 end
 
+local function load_stopwords()
+  if not SEARCH_STOPWORDS_PATH or SEARCH_STOPWORDS_PATH == "" or not json_ok then
+    return
+  end
+  local f = io.open(SEARCH_STOPWORDS_PATH, "r")
+  if not f then
+    return
+  end
+  local ok, data = pcall(cjson.decode, f:read "*a")
+  f:close()
+  if not ok or type(data) ~= "table" then
+    return
+  end
+  -- expected format: [ { siteId="...", words=["a","the","and"] }, ... ]
+  for _, entry in ipairs(data) do
+    if entry.siteId and entry.words and type(entry.words) == "table" then
+      state.search_stopwords[entry.siteId] = {}
+      for _, w in ipairs(entry.words) do
+        state.search_stopwords[entry.siteId][w:lower()] = true
+      end
+    end
+  end
+end
+
 load_rates()
 load_synonyms()
+load_stopwords()
 
 local function track_event(site_id, subject, sku, event)
   state.events[site_id] = state.events[site_id] or {}
@@ -754,8 +781,15 @@ function handlers.SearchCatalog(msg)
     table.insert(tokens, t)
   end
   local syn = state.search_synonyms[msg["Site-Id"]] or {}
-  local expanded_tokens = {}
+  local stopwords = state.search_stopwords[msg["Site-Id"]] or {}
+  local filtered_tokens = {}
   for _, t in ipairs(tokens) do
+    if not stopwords[t] then
+      table.insert(filtered_tokens, t)
+    end
+  end
+  local expanded_tokens = {}
+  for _, t in ipairs(filtered_tokens) do
     table.insert(expanded_tokens, t)
     if syn[t] then
       for _, s in ipairs(syn[t]) do
@@ -876,6 +910,13 @@ function handlers.SearchCatalog(msg)
                   if type(tag) == "string" and tag:lower() == tok then
                     score = score + 1
                   end
+                end
+              end
+              -- lightweight token typo for short tokens
+              if #tok <= 4 then
+                local d = levenshtein((payload.name or ""):lower(), tok)
+                if d == 1 then
+                  score = score + 1
                 end
               end
             end
