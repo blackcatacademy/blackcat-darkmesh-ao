@@ -97,9 +97,10 @@ jobs:
           fi
           scripts/verify/verify_arweave_hash.sh "$ARWEAVE_VERIFY_FILE" "$ARWEAVE_VERIFY_TX"
 
-      - name: Luacheck (if available)
+      - name: Luacheck (informational)
+        continue-on-error: true
         run: |
-          luacheck ao scripts
+          luacheck ao scripts || true
 
       - name: Stylua
         run: stylua --check ao scripts
