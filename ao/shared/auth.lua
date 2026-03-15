@@ -197,6 +197,12 @@ function Auth.require_signature(msg)
     if not SIG_SECRET then
       return not REQUIRE_SIGNATURE, REQUIRE_SIGNATURE and "missing_signature_secret" or nil
     end
+    local function canonical_key(secret)
+      if not secret then return nil end
+      if #secret == 32 then return secret end
+      if #secret > 32 then return secret:sub(1, 32) end
+      return secret .. string.rep("\0", 32 - #secret)
+    end
     if openssl_ok and openssl.hmac then
       local raw = openssl.hmac.digest("sha256", target, SIG_SECRET, true)
       if not raw then return false, "sig_verify_failed" end
@@ -206,7 +212,8 @@ function Auth.require_signature(msg)
       end
       return true
     elseif sodium_ok and sodium.crypto_auth then
-      local tag = sodium.crypto_auth(target, SIG_SECRET)
+      local key = canonical_key(SIG_SECRET)
+      local tag = sodium.crypto_auth(target, key)
       local hex = sodium.to_hex(tag)
       if hex:lower() ~= tostring(sig):lower() then
         return false, "bad_signature"

@@ -33,6 +33,13 @@ if not sodium_ok then
   sodium_ok, sodium = pcall(require, "luasodium")
 end
 
+local function canonical_key(secret)
+  if not secret then return nil end
+  if #secret == 32 then return secret end
+  if #secret > 32 then return secret:sub(1, 32) end
+  return secret .. string.rep("\0", 32 - #secret)
+end
+
 local function hmac_sign(action, site_id, request_id)
   if not (SIG_SECRET and SIG_SECRET ~= "") then return nil end
   local target = string.format("%s|%s|%s", action or "", site_id or "", request_id or "")
@@ -43,7 +50,8 @@ local function hmac_sign(action, site_id, request_id)
   end
 
   if sodium_ok and sodium.crypto_auth then
-    local tag = sodium.crypto_auth(target, SIG_SECRET)
+    local key = canonical_key(SIG_SECRET)
+    local tag = sodium.crypto_auth(target, key)
     if tag then
       if sodium.to_hex then return sodium.to_hex(tag) end
       return (tag:gsub(".", function(c) return string.format("%02x", string.byte(c)) end))
