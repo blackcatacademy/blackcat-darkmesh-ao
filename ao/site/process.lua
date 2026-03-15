@@ -47,6 +47,7 @@ local allowed_actions = {
   "ListOrders",
   "GetPublishLog",
   "ExportPublishLog",
+  "GetPublishStatus",
 }
 
 local role_policy = {
@@ -77,6 +78,8 @@ local role_policy = {
   GetOrder = { "support", "admin" },
   ListOrders = { "support", "admin" },
   GetPublishLog = { "publisher", "admin", "support" },
+  ExportPublishLog = { "admin" },
+  GetPublishStatus = { "publisher", "admin", "support" },
 }
 
 -- pseudo-state for scaffolding
@@ -103,6 +106,21 @@ local state = {
 local MAX_CONTENT_BYTES = tonumber(os.getenv "SITE_MAX_CONTENT_BYTES" or "") or (64 * 1024)
 local MAX_PUBLISH_RETRY = tonumber(os.getenv "SITE_MAX_PUBLISH_RETRY" or "") or 5
 local PUBLISH_LOG_LIMIT = tonumber(os.getenv "SITE_PUBLISH_LOG_LIMIT" or "") or 1000
+local PUBLISH_ALERT_PATH = os.getenv "SITE_PUBLISH_ALERT_PATH"
+
+local function publish_alert(entry, msg)
+  if not PUBLISH_ALERT_PATH then
+    return
+  end
+  local f = io.open(PUBLISH_ALERT_PATH, "a")
+  if f then
+    f:write(
+      require("cjson").encode { ts = os.date "!%Y-%m-%dT%H:%M:%SZ", entry = entry, message = msg },
+      "\n"
+    )
+    f:close()
+  end
+end
 
 local function get_locale_cfg(site_id)
   return state.locales[site_id] or { default = "en", supported = { "en" } }
@@ -305,6 +323,7 @@ function handlers.GetLayout(msg)
     version = version,
     locale = locale or nil,
     content = layout.content,
+    warnings = layout.warnings,
   }
 end
 
@@ -596,7 +615,7 @@ function handlers.UpsertLayout(msg)
   end
   local locale = msg.Locale and msg.Locale:lower() or nil
   local key = ids.layout_key(msg["Layout-Id"], msg.Version, locale)
-  state.layouts[key] = { content = msg.Components, locale = locale }
+  state.layouts[key] = { content = msg.Components, locale = locale, warnings = layout_warnings }
   audit.record(
     "site",
     "UpsertLayout",
@@ -1106,6 +1125,7 @@ function handlers.RunPublishScheduler(msg)
               locale = entry.locale,
               action = "failed_retry",
             })
+            publish_alert(entry, "publish_failed_max_retry")
             table.insert(state.publish_log, {
               ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
               siteId = site_id,
@@ -1228,6 +1248,32 @@ function handlers.ExportPublishLog(msg)
     end
   end
   return codec.ok { siteId = msg["Site-Id"], items = data, total = #data }
+end
+
+function handlers.GetPublishStatus(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Page-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local items = {}
+  for _, entry in ipairs(state.publish_schedules[msg["Site-Id"]] or {}) do
+    if (not msg["Page-Id"]) or entry.pageId == msg["Page-Id"] then
+      table.insert(items, entry)
+    end
+  end
+  return codec.ok { siteId = msg["Site-Id"], items = items, total = #items }
 end
 
 function handlers.GetDraftAudit(msg)
