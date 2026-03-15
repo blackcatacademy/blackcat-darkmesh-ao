@@ -78,6 +78,7 @@ tests/             # integration, message-contracts, snapshots, security
 - Idempotency cache: `IDEM_TTL_SECONDS` (default 300s) and `IDEM_MAX_ENTRIES` (default 1024) bound the in-memory Request-Id store.
 - Security hooks: nonce/signature optional enforcement (`AUTH_REQUIRE_NONCE`, `AUTH_REQUIRE_SIGNATURE`), nonce TTL (`AUTH_NONCE_TTL_SECONDS`), rate limit window (`AUTH_RATE_LIMIT_WINDOW_SECONDS`) and max (`AUTH_RATE_LIMIT_MAX_REQUESTS`).
 - Signature check uses HMAC-SHA256 over `Action|Site-Id|Request-Id` with `AUTH_SIGNATURE_SECRET` (requires `openssl` when enforcement is on).
+- Optional JWT gate: set `AUTH_JWT_HS_SECRET` (HS256) and optionally `AUTH_REQUIRE_JWT=1` to fail-closed; claims `sub/tenant/role/nonce` are mapped to `Actor-Id`/`Tenant`/`Actor-Role`/`Nonce`.
 - Rate-limit state can persist to `AUTH_RATE_LIMIT_FILE`.
 - Prefer libsodium/luaossl for ed25519 when present; set `AUTH_ALLOW_SHELL_FALLBACK=0` to forbid shell fallback.
 - Metrics: set `METRICS_ENABLED=1` and `METRICS_LOG` path to emit NDJSON counters; see `ao/shared/metrics.lua`.
