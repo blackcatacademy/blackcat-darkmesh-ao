@@ -9,6 +9,11 @@ local audit = require "ao.shared.audit"
 local schema = require "ao.shared.schema"
 local metrics = require "ao.shared.metrics"
 local json_ok, cjson = pcall(require, "cjson.safe")
+local RECENT_LIMIT = tonumber(os.getenv "CATALOG_RECENT_LIMIT" or "") or 20
+local SCA_FORCE = os.getenv "CATALOG_SCA_FORCE" == "1"
+local MAX_RATE_OPTIONS = tonumber(os.getenv "CATALOG_MAX_RATE_OPTIONS" or "") or 5
+local RISK_THRESHOLD = tonumber(os.getenv "CATALOG_MANUAL_REVIEW_THRESHOLD" or "") or 90
+local TELEMETRY_EXPORT_PATH = os.getenv "CATALOG_TELEMETRY_PATH"
 
 local handlers = {}
 local allowed_actions = {
@@ -41,6 +46,24 @@ local allowed_actions = {
   "CompleteCheckout",
   "SetInventory",
   "GetInventory",
+  "TrackCatalogEvent",
+  "RelatedProducts",
+  "RecentlyViewed",
+  "CreatePaymentIntent",
+  "CapturePayment",
+  "RefundPayment",
+  "RequestReturn",
+  "ApproveReturn",
+  "RefundReturn",
+  "CalculateTax",
+  "RateShopCarriers",
+  "ExportTelemetry",
+  "CreateCompanyAccount",
+  "AddCompanyUser",
+  "CreatePurchaseOrder",
+  "ApprovePurchaseOrder",
+  "RejectPurchaseOrder",
+  "CheckoutPurchaseOrder",
 }
 
 local role_policy = {
@@ -68,6 +91,24 @@ local role_policy = {
   CompleteCheckout = { "catalog-admin", "support", "admin" },
   SetInventory = { "catalog-admin", "admin" },
   GetInventory = { "catalog-admin", "support", "admin" },
+  TrackCatalogEvent = { "catalog-admin", "support", "admin", "viewer" },
+  RelatedProducts = { "catalog-admin", "support", "admin", "viewer" },
+  RecentlyViewed = { "catalog-admin", "support", "admin", "viewer" },
+  CreatePaymentIntent = { "catalog-admin", "support", "admin" },
+  CapturePayment = { "catalog-admin", "support", "admin" },
+  RefundPayment = { "catalog-admin", "support", "admin" },
+  RequestReturn = { "support", "catalog-admin", "admin" },
+  ApproveReturn = { "support", "catalog-admin", "admin" },
+  RefundReturn = { "support", "catalog-admin", "admin" },
+  CalculateTax = { "catalog-admin", "support", "admin" },
+  RateShopCarriers = { "catalog-admin", "support", "admin" },
+  ExportTelemetry = { "admin", "catalog-admin" },
+  CreateCompanyAccount = { "catalog-admin", "admin" },
+  AddCompanyUser = { "catalog-admin", "admin" },
+  CreatePurchaseOrder = { "buyer", "approver", "catalog-admin", "admin" },
+  ApprovePurchaseOrder = { "approver", "catalog-admin", "admin" },
+  RejectPurchaseOrder = { "approver", "catalog-admin", "admin" },
+  CheckoutPurchaseOrder = { "catalog-admin", "admin", "approver" },
 }
 
 local state = {
@@ -87,7 +128,17 @@ local state = {
   tax_rules = {}, -- siteId -> list { country, region?, rate }
   shipping_rules = {}, -- siteId -> list { country, min_total, max_total, rate, carrier, service }
   checkouts = {}, -- checkoutId -> { siteId, items, address, quote, status }
+  events = {}, -- siteId -> sku -> { views, add_to_cart, purchases }
+  recent = {}, -- subject -> list of { siteId, sku } (most recent first, capped)
+  payments = {}, -- paymentId -> { status, amount, currency, method, siteId, orderId, checkoutId, requiresAction }
+  telemetry = {}, -- buffered events for export
+  companies = {}, -- companyId -> { name, users = { [userId] = role } }
+  purchase_orders = {}, -- poId -> { siteId, companyId, items, address, currency, subtotal, tax, shipping, total, status, approvals = {} }
 }
+
+local function gen_id(prefix)
+  return string.format("%s-%d-%04d", prefix, os.time(), math.random(0, 9999))
+end
 
 local MAX_PAYLOAD_BYTES = tonumber(os.getenv "CATALOG_MAX_PAYLOAD_BYTES" or "") or (64 * 1024)
 local SHIPPING_RATES_PATH = os.getenv "AO_SHIPPING_RATES_PATH"
@@ -130,6 +181,115 @@ local function load_rates()
 end
 
 load_rates()
+
+local function track_event(site_id, subject, sku, event)
+  state.events[site_id] = state.events[site_id] or {}
+  local stats = state.events[site_id][sku] or { views = 0, add_to_cart = 0, purchases = 0 }
+  if event == "view" then
+    stats.views = stats.views + 1
+  elseif event == "add_to_cart" then
+    stats.add_to_cart = stats.add_to_cart + 1
+  elseif event == "purchase" then
+    stats.purchases = stats.purchases + 1
+  end
+  state.events[site_id][sku] = stats
+
+  if subject then
+    state.recent[subject] = state.recent[subject] or {}
+    local list = state.recent[subject]
+    for i = #list, 1, -1 do
+      if list[i].sku == sku and list[i].siteId == site_id then
+        table.remove(list, i)
+      end
+    end
+    table.insert(list, 1, { siteId = site_id, sku = sku })
+    while #list > RECENT_LIMIT do
+      table.remove(list)
+    end
+  end
+
+  return stats
+end
+
+local function create_payment_intent_internal(args)
+  -- args: siteId, checkoutId?, orderId?, amount, currency, method, require3ds?
+  local payment_id = gen_id "pay"
+  local requires_action = (args.require3ds == true) or SCA_FORCE
+  local status = requires_action and "requires_action" or "authorized"
+  local record = {
+    paymentId = payment_id,
+    siteId = args.siteId,
+    checkoutId = args.checkoutId,
+    orderId = args.orderId,
+    amount = args.amount,
+    currency = args.currency,
+    method = args.method,
+    status = status,
+    requiresAction = requires_action,
+    clientSecret = "sec_" .. payment_id,
+    createdAt = os.time(),
+  }
+  state.payments[payment_id] = record
+  if args.checkoutId and state.checkouts[args.checkoutId] then
+    local chk = state.checkouts[args.checkoutId]
+    chk.paymentIntent = payment_id
+    chk.paymentStatus = status
+  end
+  if args.orderId and state.orders[args.orderId] then
+    state.orders[args.orderId].paymentStatus = status
+  end
+  return record
+end
+
+local function record_telemetry(kind, data)
+  table.insert(state.telemetry, {
+    ts = os.time(),
+    kind = kind,
+    data = data,
+  })
+end
+
+local function risk_score(checkout)
+  local score = 0
+  if checkout.quote.total and checkout.quote.total > 500 then
+    score = score + 20
+  end
+  if checkout.address and checkout.address.Country and checkout.address.Country ~= "US" then
+    score = score + 10
+  end
+  if checkout.email and checkout.email:match "@(mailinator|10minutemail|tempmail)" then
+    score = score + 25
+  end
+  if checkout.quote and checkout.quote.shipping and checkout.quote.shipping.rate == 0 then
+    score = score + 5
+  end
+  if checkout.quote and checkout.quote.promo then
+    score = score + 5
+  end
+  return math.min(100, score)
+end
+
+-- B2B helpers -------------------------------------------------------------
+local function ensure_company(company_id)
+  if not state.companies[company_id] then
+    return false, "Company not found"
+  end
+  return true
+end
+
+local function require_company_role(company_id, user_id, roles)
+  local comp = state.companies[company_id]
+  if not comp then
+    return false, "Company not found"
+  end
+  local role = comp.users and comp.users[user_id]
+  for _, r in ipairs(roles) do
+    if role == r then
+      return true
+    end
+  end
+  return false, "User not authorized for company"
+end
 
 -- tiny Levenshtein for typo tolerance on short queries
 local function levenshtein(a, b)
@@ -190,6 +350,7 @@ function handlers.GetProduct(msg)
     payload = product.payload,
     version = product.version or state.active_versions[msg["Site-Id"]] or "active",
     variants = state.variants[msg["Site-Id"]] and state.variants[msg["Site-Id"]][msg.Sku],
+    stats = state.events[msg["Site-Id"]] and state.events[msg["Site-Id"]][msg.Sku],
   }
 end
 
@@ -330,8 +491,12 @@ function handlers.SearchCatalog(msg)
         local locale = payload.locale or payload.Locale
         local available = payload.is_available or payload.available
         if not available and state.inventory[msg["Site-Id"]] then
-          local inv = state.inventory[msg["Site-Id"]][sku]
-          available = inv and inv.quantity and inv.quantity > 0 or false
+          local inv = state.inventory[msg["Site-Id"]] or {}
+          local qty = 0
+          for _, wh in pairs(inv) do
+            qty = qty + (wh[sku] or 0)
+          end
+          available = qty > 0
         end
         local ok_price = true
         if min_price and price and price < min_price then
@@ -411,6 +576,7 @@ function handlers.SearchCatalog(msg)
             name = payload.name or sku,
             score = score,
             available = available,
+            category = payload.categoryId or (payload.category and payload.category.id),
           })
         end
       end
@@ -452,6 +618,160 @@ function handlers.SearchCatalog(msg)
     total = #results,
     facets = facets,
   }
+end
+
+function handlers.TrackCatalogEvent(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Sku", "Event" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Sku",
+    "Event",
+    "Subject",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
+  if not ok_len_site then
+    return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" })
+  end
+  local ok_len_sku, err_sku = validation.check_length(msg.Sku, 128, "Sku")
+  if not ok_len_sku then
+    return codec.error("INVALID_INPUT", err_sku, { field = "Sku" })
+  end
+  if msg.Subject then
+    local ok_len_sub, err_sub = validation.check_length(msg.Subject, 128, "Subject")
+    if not ok_len_sub then
+      return codec.error("INVALID_INPUT", err_sub, { field = "Subject" })
+    end
+  end
+  local ev = msg.Event
+  if ev ~= "view" and ev ~= "add_to_cart" and ev ~= "purchase" then
+    return codec.error("INVALID_INPUT", "Event must be view|add_to_cart|purchase")
+  end
+  local key = ids.product_key(msg["Site-Id"], msg.Sku)
+  if not state.products[key] then
+    return codec.error("NOT_FOUND", "Product not found", { sku = msg.Sku })
+  end
+  local stats = track_event(msg["Site-Id"], msg.Subject, msg.Sku, ev)
+  record_telemetry("catalog_event", {
+    siteId = msg["Site-Id"],
+    sku = msg.Sku,
+    subject = msg.Subject,
+    event = ev,
+  })
+  audit.record("catalog", "TrackCatalogEvent", msg, nil, { event = ev, sku = msg.Sku })
+  metrics.inc("catalog.TrackCatalogEvent." .. ev)
+  metrics.tick()
+  return codec.ok {
+    siteId = msg["Site-Id"],
+    sku = msg.Sku,
+    stats = stats,
+    recent = state.recent[msg.Subject],
+  }
+end
+
+function handlers.RelatedProducts(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Sku" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Sku",
+    "Limit",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local key = ids.product_key(msg["Site-Id"], msg.Sku)
+  if not state.products[key] then
+    return codec.error("NOT_FOUND", "Product not found", { sku = msg.Sku })
+  end
+  local limit = tonumber(msg.Limit) or 5
+  if limit < 1 then
+    limit = 1
+  end
+  if limit > 20 then
+    limit = 20
+  end
+
+  local scores = state.events[msg["Site-Id"]] or {}
+  local ranked = {}
+  for sku, s in pairs(scores) do
+    if sku ~= msg.Sku then
+      local score = (s.views or 0) + 3 * (s.add_to_cart or 0) + 5 * (s.purchases or 0)
+      local pkey = ids.product_key(msg["Site-Id"], sku)
+      if state.products[pkey] then
+        table.insert(ranked, { sku = sku, score = score, payload = state.products[pkey].payload })
+      end
+    end
+  end
+  table.sort(ranked, function(a, b)
+    if a.score == b.score then
+      return tostring(a.sku) < tostring(b.sku)
+    end
+    return a.score > b.score
+  end)
+  while #ranked > limit do
+    table.remove(ranked)
+  end
+  return codec.ok { siteId = msg["Site-Id"], sku = msg.Sku, items = ranked, total = #ranked }
+end
+
+function handlers.RecentlyViewed(msg)
+  local ok, missing = validation.require_fields(msg, { "Subject" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Subject",
+    "Site-Id",
+    "Limit",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local list = state.recent[msg.Subject] or {}
+  local limit = tonumber(msg.Limit) or 10
+  if limit < 1 then
+    limit = 1
+  end
+  if limit > RECENT_LIMIT then
+    limit = RECENT_LIMIT
+  end
+  local items = {}
+  for _, entry in ipairs(list) do
+    if #items >= limit then
+      break
+    end
+    if (not msg["Site-Id"]) or entry.siteId == msg["Site-Id"] then
+      local pkey = ids.product_key(entry.siteId, entry.sku)
+      local product = state.products[pkey]
+      if product then
+        table.insert(items, { siteId = entry.siteId, sku = entry.sku, payload = product.payload })
+      end
+    end
+  end
+  return codec.ok { subject = msg.Subject, items = items, total = #items }
 end
 
 function handlers.ApplyOrderEvent(msg)
@@ -1261,7 +1581,7 @@ local function pick_tax_rate(site_id, address)
   return 0
 end
 
-local function pick_shipping(site_id, address, total)
+local function pick_shipping(site_id, address, total, weight)
   local rules = state.shipping_rules[site_id] or state.shipping_rates[site_id] or {}
   local best = nil
   for _, r in ipairs(rules) do
@@ -1270,6 +1590,8 @@ local function pick_shipping(site_id, address, total)
       and (not r.region or r.region == address.Region)
       and (not r.min_total or total >= r.min_total)
       and (not r.max_total or total <= r.max_total)
+      and (not r.min_weight or (weight or 0) >= r.min_weight)
+      and (not r.max_weight or (weight or 0) <= r.max_weight)
     then
       if not best or (r.rate or 0) < (best.rate or 0) then
         best = r
@@ -1277,6 +1599,69 @@ local function pick_shipping(site_id, address, total)
     end
   end
   return best or { rate = 0, carrier = "standard", service = "ground" }
+end
+
+local function shop_shipping(site_id, address, total, weight)
+  local rules = state.shipping_rules[site_id] or state.shipping_rates[site_id] or {}
+  local options = {}
+  for _, r in ipairs(rules) do
+    if
+      (not r.country or r.country == address.Country)
+      and (not r.region or r.region == address.Region)
+      and (not r.min_total or total >= r.min_total)
+      and (not r.max_total or total <= r.max_total)
+      and (not r.min_weight or (weight or 0) >= r.min_weight)
+      and (not r.max_weight or (weight or 0) <= r.max_weight)
+    then
+      table.insert(options, {
+        carrier = r.carrier or "standard",
+        service = r.service or "ground",
+        rate = r.rate or 0,
+        transitDays = r.transit_days or r.transitDays,
+        currency = r.currency or "USD",
+      })
+    end
+  end
+  table.sort(options, function(a, b)
+    return (a.rate or 0) < (b.rate or 0)
+  end)
+  while #options > MAX_RATE_OPTIONS do
+    table.remove(options)
+  end
+  if #options == 0 then
+    table.insert(options, { carrier = "standard", service = "ground", rate = 0, currency = "USD" })
+  end
+  return options
+end
+
+local function compute_cart(site_id, items, currency, promo)
+  local subtotal = 0
+  local weight = 0
+  local lines = {}
+  for _, it in ipairs(items) do
+    local qty = tonumber(it.Qty or it.qty) or 0
+    if qty <= 0 then
+      return nil, "INVALID_QTY"
+    end
+    local sku = it.Sku or it.sku
+    local quote, err = apply_pricing(site_id, sku, currency, promo)
+    if not quote then
+      return nil, err or "NOT_FOUND"
+    end
+    local line_total = quote.price * qty
+    subtotal = subtotal + line_total
+    local pkey = ids.product_key(site_id, sku)
+    local payload = state.products[pkey] and state.products[pkey].payload or {}
+    weight = weight + (payload.weight or payload.Weight or 0) * qty
+    table.insert(lines, {
+      sku = sku,
+      qty = qty,
+      unit_price = quote.price,
+      currency = quote.currency,
+      line_total = line_total,
+    })
+  end
+  return { subtotal = subtotal, weight = weight, lines = lines }, nil
 end
 
 function handlers.QuoteOrder(msg)
@@ -1312,57 +1697,119 @@ function handlers.QuoteOrder(msg)
     return codec.error("INVALID_INPUT", "Address.Country required", { field = "Address" })
   end
   local currency = msg.Currency or "USD"
-  local line_items = {}
-  local subtotal = 0
-  for _, item in ipairs(msg.Items) do
-    if not item.Sku or not item.Qty then
-      return codec.error("INVALID_INPUT", "Item requires Sku and Qty", { item = item })
-    end
-    local qty = tonumber(item.Qty) or 0
-    if qty <= 0 then
-      return codec.error("INVALID_INPUT", "Qty must be > 0", { item = item })
-    end
-    -- inventory check across warehouses
+  local cart, cart_err = compute_cart(msg["Site-Id"], msg.Items, currency, msg.Promo)
+  if not cart then
+    return codec.error("INVALID_INPUT", cart_err or "Pricing failed")
+  end
+  -- inventory check across warehouses
+  for _, line in ipairs(cart.lines) do
     local inv = state.inventory[msg["Site-Id"]] or {}
     local available = 0
     for _, wh in pairs(inv) do
-      available = available + (wh[item.Sku] or 0)
+      available = available + (wh[line.sku] or 0)
     end
-    if available < qty then
+    if available < line.qty then
       return codec.error(
         "OUT_OF_STOCK",
         "Insufficient inventory",
-        { sku = item.Sku, available = available }
+        { sku = line.sku, available = available }
       )
     end
-    local quote = apply_pricing(msg["Site-Id"], item.Sku, currency, msg.Promo)
-    if not quote then
-      return codec.error("NOT_FOUND", "Product not found", { sku = item.Sku })
-    end
-    local line_sub = quote.price * qty
-    subtotal = subtotal + line_sub
-    table.insert(line_items, {
-      sku = item.Sku,
-      qty = qty,
-      unit = quote.price,
-      currency = quote.currency,
-      subtotal = line_sub,
-    })
   end
-  local ship = pick_shipping(msg["Site-Id"], address, subtotal)
+  local ship = pick_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight)
   local tax_rate = pick_tax_rate(msg["Site-Id"], address)
-  local tax = subtotal * tax_rate / 100
-  local total = subtotal + ship.rate + tax
+  local tax = cart.subtotal * tax_rate / 100
+  local total = cart.subtotal + ship.rate + tax
   return codec.ok {
     siteId = msg["Site-Id"],
     currency = currency,
-    items = line_items,
-    subtotal = subtotal,
+    items = cart.lines,
+    subtotal = cart.subtotal,
+    weight = cart.weight,
     shipping = ship,
     tax = tax,
     taxRate = tax_rate,
     total = total,
     promo = msg.Promo,
+  }
+end
+
+function handlers.CalculateTax(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Items", "Address" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Items",
+    "Address",
+    "Currency",
+    "Promo",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local address = msg.Address
+  if type(address) ~= "table" or not address.Country then
+    return codec.error("INVALID_INPUT", "Address.Country required", { field = "Address" })
+  end
+  local currency = msg.Currency or "USD"
+  local cart, cart_err = compute_cart(msg["Site-Id"], msg.Items, currency, msg.Promo)
+  if not cart then
+    return codec.error("INVALID_INPUT", cart_err or "Pricing failed")
+  end
+  local tax_rate = pick_tax_rate(msg["Site-Id"], address)
+  local tax = cart.subtotal * tax_rate / 100
+  return codec.ok {
+    siteId = msg["Site-Id"],
+    subtotal = cart.subtotal,
+    taxRate = tax_rate,
+    tax = tax,
+    currency = currency,
+  }
+end
+
+function handlers.RateShopCarriers(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Items", "Address" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Items",
+    "Address",
+    "Currency",
+    "Promo",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local address = msg.Address
+  if type(address) ~= "table" or not address.Country then
+    return codec.error("INVALID_INPUT", "Address.Country required", { field = "Address" })
+  end
+  local currency = msg.Currency or "USD"
+  local cart, cart_err = compute_cart(msg["Site-Id"], msg.Items, currency, msg.Promo)
+  if not cart then
+    return codec.error("INVALID_INPUT", cart_err or "Pricing failed")
+  end
+  local options = shop_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight)
+  return codec.ok {
+    siteId = msg["Site-Id"],
+    subtotal = cart.subtotal,
+    weight = cart.weight,
+    currency = currency,
+    options = options,
   }
 end
 
@@ -1477,10 +1924,37 @@ function handlers.StartCheckout(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local quote_resp = handlers.QuoteOrder(msg)
-  if quote_resp.status ~= "OK" then
-    return quote_resp
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Items",
+    "Address",
+    "Email",
+    "Currency",
+    "Promo",
+    "Payment-Method",
+    "Require3DS",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
+  local currency = msg.Currency or "USD"
+  local cart, cart_err = compute_cart(msg["Site-Id"], msg.Items, currency, msg.Promo)
+  if not cart then
+    return codec.error("INVALID_INPUT", cart_err or "Pricing failed")
+  end
+  local address = msg.Address
+  if type(address) ~= "table" or not address.Country then
+    return codec.error("INVALID_INPUT", "Address.Country required", { field = "Address" })
+  end
+  local shipping = pick_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight)
+  local tax_rate = pick_tax_rate(msg["Site-Id"], address)
+  local tax = cart.subtotal * tax_rate / 100
+  local total = cart.subtotal + shipping.rate + tax
   local items = {}
   for _, item in ipairs(msg.Items) do
     table.insert(items, { sku = item.Sku, qty = tonumber(item.Qty) or 0 })
@@ -1495,14 +1969,50 @@ function handlers.StartCheckout(msg)
     items = items,
     address = msg.Address,
     email = msg.Email,
-    quote = quote_resp.payload,
+    quote = {
+      subtotal = cart.subtotal,
+      weight = cart.weight,
+      taxRate = tax_rate,
+      tax = tax,
+      shipping = shipping,
+      total = total,
+      currency = currency,
+      promo = msg.Promo,
+    },
     status = "pending_payment",
     reserve = changes,
+    risk = risk_score {
+      quote = {
+        subtotal = cart.subtotal,
+        shipping = shipping,
+        total = total,
+        promo = msg.Promo,
+      },
+      address = msg.Address,
+      email = msg.Email,
+    },
   }
+  local payment
+  if msg["Payment-Method"] then
+    payment = create_payment_intent_internal {
+      siteId = msg["Site-Id"],
+      checkoutId = checkout_id,
+      amount = total,
+      currency = currency,
+      method = msg["Payment-Method"],
+      require3ds = msg.Require3DS,
+    }
+  end
   return codec.ok {
     checkoutId = checkout_id,
-    total = quote_resp.payload.total,
-    currency = quote_resp.payload.currency,
+    total = total,
+    currency = currency,
+    tax = tax,
+    taxRate = tax_rate,
+    shipping = shipping,
+    paymentIntent = payment and payment.paymentId,
+    paymentStatus = payment and payment.status or "pending_payment",
+    risk = state.checkouts[checkout_id].risk,
   }
 end
 
@@ -1511,18 +2021,15 @@ function handlers.CompleteCheckout(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Checkout-Id",
-      "Payment-Method",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Checkout-Id",
+    "Payment-Method",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -1533,12 +2040,615 @@ function handlers.CompleteCheckout(msg)
   if chk.status ~= "pending_payment" then
     return codec.error("INVALID_STATE", "Checkout already completed", { status = chk.status })
   end
-  -- simulate payment success always
+  local payment_id = chk.paymentIntent
+  if not payment_id then
+    local created = create_payment_intent_internal {
+      siteId = chk.siteId,
+      checkoutId = msg["Checkout-Id"],
+      amount = chk.quote.total,
+      currency = chk.quote.currency or "USD",
+      method = msg["Payment-Method"],
+      require3ds = msg.Require3DS,
+    }
+    payment_id = created.paymentId
+  end
+  local pay = state.payments[payment_id]
+  if not pay then
+    return codec.error("NOT_FOUND", "Payment intent missing", { paymentId = payment_id })
+  end
+  if pay.requiresAction and not msg.ChallengeCompleted then
+    return codec.error("REQUIRES_ACTION", "3DS challenge not completed")
+  end
+  if chk.risk and chk.risk >= RISK_THRESHOLD and not msg.OverrideRisk then
+    chk.status = "manual_review"
+    return codec.error("REVIEW_REQUIRED", "Checkout flagged for manual review", { risk = chk.risk })
+  end
+  pay.status = "captured"
+  pay.capturedAt = os.time()
   chk.status = "paid"
-  chk.payment =
-    { method = msg["Payment-Method"], status = "succeeded", paidAt = os.date "!%Y-%m-%dT%H:%M:%SZ" }
+  chk.payment = {
+    method = msg["Payment-Method"],
+    status = pay.status,
+    paidAt = os.date "!%Y-%m-%dT%H:%M:%SZ",
+    paymentId = pay.paymentId,
+  }
   audit.record("catalog", "CompleteCheckout", msg, nil, { checkoutId = msg["Checkout-Id"] })
-  return codec.ok { checkoutId = msg["Checkout-Id"], status = chk.status, payment = chk.payment }
+  return codec.ok {
+    checkoutId = msg["Checkout-Id"],
+    status = chk.status,
+    payment = chk.payment,
+    risk = chk.risk,
+  }
+end
+
+function handlers.CreatePaymentIntent(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Amount", "Currency", "Method" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Checkout-Id",
+    "Order-Id",
+    "Amount",
+    "Currency",
+    "Method",
+    "Require3DS",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  if type(msg.Amount) ~= "number" or msg.Amount <= 0 then
+    return codec.error("INVALID_INPUT", "Amount must be positive number")
+  end
+  if not msg.Currency or #msg.Currency ~= 3 then
+    return codec.error("INVALID_INPUT", "Currency must be ISO 4217")
+  end
+  local method = msg.Method
+  local allowed = { card = true, paypal = true, applepay = true, googlepay = true, ideal = true }
+  if not allowed[method] then
+    return codec.error("INVALID_INPUT", "Unsupported payment method")
+  end
+  if msg["Checkout-Id"] and not state.checkouts[msg["Checkout-Id"]] then
+    return codec.error("NOT_FOUND", "Checkout not found", { checkoutId = msg["Checkout-Id"] })
+  end
+  if msg["Order-Id"] and not state.orders[msg["Order-Id"]] then
+    return codec.error("NOT_FOUND", "Order not found", { orderId = msg["Order-Id"] })
+  end
+  local record = create_payment_intent_internal {
+    siteId = msg["Site-Id"],
+    checkoutId = msg["Checkout-Id"],
+    orderId = msg["Order-Id"],
+    amount = msg.Amount,
+    currency = msg.Currency,
+    method = method,
+    require3ds = msg.Require3DS,
+  }
+  audit.record(
+    "catalog",
+    "CreatePaymentIntent",
+    msg,
+    nil,
+    { paymentId = record.paymentId, status = record.status }
+  )
+  metrics.inc "catalog.CreatePaymentIntent.count"
+  metrics.tick()
+  return codec.ok {
+    paymentId = record.paymentId,
+    status = record.status,
+    clientSecret = record.clientSecret,
+    nextAction = record.requiresAction
+        and { type = "3ds_redirect", token = "3ds-" .. record.paymentId }
+      or nil,
+  }
+end
+
+function handlers.CapturePayment(msg)
+  local ok, missing = validation.require_fields(msg, { "Payment-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Payment-Id",
+    "ChallengeCompleted",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local pay = state.payments[msg["Payment-Id"]]
+  if not pay then
+    return codec.error("NOT_FOUND", "Payment not found")
+  end
+  if pay.status == "captured" or pay.status == "refunded" then
+    return codec.ok { paymentId = pay.paymentId, status = pay.status }
+  end
+  if pay.requiresAction and not msg.ChallengeCompleted then
+    return codec.error("REQUIRES_ACTION", "3DS challenge not completed")
+  end
+  pay.status = "captured"
+  pay.capturedAt = os.time()
+  if pay.orderId and state.orders[pay.orderId] then
+    state.orders[pay.orderId].paymentStatus = "paid"
+  end
+  if pay.checkoutId and state.checkouts[pay.checkoutId] then
+    state.checkouts[pay.checkoutId].paymentStatus = "paid"
+    state.checkouts[pay.checkoutId].status = "paid"
+  end
+  audit.record("catalog", "CapturePayment", msg, nil, { paymentId = pay.paymentId })
+  metrics.inc "catalog.CapturePayment.count"
+  metrics.tick()
+  return codec.ok { paymentId = pay.paymentId, status = pay.status }
+end
+
+function handlers.RefundPayment(msg)
+  local ok, missing = validation.require_fields(msg, { "Payment-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Payment-Id",
+    "Amount",
+    "Reason",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local pay = state.payments[msg["Payment-Id"]]
+  if not pay then
+    return codec.error("NOT_FOUND", "Payment not found")
+  end
+  local amount = msg.Amount or pay.amount
+  if type(amount) ~= "number" or amount <= 0 then
+    return codec.error("INVALID_INPUT", "Amount must be positive number")
+  end
+  pay.status = "refunded"
+  pay.refundAmount = amount
+  pay.refundedAt = os.time()
+  if pay.orderId and state.orders[pay.orderId] then
+    state.orders[pay.orderId].refundAmount = amount
+    state.orders[pay.orderId].paymentStatus = "refunded"
+    state.orders[pay.orderId].status = state.orders[pay.orderId].status or "refunded"
+  end
+  audit.record("catalog", "RefundPayment", msg, nil, { paymentId = pay.paymentId, amount = amount })
+  metrics.inc "catalog.RefundPayment.count"
+  metrics.tick()
+  return codec.ok { paymentId = pay.paymentId, status = pay.status, amount = amount }
+end
+
+function handlers.RequestReturn(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Order-Id", "Items" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Order-Id",
+    "Items",
+    "Reason",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_items, err_items = validation.assert_type(msg.Items, "table", "Items")
+  if not ok_items then
+    return codec.error("INVALID_INPUT", err_items, { field = "Items" })
+  end
+  local items = {}
+  for _, it in ipairs(msg.Items) do
+    if not (it.Sku and it.Qty) then
+      return codec.error("INVALID_INPUT", "Item requires Sku and Qty")
+    end
+    table.insert(items, { sku = it.Sku, qty = tonumber(it.Qty) or 0, reason = it.Reason })
+  end
+  local return_id = gen_id "ret"
+  state.returns[return_id] = {
+    returnId = return_id,
+    siteId = msg["Site-Id"],
+    orderId = msg["Order-Id"],
+    items = items,
+    status = "requested",
+    reason = msg.Reason,
+    createdAt = os.time(),
+  }
+  audit.record("catalog", "RequestReturn", msg, nil, { returnId = return_id })
+  metrics.inc "catalog.RequestReturn.count"
+  metrics.tick()
+  return codec.ok { returnId = return_id, status = "requested" }
+end
+
+function handlers.ApproveReturn(msg)
+  local ok, missing = validation.require_fields(msg, { "Return-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Return-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ret = state.returns[msg["Return-Id"]]
+  if not ret then
+    return codec.error("NOT_FOUND", "Return not found")
+  end
+  ret.status = "approved"
+  ret.approvedAt = os.time()
+  audit.record("catalog", "ApproveReturn", msg, nil, { returnId = ret.returnId })
+  metrics.inc "catalog.ApproveReturn.count"
+  metrics.tick()
+  return codec.ok { returnId = ret.returnId, status = ret.status }
+end
+
+function handlers.RefundReturn(msg)
+  local ok, missing = validation.require_fields(msg, { "Return-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Return-Id",
+    "Amount",
+    "Restock",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ret = state.returns[msg["Return-Id"]]
+  if not ret then
+    return codec.error("NOT_FOUND", "Return not found")
+  end
+  local amount = msg.Amount
+  if amount and (type(amount) ~= "number" or amount <= 0) then
+    return codec.error("INVALID_INPUT", "Amount must be positive number")
+  end
+  ret.status = "refunded"
+  ret.refundAmount = amount
+  ret.refundedAt = os.time()
+  local restock = msg.Restock ~= false
+  if restock then
+    adjust_inventory(ret.siteId, ret.items, 1)
+  end
+  if ret.orderId and state.orders[ret.orderId] then
+    local o = state.orders[ret.orderId]
+    o.status = o.status or "returned"
+    o.returnStatus = ret.status
+    o.refundAmount = amount or o.refundAmount
+  end
+  audit.record("catalog", "RefundReturn", msg, nil, { returnId = ret.returnId, amount = amount })
+  metrics.inc "catalog.RefundReturn.count"
+  metrics.tick()
+  return codec.ok { returnId = ret.returnId, status = ret.status, restocked = restock }
+end
+
+function handlers.ExportTelemetry(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local events = state.telemetry
+  state.telemetry = {}
+  if TELEMETRY_EXPORT_PATH and TELEMETRY_EXPORT_PATH ~= "" and json_ok then
+    local f = io.open(TELEMETRY_EXPORT_PATH, "a")
+    if f then
+      for _, ev in ipairs(events) do
+        local ok, line = pcall(cjson.encode, ev)
+        if ok and line then
+          f:write(line)
+          f:write "\n"
+        end
+      end
+      f:close()
+    end
+  end
+  return codec.ok { events = events, count = #events, path = TELEMETRY_EXPORT_PATH }
+end
+
+-- B2B / Purchase Orders ---------------------------------------------------
+function handlers.CreateCompanyAccount(msg)
+  local ok, missing = validation.require_fields(msg, { "Name" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Company-Id",
+    "Name",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local cid = msg["Company-Id"] or gen_id "co"
+  state.companies[cid] = state.companies[cid] or { name = msg.Name, users = {} }
+  audit.record("catalog", "CreateCompanyAccount", msg, nil, { companyId = cid })
+  return codec.ok { companyId = cid, name = msg.Name }
+end
+
+function handlers.AddCompanyUser(msg)
+  local ok, missing = validation.require_fields(msg, { "Company-Id", "User-Id", "Role" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Company-Id",
+    "User-Id",
+    "Role",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_comp, err_comp = ensure_company(msg["Company-Id"])
+  if not ok_comp then
+    return codec.error("NOT_FOUND", err_comp)
+  end
+  local role = msg.Role
+  if role ~= "buyer" and role ~= "approver" and role ~= "admin" then
+    return codec.error("INVALID_INPUT", "Role must be buyer|approver|admin")
+  end
+  state.companies[msg["Company-Id"]].users[msg["User-Id"]] = role
+  audit.record(
+    "catalog",
+    "AddCompanyUser",
+    msg,
+    nil,
+    { companyId = msg["Company-Id"], userId = msg["User-Id"], role = role }
+  )
+  return codec.ok { companyId = msg["Company-Id"], userId = msg["User-Id"], role = role }
+end
+
+function handlers.CreatePurchaseOrder(msg)
+  local ok, missing =
+    validation.require_fields(msg, { "Site-Id", "Company-Id", "Items", "Address" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Company-Id",
+    "Items",
+    "Address",
+    "Currency",
+    "Promo",
+    "Buyer-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_comp, err_comp = ensure_company(msg["Company-Id"])
+  if not ok_comp then
+    return codec.error("NOT_FOUND", err_comp)
+  end
+  if
+    msg["Buyer-Id"]
+    and not require_company_role(msg["Company-Id"], msg["Buyer-Id"], { "buyer", "admin" })
+  then
+    return codec.error("FORBIDDEN", "Buyer not allowed for company")
+  end
+  local currency = msg.Currency or "USD"
+  local cart, cart_err = compute_cart(msg["Site-Id"], msg.Items, currency, msg.Promo)
+  if not cart then
+    return codec.error("INVALID_INPUT", cart_err or "Pricing failed")
+  end
+  local address = msg.Address
+  if type(address) ~= "table" or not address.Country then
+    return codec.error("INVALID_INPUT", "Address.Country required", { field = "Address" })
+  end
+  local shipping = pick_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight)
+  local tax_rate = pick_tax_rate(msg["Site-Id"], address)
+  local tax = cart.subtotal * tax_rate / 100
+  local total = cart.subtotal + shipping.rate + tax
+  local po_id = gen_id "po"
+  state.purchase_orders[po_id] = {
+    poId = po_id,
+    siteId = msg["Site-Id"],
+    companyId = msg["Company-Id"],
+    items = cart.lines,
+    address = address,
+    currency = currency,
+    subtotal = cart.subtotal,
+    weight = cart.weight,
+    tax = tax,
+    taxRate = tax_rate,
+    shipping = shipping,
+    total = total,
+    promo = msg.Promo,
+    status = "pending_approval",
+    approvals = {},
+  }
+  audit.record("catalog", "CreatePurchaseOrder", msg, nil, { poId = po_id, total = total })
+  return codec.ok { poId = po_id, status = "pending_approval", total = total, currency = currency }
+end
+
+function handlers.ApprovePurchaseOrder(msg)
+  local ok, missing = validation.require_fields(msg, { "PO-Id", "Approver-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "PO-Id",
+    "Approver-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local po = state.purchase_orders[msg["PO-Id"]]
+  if not po then
+    return codec.error("NOT_FOUND", "Purchase order not found")
+  end
+  if not require_company_role(po.companyId, msg["Approver-Id"], { "approver", "admin" }) then
+    return codec.error("FORBIDDEN", "Approver not allowed")
+  end
+  po.status = "approved"
+  po.approvals[msg["Approver-Id"]] = "approved"
+  audit.record("catalog", "ApprovePurchaseOrder", msg, nil, { poId = po.poId })
+  return codec.ok { poId = po.poId, status = po.status }
+end
+
+function handlers.RejectPurchaseOrder(msg)
+  local ok, missing = validation.require_fields(msg, { "PO-Id", "Approver-Id", "Reason" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "PO-Id",
+    "Approver-Id",
+    "Reason",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local po = state.purchase_orders[msg["PO-Id"]]
+  if not po then
+    return codec.error("NOT_FOUND", "Purchase order not found")
+  end
+  if not require_company_role(po.companyId, msg["Approver-Id"], { "approver", "admin" }) then
+    return codec.error("FORBIDDEN", "Approver not allowed")
+  end
+  po.status = "rejected"
+  po.approvals[msg["Approver-Id"]] = "rejected"
+  po.rejectionReason = msg.Reason
+  audit.record("catalog", "RejectPurchaseOrder", msg, nil, { poId = po.poId })
+  return codec.ok { poId = po.poId, status = po.status, reason = msg.Reason }
+end
+
+function handlers.CheckoutPurchaseOrder(msg)
+  local ok, missing = validation.require_fields(msg, { "PO-Id", "Payment-Method" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "PO-Id",
+    "Payment-Method",
+    "Require3DS",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local po = state.purchase_orders[msg["PO-Id"]]
+  if not po then
+    return codec.error("NOT_FOUND", "Purchase order not found")
+  end
+  if po.status ~= "approved" then
+    return codec.error("INVALID_STATE", "PO not approved", { status = po.status })
+  end
+  -- create checkout-like record without re-quoting
+  local items = {}
+  for _, line in ipairs(po.items) do
+    table.insert(items, { sku = line.sku, qty = line.qty })
+  end
+  local ok_reserve, changes = reserve_inventory(po.siteId, items)
+  if not ok_reserve then
+    return codec.error("OUT_OF_STOCK", "Insufficient inventory")
+  end
+  local checkout_id = gen_id "chk"
+  state.checkouts[checkout_id] = {
+    siteId = po.siteId,
+    items = items,
+    address = po.address,
+    email = po.email,
+    quote = {
+      subtotal = po.subtotal,
+      weight = po.weight,
+      taxRate = po.taxRate,
+      tax = po.tax,
+      shipping = po.shipping,
+      total = po.total,
+      currency = po.currency,
+      promo = po.promo,
+    },
+    status = "pending_payment",
+    reserve = changes,
+    poId = po.poId,
+    risk = risk_score { quote = { total = po.total, shipping = po.shipping }, address = po.address },
+  }
+  local payment = create_payment_intent_internal {
+    siteId = po.siteId,
+    checkoutId = checkout_id,
+    amount = po.total,
+    currency = po.currency,
+    method = msg["Payment-Method"],
+    require3ds = msg.Require3DS,
+  }
+  po.status = "in_checkout"
+  po.checkoutId = checkout_id
+  audit.record(
+    "catalog",
+    "CheckoutPurchaseOrder",
+    msg,
+    nil,
+    { poId = po.poId, checkoutId = checkout_id }
+  )
+  return codec.ok {
+    poId = po.poId,
+    checkoutId = checkout_id,
+    paymentId = payment.paymentId,
+    paymentStatus = payment.status,
+    total = po.total,
+    currency = po.currency,
+  }
 end
 
 local function route(msg)
