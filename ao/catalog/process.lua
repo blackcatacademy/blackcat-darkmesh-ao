@@ -33,6 +33,8 @@ local PAYMENT_WEBHOOK_SECRET = os.getenv "CATALOG_PAYMENT_WEBHOOK_SECRET"
 local CARRIER_WEBHOOK_SECRET = os.getenv "CATALOG_CARRIER_WEBHOOK_SECRET"
 local RETURN_LABEL_BASE = os.getenv "CATALOG_RETURN_LABEL_BASE" or CARRIER_LABEL_BASE
 local JWT_HMAC_SECRET = os.getenv "CATALOG_JWT_SECRET" or os.getenv "JWT_SECRET"
+local INVOICE_SIGN_SECRET = os.getenv "CATALOG_INVOICE_SIGN_SECRET"
+local PDF_RENDER_CMD = os.getenv "CATALOG_PDF_RENDER_CMD" or "cat" -- expects: CMD input.html output.pdf
 
 local handlers = {}
 local allowed_actions = {
@@ -375,6 +377,46 @@ local function s3_copy_with_retry(path, bucket)
     end
   end
   return false
+end
+
+local function render_invoice_pdf(inv)
+  if not INVOICE_PDF_DIR or INVOICE_PDF_DIR == "" then
+    return nil
+  end
+  os.execute("mkdir -p " .. INVOICE_PDF_DIR)
+  local html_path = string.format("%s/%s.html", INVOICE_PDF_DIR, inv.invoiceId)
+  local pdf_path = string.format("%s/%s.pdf", INVOICE_PDF_DIR, inv.invoiceId)
+  local f = io.open(html_path, "w")
+  if f then
+    f:write "<html><body>"
+    f:write(string.format("<h1>Invoice %s</h1>", inv.invoiceNumber or inv.invoiceId))
+    f:write(string.format("<p>Order: %s</p>", inv.orderId or "-"))
+    f:write(string.format("<p>Total: %.2f %s</p>", inv.total or 0, inv.currency or ""))
+    f:write "<ul>"
+    for _, line in ipairs(inv.lines or {}) do
+      f:write(
+        string.format(
+          "<li>%s x%s @ %s</li>",
+          line.sku or line.Sku or "item",
+          line.qty or line.Qty or "1",
+          line.unit_price or line.price or "?"
+        )
+      )
+    end
+    f:write "</ul>"
+    f:write(string.format("<p>Tax: %.2f Shipping: %.2f</p>", inv.tax or 0, inv.shipping or 0))
+    f:write "</body></html>"
+    f:close()
+  end
+  -- best-effort render command
+  local cmd = string.format("%s %s %s", PDF_RENDER_CMD, html_path, pdf_path)
+  os.execute(cmd)
+  local pdf_exists = io.open(pdf_path, "r")
+  if pdf_exists then
+    pdf_exists:close()
+    return pdf_path
+  end
+  return nil
 end
 
 local function risk_score(checkout)
@@ -3519,6 +3561,24 @@ local function persist_invoice(inv)
     local ok = s3_copy_with_retry(inv.pdfPath, INVOICE_S3_BUCKET)
     if ok then
       inv.s3Url = string.format("s3://%s/%s", INVOICE_S3_BUCKET, inv.invoiceId .. ".pdf")
+    end
+  end
+  -- render HTML->PDF via external tool if configured
+  local rendered = render_invoice_pdf(inv)
+  if rendered then
+    inv.pdfPath = rendered
+    if INVOICE_S3_BUCKET and INVOICE_S3_BUCKET ~= "" then
+      local ok = s3_copy_with_retry(inv.pdfPath, INVOICE_S3_BUCKET)
+      if ok then
+        inv.s3Url = string.format("s3://%s/%s", INVOICE_S3_BUCKET, inv.invoiceId .. ".pdf")
+      end
+    end
+  end
+  -- attach signature if secret present
+  if INVOICE_SIGN_SECRET and json_ok then
+    local ok_enc, body = pcall(cjson.encode, inv)
+    if ok_enc then
+      inv.signature = auth.hmac(body, INVOICE_SIGN_SECRET)
     end
   end
 end
