@@ -23,6 +23,9 @@ local DEVICE_TOKEN = os.getenv("AUTH_DEVICE_TOKEN")
 local REQUIRE_DEVICE = os.getenv("AUTH_REQUIRE_DEVICE_TOKEN") == "1"
 local openssl_ok, openssl = pcall(require, "openssl")
 local sodium_ok, sodium = pcall(require, "sodium")
+if not sodium_ok then
+  sodium_ok, sodium = pcall(require, "luasodium")
+end
 local ed25519_ok, ed25519 = pcall(require, "ed25519") -- pure-lua (MIT) if installed
 local sqlite_ok, sqlite = pcall(require, "lsqlite3")
 local SHELL_FALLBACK = os.getenv("AUTH_ALLOW_SHELL_FALLBACK") == "1" -- default now off

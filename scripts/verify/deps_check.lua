@@ -1,9 +1,9 @@
 local deps = {
-  { name = "luv", mod = "luv" },
-  { name = "lsqlite3", mod = "lsqlite3" },
-  { name = "cjson", mod = "cjson.safe" },
-  { name = "luaossl", mod = "openssl" },
-  { name = "sodium", mod = "sodium" },
+  { name = "luv", mods = { "luv" } },
+  { name = "lsqlite3", mods = { "lsqlite3" } },
+  { name = "cjson", mods = { "cjson.safe", "cjson" } },
+  { name = "luaossl", mods = { "openssl" } },
+  { name = "sodium", mods = { "sodium", "luasodium" } },
 }
 
 local function require_any(label, modules)
@@ -20,11 +20,11 @@ end
 
 -- core deps
 for _, d in ipairs(deps) do
-  if not require_any(d.name, { d.mod }) then os.exit(1) end
+  if not require_any(d.name, d.mods) then os.exit(1) end
 end
 
 -- Ed25519 signer: allow either ed25519 rock or sodium providing crypto_sign_* API
-local ed25519_ok = require_any("ed25519", { "ed25519", "sodium" })
+local ed25519_ok = require_any("ed25519", { "ed25519", "sodium", "luasodium" })
 if not ed25519_ok then os.exit(1) end
 
 -- Fail-closed if signatures required and no sodium available (used for ed25519)

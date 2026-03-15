@@ -28,6 +28,9 @@ local cjson = cjson_safe or require("cjson") -- required dependency
 local schema = require("ao.shared.schema")
 local openssl_ok, openssl = pcall(require, "openssl")
 local sodium_ok, sodium = pcall(require, "sodium")
+if not sodium_ok then
+  sodium_ok, sodium = pcall(require, "luasodium")
+end
 
 local function next_tx()
   counter = counter + 1
