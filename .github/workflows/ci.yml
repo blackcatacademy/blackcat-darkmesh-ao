@@ -51,6 +51,9 @@ jobs:
           AUTH_REQUIRE_SIGNATURE: 1  # fail-closed: require libsodium/openssl present
         run: scripts/verify/preflight.sh
 
+      - name: Enforce libsodium/ed25519
+        run: scripts/verify/libsodium_strict.sh
+
       - name: Checksum alert (audit/queue/wal)
         env:
           AUDIT_LOG_DIR: arweave/manifests
