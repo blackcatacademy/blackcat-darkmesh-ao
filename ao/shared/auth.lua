@@ -1,6 +1,8 @@
 -- Shared auth utilities: signature verification and role checks.
 -- AO environment is expected to verify signatures; here we keep role/allowlist helpers.
 
+local jwt_ok, jwt = pcall(require, "ao.shared.jwt")
+
 local Auth = {}
 local os_time = os.time
 
@@ -15,6 +17,8 @@ local RL_SQLITE = os.getenv("AUTH_RATE_LIMIT_SQLITE")
 local SIG_SECRET = os.getenv("AUTH_SIGNATURE_SECRET")
 local SIG_PUBLIC = os.getenv("AUTH_SIGNATURE_PUBLIC")
 local SIG_TYPE = os.getenv("AUTH_SIGNATURE_TYPE") or "hmac" -- hmac | ed25519
+local JWT_SECRET = os.getenv("AUTH_JWT_HS_SECRET")
+local REQUIRE_JWT = os.getenv("AUTH_REQUIRE_JWT") == "1"
 local openssl_ok, openssl = pcall(require, "openssl")
 local sodium_ok, sodium = pcall(require, "sodium")
 local ed25519_ok, ed25519 = pcall(require, "ed25519") -- pure-lua (MIT) if installed
@@ -46,6 +50,37 @@ local function contains(list, value)
     end
   end
   return false
+end
+
+local function extract_bearer(msg)
+  if msg.jwt then return msg.jwt end
+  if msg.JWT then return msg.JWT end
+  if msg.token then return msg.token end
+  local authz = msg.Authorization or msg.authorization or msg.auth
+  if authz and type(authz) == "string" then
+    return (authz:gsub("^%s*[Bb]earer%s+", ""))
+  end
+end
+
+function Auth.consume_jwt(msg)
+  if not JWT_SECRET or JWT_SECRET == "" then return true end
+  if not jwt_ok then return not REQUIRE_JWT, "jwt_module_missing" end
+  local token = extract_bearer(msg)
+  if (not token or token == "") then
+    if REQUIRE_JWT then return false, "missing_jwt" end
+    return true
+  end
+  local ok, claims = jwt.verify_hs256(token, JWT_SECRET)
+  if not ok then return false, claims or "jwt_invalid" end
+  if claims.exp and os_time() > claims.exp then
+    return false, "jwt_expired"
+  end
+  msg["Actor-Id"] = msg["Actor-Id"] or claims.sub or claims.actor
+  msg["Actor-Role"] = msg["Actor-Role"] or claims.role
+  msg["Tenant"] = msg["Tenant"] or claims.tenant
+  msg.Nonce = msg.Nonce or claims.nonce
+  msg.jwt_claims = claims
+  return true
 end
 
 -- Accepts either dash or camel case field names for flexibility with gateways.
@@ -276,6 +311,8 @@ end
 
 -- Combined security gate used by routes
 function Auth.enforce(msg)
+  local ok_jwt, err_jwt = Auth.consume_jwt(msg)
+  if not ok_jwt then return false, err_jwt end
   local ok_nonce, err_nonce = Auth.require_nonce(msg)
   if not ok_nonce then return false, err_nonce end
   local ok_sig, err_sig = Auth.require_signature(msg)
