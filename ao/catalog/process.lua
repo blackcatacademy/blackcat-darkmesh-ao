@@ -17,6 +17,9 @@ local TELEMETRY_EXPORT_PATH = os.getenv "CATALOG_TELEMETRY_PATH"
 local INVOICE_EXPORT_PATH = os.getenv "CATALOG_INVOICE_PATH"
 local CARRIER_LABEL_BASE = os.getenv "CATALOG_CARRIER_LABEL_BASE" or "https://labels.example/"
 local CARRIER_TRACK_BASE = os.getenv "CATALOG_CARRIER_TRACK_BASE" or "https://track.example/"
+local CARRIER_API_URL = os.getenv "CATALOG_CARRIER_API_URL" -- optional external rate/label stub
+local CARRIER_API_TOKEN = os.getenv "CATALOG_CARRIER_API_TOKEN"
+local INVOICE_PDF_DIR = os.getenv "CATALOG_INVOICE_PDF_DIR"
 
 local handlers = {}
 local allowed_actions = {
@@ -146,6 +149,7 @@ local state = {
   companies = {}, -- companyId -> { name, users = { [userId] = role } }
   purchase_orders = {}, -- poId -> { siteId, companyId, items, address, currency, subtotal, tax, shipping, total, status, approvals = {} }
   invoices = {}, -- invoiceId -> { orderId, siteId, total, currency, lines, issuedAt, status }
+  invoice_seq = {}, -- siteId -> last number
 }
 
 local function gen_id(prefix)
@@ -286,7 +290,7 @@ local function build_label(carrier, service, weight)
   local tracking = string.format("trk-%s-%04d", carrier or "std", math.random(0, 9999))
   local label_url = string.format("%s%s.pdf", CARRIER_LABEL_BASE, shipment_id)
   local track_url = string.format("%s%s", CARRIER_TRACK_BASE, tracking)
-  return {
+  local label = {
     shipmentId = shipment_id,
     tracking = tracking,
     trackingUrl = track_url,
@@ -296,6 +300,30 @@ local function build_label(carrier, service, weight)
     weight = weight,
     status = "label_created",
   }
+  -- optional remote label creation
+  if CARRIER_API_URL and json_ok then
+    local payload = {
+      carrier = carrier,
+      service = service,
+      tracking = tracking,
+      shipmentId = shipment_id,
+      weight = weight,
+    }
+    local ok_enc, body = pcall(cjson.encode, payload)
+    if ok_enc then
+      local cmd = string.format(
+        "curl -sSf -X POST %s/label -H 'Content-Type: application/json'%s --data-binary @-",
+        CARRIER_API_URL,
+        CARRIER_API_TOKEN and (" -H 'Authorization: Bearer " .. CARRIER_API_TOKEN .. "'") or ""
+      )
+      local proc = io.popen(cmd, "w")
+      if proc then
+        proc:write(body)
+        proc:close()
+      end
+    end
+  end
+  return label
 end
 
 -- B2B helpers -------------------------------------------------------------
@@ -1709,6 +1737,51 @@ local function shop_shipping(site_id, address, total, weight)
   while #options > MAX_RATE_OPTIONS do
     table.remove(options)
   end
+  if CARRIER_API_URL and CARRIER_API_URL ~= "" then
+    local payload = {
+      siteId = site_id,
+      address = address,
+      total = total,
+      weight = weight,
+      currency = address.Currency or "USD",
+    }
+    if json_ok then
+      local ok_enc, body = pcall(cjson.encode, payload)
+      if ok_enc then
+        local cmd = string.format(
+          "curl -sSf -X POST %s -H 'Content-Type: application/json'%s --data-binary @-",
+          CARRIER_API_URL,
+          CARRIER_API_TOKEN and (" -H 'Authorization: Bearer " .. CARRIER_API_TOKEN .. "'") or ""
+        )
+        local proc = io.popen(cmd, "w")
+        if proc then
+          proc:write(body)
+          proc:close()
+        end
+        local resp = io.popen(cmd:gsub("--data%-binary @%-", ""), "r")
+        if resp then
+          local out = resp:read "*a"
+          resp:close()
+          if out and out ~= "" then
+            local ok, arr = pcall(cjson.decode, out)
+            if ok and type(arr) == "table" then
+              for _, o in ipairs(arr) do
+                if o.rate then
+                  table.insert(options, {
+                    carrier = o.carrier or "external",
+                    service = o.service or "standard",
+                    rate = o.rate,
+                    transitDays = o.transitDays,
+                    currency = o.currency or payload.currency,
+                  })
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
   if #options == 0 then
     table.insert(options, { carrier = "standard", service = "ground", rate = 0, currency = "USD" })
   end
@@ -2745,6 +2818,43 @@ local function persist_invoice(inv)
       f:close()
     end
   end
+  if INVOICE_PDF_DIR and INVOICE_PDF_DIR ~= "" then
+    os.execute("mkdir -p " .. INVOICE_PDF_DIR)
+    local path = string.format("%s/%s.pdf", INVOICE_PDF_DIR, inv.invoiceId)
+    local f = io.open(path, "w")
+    if f then
+      f:write(string.format("INVOICE %s (%s)\n", inv.invoiceNumber or inv.invoiceId, inv.siteId))
+      f:write(
+        string.format(
+          "Order: %s\nCurrency: %s\nTotal: %.2f\n",
+          inv.orderId or "-",
+          inv.currency,
+          inv.total or 0
+        )
+      )
+      f:write "Lines:\n"
+      for _, line in ipairs(inv.lines or {}) do
+        f:write(
+          string.format(
+            "- %s x%s @ %s\n",
+            line.sku or line.Sku or "item",
+            line.qty or line.Qty or "1",
+            line.unit_price or line.price or "?"
+          )
+        )
+      end
+      f:write(
+        string.format(
+          "Tax: %.2f\nShipping: %.2f\nIssued: %s\n",
+          inv.tax or 0,
+          inv.shipping or 0,
+          inv.issuedAt or ""
+        )
+      )
+      f:close()
+      inv.pdfPath = path
+    end
+  end
 end
 
 function handlers.CreateInvoice(msg)
@@ -2790,8 +2900,12 @@ function handlers.CreateInvoice(msg)
     return codec.error("INVALID_INPUT", "Total must be non-negative number")
   end
   local inv_id = gen_id "inv"
+  local seq = (state.invoice_seq[msg["Site-Id"]] or 0) + 1
+  state.invoice_seq[msg["Site-Id"]] = seq
+  local invoice_number = string.format("%s-%06d", msg["Site-Id"], seq)
   local inv = {
     invoiceId = inv_id,
+    invoiceNumber = invoice_number,
     siteId = msg["Site-Id"],
     orderId = msg["Order-Id"],
     currency = currency,
