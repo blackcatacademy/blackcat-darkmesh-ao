@@ -52,6 +52,9 @@ local STRIPE_SECRET = os.getenv "CATALOG_STRIPE_SECRET"
 local STRIPE_WEBHOOK_SECRET = os.getenv "CATALOG_STRIPE_WEBHOOK_SECRET"
 local STRIPE_WEBHOOK_ID = os.getenv "CATALOG_STRIPE_WEBHOOK_ID"
 local STRIPE_VERIFY_EVENT = os.getenv "CATALOG_STRIPE_VERIFY_EVENT" == "1"
+local APPLE_PAY_MERCHANT_ID = os.getenv "CATALOG_APPLE_PAY_MERCHANT_ID" -- luacheck: ignore
+local GOOGLE_PAY_MERCHANT_ID = os.getenv "CATALOG_GOOGLE_PAY_MERCHANT_ID" -- luacheck: ignore
+local ADYEN_MERCHANT_ACCOUNT = os.getenv "CATALOG_ADYEN_MERCHANT_ACCOUNT" -- luacheck: ignore
 local PAYPAL_WEBHOOK_ID = os.getenv "CATALOG_PAYPAL_WEBHOOK_ID"
 local PAYPAL_WEBHOOK_SECRET = os.getenv "CATALOG_PAYPAL_WEBHOOK_SECRET"
 local PAYPAL_CERT_HOST = os.getenv "CATALOG_PAYPAL_CERT_HOST" or "paypal.com"
@@ -733,8 +736,15 @@ local function track_event(site_id, subject, sku, event)
   return stats
 end
 
+local function normalize_provider(p)
+  if p == "apple_pay" or p == "google_pay" then
+    return "stripe"
+  end
+  return p or "internal"
+end
+
 local function create_payment_intent_internal(args)
-  -- args: siteId, checkoutId?, orderId?, amount, currency, method, require3ds?, provider?, token?
+  -- args: siteId, checkoutId?, orderId?, amount, currency, method, require3ds?, provider?, token?, subject?
   local payment_id = gen_id "pay"
   local requires_action = (args.require3ds == true) or SCA_FORCE
   local status = requires_action and "requires_action" or "authorized"
@@ -746,8 +756,9 @@ local function create_payment_intent_internal(args)
     amount = args.amount,
     currency = args.currency,
     method = args.method,
-    provider = args.provider or "internal",
+    provider = normalize_provider(args.provider),
     token = args.token,
+    subject = args.subject,
     status = status,
     requiresAction = requires_action,
     clientSecret = "sec_" .. payment_id,
@@ -1785,19 +1796,16 @@ function handlers.SaveAddress(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Subject",
-      "Address",
-      "Label",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Subject",
+    "Address",
+    "Label",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -5335,6 +5343,11 @@ function handlers.CreatePaymentIntent(msg)
       return codec.ok(cached)
     end
   end
+  local token = msg.Token
+  if msg.Subject and not token and state.payment_tokens[msg.Subject] then
+    local last = state.payment_tokens[msg.Subject][#state.payment_tokens[msg.Subject]]
+    token = last and last.token
+  end
   local record = create_payment_intent_internal {
     siteId = msg["Site-Id"],
     checkoutId = msg["Checkout-Id"],
@@ -5344,7 +5357,8 @@ function handlers.CreatePaymentIntent(msg)
     method = method,
     require3ds = msg.Require3DS,
     provider = provider,
-    token = msg.Token,
+    token = token,
+    subject = msg.Subject,
   }
   if record.requiresAction then
     record.challengeToken = "3ds-" .. record.paymentId
@@ -5387,6 +5401,7 @@ function handlers.TokenizePaymentMethod(msg)
   local ok_extra, extras = validation.require_no_extras(msg, {
     "Action",
     "Request-Id",
+    "Subject",
     "Provider",
     "Payload",
     "Actor-Role",
@@ -5400,10 +5415,28 @@ function handlers.TokenizePaymentMethod(msg)
     return codec.error("INVALID_INPUT", "Payload must be object")
   end
   local provider = msg.Provider
-  if provider ~= "stripe" and provider ~= "paypal" and provider ~= "adyen" then
+  if
+    provider ~= "stripe"
+    and provider ~= "paypal"
+    and provider ~= "adyen"
+    and provider ~= "apple_pay"
+    and provider ~= "google_pay"
+  then
     return codec.error("INVALID_INPUT", "Unsupported provider")
   end
   local token = string.format("%s_tok_%s", provider, gen_id "pm")
+  if msg.Subject then
+    state.payment_tokens[msg.Subject] = state.payment_tokens[msg.Subject] or {}
+    table.insert(state.payment_tokens[msg.Subject], {
+      provider = provider,
+      token = token,
+      label = msg.Payload.label,
+      last4 = msg.Payload.last4 or msg.Payload.Last4,
+      brand = msg.Payload.brand,
+      exp = msg.Payload.exp,
+      default = msg.Payload.default == true,
+    })
+  end
   audit.record("catalog", "TokenizePaymentMethod", msg, nil, { provider = provider })
   return codec.ok { token = token, provider = provider }
 end
