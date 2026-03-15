@@ -41,6 +41,7 @@ local MERCHANT_CENTER_COUNTRY = os.getenv "CATALOG_MERCHANT_CENTER_COUNTRY" or "
 local MERCHANT_CENTER_CURRENCY = os.getenv "CATALOG_MERCHANT_CENTER_CURRENCY" or "USD"
 local STOCK_ALERT_WEBHOOK = os.getenv "CATALOG_STOCK_ALERT_WEBHOOK"
 local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" or os.getenv "CDN_PURGE_CMD"
+local RMA_WEBHOOK = os.getenv "CATALOG_RMA_WEBHOOK"
 local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" -- optional, e.g. "curl -X POST https://api.fastly.com/service/... -H 'Fastly-Key: ...' -H 'Surrogate-Key: %s'"
 
 local handlers = {}
@@ -3617,6 +3618,29 @@ local function forget_subject(site_id, subject)
   return scrubbed
 end
 
+local function notify_rma(site_id, return_id, event, payload)
+  if not RMA_WEBHOOK or RMA_WEBHOOK == "" or not json_ok then
+    return
+  end
+  local body = {
+    type = "rma." .. event,
+    siteId = site_id,
+    returnId = return_id,
+    payload = payload,
+  }
+  local ok, json_body = pcall(cjson.encode, body)
+  if not ok then
+    return
+  end
+  local cmd = string.format(
+    "curl -sS -m %d -H 'Content-Type: application/json' -d '%s' %s >/dev/null 2>&1",
+    HTTP_TIMEOUT,
+    json_body:gsub("'", "'\\''"),
+    RMA_WEBHOOK
+  )
+  os.execute(cmd)
+end
+
 local function deliver_stock_alert(site_id, alert)
   if not STOCK_ALERT_WEBHOOK or STOCK_ALERT_WEBHOOK == "" or not json_ok then
     return
@@ -4017,6 +4041,7 @@ function handlers.RequestReturn(msg)
     method = msg.Method or "dropoff",
   }
   audit.record("catalog", "RequestReturn", msg, nil, { returnId = return_id })
+  notify_rma(msg["Site-Id"], return_id, "requested", state.returns[return_id])
   metrics.inc "catalog.RequestReturn.count"
   metrics.tick()
   return codec.ok { returnId = return_id, status = "requested" }
@@ -4066,6 +4091,7 @@ function handlers.UpdateReturnStatus(msg)
     nil,
     { returnId = ret.returnId, status = ret.status }
   )
+  notify_rma(ret.siteId, ret.returnId, "status", { status = ret.status, reason = ret.reason })
   return codec.ok { returnId = ret.returnId, status = ret.status }
 end
 
@@ -4092,6 +4118,7 @@ function handlers.ApproveReturn(msg)
   ret.status = "approved"
   ret.approvedAt = os.time()
   audit.record("catalog", "ApproveReturn", msg, nil, { returnId = ret.returnId })
+  notify_rma(ret.siteId, ret.returnId, "approved", { status = ret.status })
   metrics.inc "catalog.ApproveReturn.count"
   metrics.tick()
   return codec.ok { returnId = ret.returnId, status = ret.status }
@@ -4137,6 +4164,7 @@ function handlers.RefundReturn(msg)
     o.refundAmount = amount or o.refundAmount
   end
   audit.record("catalog", "RefundReturn", msg, nil, { returnId = ret.returnId, amount = amount })
+  notify_rma(ret.siteId, ret.returnId, "refunded", { amount = amount, restocked = restock })
   metrics.inc "catalog.RefundReturn.count"
   metrics.tick()
   return codec.ok { returnId = ret.returnId, status = ret.status, restocked = restock }
@@ -4177,6 +4205,12 @@ function handlers.CreateReturnLabel(msg)
   label.base = RETURN_LABEL_BASE
   state.shipments[label.shipmentId] = label
   ret.returnLabel = label
+  notify_rma(
+    ret.siteId,
+    ret.returnId,
+    "label",
+    { shipmentId = label.shipmentId, carrier = carrier }
+  )
   audit.record(
     "catalog",
     "CreateReturnLabel",
