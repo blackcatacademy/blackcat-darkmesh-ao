@@ -210,7 +210,13 @@ function handlers.SearchCatalog(msg)
     if key:sub(1, #prefix) == prefix then
       local sku = key:match("product:[^:]+:(.+)")
       local text = (product.payload.name or ""):lower() .. " " .. (product.payload.description or ""):lower()
-      if q == "" or text:find(q, 1, true) then
+      local matched = (q == "") or text:find(q, 1, true)
+      local fuzzy_hit = false
+      if (not matched) and q ~= "" and #q <= 16 then
+        local d = levenshtein((product.payload.name or ""):lower(), q)
+        fuzzy_hit = d <= 2
+      end
+      if matched or fuzzy_hit then
         local payload = product.payload or {}
         local price = payload.price
         local locale = payload.locale or payload.Locale
@@ -251,6 +257,7 @@ function handlers.SearchCatalog(msg)
               local d = levenshtein((payload.name or ""):lower(), q)
               if d == 1 then score = score + 2 end
             end
+            if fuzzy_hit then score = score + 1 end
           end
           if msg.Locale and locale == msg.Locale then score = score + 1 end
           table.insert(results, { sku = sku, payload = payload, price = price, name = payload.name or sku, score = score, available = available })
@@ -259,8 +266,8 @@ function handlers.SearchCatalog(msg)
     end
   end
   table.sort(results, function(a, b)
-    if sort == "price" then return (a.price or 0) < (b.price or 0) end
-    if sort == "-price" then return (a.price or 0) > (b.price or 0) end
+    if sort == "price" or sort == "price_asc" then return (a.price or 0) < (b.price or 0) end
+    if sort == "-price" or sort == "price_desc" then return (a.price or 0) > (b.price or 0) end
     if sort == "name" then return tostring(a.name) < tostring(b.name) end
     if sort == "available" then
       if a.available ~= b.available then return a.available and not b.available end
