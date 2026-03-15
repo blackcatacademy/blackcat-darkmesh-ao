@@ -49,11 +49,11 @@ local role_policy = {
 
 -- pseudo-state for scaffolding
 local state = {
-  routes = {}, -- route:<site>:<path> -> { pageId, layoutId, type }
-  pages = {}, -- page:<site>:<page>:<version> -> { content, manifestTx, archived }
-  layouts = {}, -- layout:<id>:<version> -> { content }
-  menus = {}, -- menu:<site>:<menu>:<version> -> { items }
-  drafts = {}, -- page:<site>:<page>:draft -> { content }
+  routes = {}, -- route:<site>:<path>[:locale] -> { pageId, layoutId, type }
+  pages = {}, -- page:<site>:<page>:<version>[:locale] -> { content, manifestTx, archived }
+  layouts = {}, -- layout:<id>:<version>[:locale] -> { content }
+  menus = {}, -- menu:<site>:<menu>:<version>[:locale] -> { items }
+  drafts = {}, -- page:<site>:<page>:draft[:locale] -> { content }
   active_versions = {}, -- siteId -> versionId
   orders = {}, -- siteId -> orderId -> { status, totalAmount, currency, vatRate, updatedAt }
   assets = {}, -- siteId -> assetId -> metadata
@@ -64,6 +64,19 @@ local MAX_CONTENT_BYTES = tonumber(os.getenv "SITE_MAX_CONTENT_BYTES" or "") or 
 
 local function get_locale_cfg(site_id)
   return state.locales[site_id] or { default = "en", supported = { "en" } }
+end
+
+local function pick_locale(site_id, requested)
+  local cfg = get_locale_cfg(site_id)
+  if not requested or requested == "" then
+    return cfg.default
+  end
+  for _, loc in ipairs(cfg.supported or {}) do
+    if loc:lower() == requested:lower() then
+      return loc:lower()
+    end
+  end
+  return cfg.default
 end
 
 local function validate_locales(msg)
@@ -117,8 +130,10 @@ function handlers.ResolveRoute(msg)
   local locale_cfg = get_locale_cfg(msg["Site-Id"])
   local locale, normalized_path =
     i18n.detect_locale(msg.Path, locale_cfg.supported, locale_cfg.default)
-  local key = ids.route_key(msg["Site-Id"], normalized_path)
-  local route = state.routes[key]
+  local key_locale = ids.route_key(msg["Site-Id"], normalized_path, locale)
+  local key_default = ids.route_key(msg["Site-Id"], normalized_path, locale_cfg.default)
+  local key_plain = ids.route_key(msg["Site-Id"], normalized_path)
+  local route = state.routes[key_locale] or state.routes[key_default] or state.routes[key_plain]
   if not route then
     return codec.error("NOT_FOUND", "Route not found", { path = msg.Path })
   end
@@ -143,6 +158,7 @@ function handlers.GetPage(msg)
     "Site-Id",
     "Page-Id",
     "Version",
+    "Locale",
     "Actor-Role",
     "Schema-Version",
     "Signature",
@@ -165,8 +181,10 @@ function handlers.GetPage(msg)
     end
   end
   local version = msg.Version or state.active_versions[msg["Site-Id"]] or "active"
-  local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], version)
-  local page = state.pages[key]
+  local locale = pick_locale(msg["Site-Id"], msg.Locale)
+  local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], version, locale)
+  local fallback = ids.page_key(msg["Site-Id"], msg["Page-Id"], version)
+  local page = state.pages[key] or state.pages[fallback]
   if not page or page.archived then
     return codec.error(
       "NOT_FOUND",
@@ -178,6 +196,7 @@ function handlers.GetPage(msg)
     siteId = msg["Site-Id"],
     pageId = msg["Page-Id"],
     version = version,
+    locale = locale,
     content = page.content,
   }
 end
@@ -187,10 +206,16 @@ function handlers.GetLayout(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    { "Action", "Request-Id", "Layout-Id", "Version", "Actor-Role", "Schema-Version", "Signature" }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Layout-Id",
+    "Version",
+    "Locale",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -205,8 +230,10 @@ function handlers.GetLayout(msg)
     end
   end
   local version = msg.Version or "active"
-  local key = ids.layout_key(msg["Layout-Id"], version)
-  local layout = state.layouts[key]
+  local locale = msg.Locale and msg.Locale:lower() or nil
+  local key = ids.layout_key(msg["Layout-Id"], version, locale)
+  local fallback = ids.layout_key(msg["Layout-Id"], version)
+  local layout = state.layouts[key] or state.layouts[fallback]
   if not layout then
     return codec.error(
       "NOT_FOUND",
@@ -217,6 +244,7 @@ function handlers.GetLayout(msg)
   return codec.ok {
     layoutId = msg["Layout-Id"],
     version = version,
+    locale = locale or nil,
     content = layout.content,
   }
 end
@@ -232,6 +260,7 @@ function handlers.GetNavigation(msg)
     "Site-Id",
     "Menu-Id",
     "Version",
+    "Locale",
     "Actor-Role",
     "Schema-Version",
     "Signature",
@@ -254,8 +283,10 @@ function handlers.GetNavigation(msg)
     end
   end
   local version = msg.Version or state.active_versions[msg["Site-Id"]] or "active"
-  local key = ids.menu_key(msg["Site-Id"], msg["Menu-Id"], version)
-  local menu = state.menus[key]
+  local locale = pick_locale(msg["Site-Id"], msg.Locale)
+  local key = ids.menu_key(msg["Site-Id"], msg["Menu-Id"], version, locale)
+  local fallback = ids.menu_key(msg["Site-Id"], msg["Menu-Id"], version)
+  local menu = state.menus[key] or state.menus[fallback]
   if not menu then
     return codec.error(
       "NOT_FOUND",
@@ -267,6 +298,7 @@ function handlers.GetNavigation(msg)
     siteId = msg["Site-Id"],
     menuId = msg["Menu-Id"],
     version = version,
+    locale = locale,
     items = menu.items,
   }
 end
@@ -282,6 +314,7 @@ function handlers.PutDraft(msg)
     "Site-Id",
     "Page-Id",
     "Content",
+    "Locale",
     "Actor-Role",
     "Schema-Version",
     "ExpectedVersion",
@@ -326,9 +359,14 @@ function handlers.PutDraft(msg)
       { warnings = a11y_warnings }
     )
   end
-  local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], "draft")
-  state.drafts[key] = { content = msg.Content, updatedAt = os.date "!%Y-%m-%dT%H:%M:%SZ" }
-  return codec.ok { draftId = key, warnings = a11y_warnings }
+  local locale = pick_locale(msg["Site-Id"], msg.Locale)
+  local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], "draft", locale)
+  state.drafts[key] = {
+    content = msg.Content,
+    updatedAt = os.date "!%Y-%m-%dT%H:%M:%SZ",
+    locale = locale,
+  }
+  return codec.ok { draftId = key, warnings = a11y_warnings, locale = locale }
 end
 
 function handlers.UpsertRoute(msg)
@@ -344,6 +382,7 @@ function handlers.UpsertRoute(msg)
     "Page-Id",
     "Layout-Id",
     "Type",
+    "Locale",
     "Actor-Role",
     "Schema-Version",
     "Signature",
@@ -375,14 +414,13 @@ function handlers.UpsertRoute(msg)
       return codec.error("INVALID_INPUT", err_type, { field = "Type" })
     end
   end
-  local locale_cfg = get_locale_cfg(msg["Site-Id"])
-  local locale, normalized_path =
-    i18n.detect_locale(msg.Path, locale_cfg.supported, locale_cfg.default)
-  local key = ids.route_key(msg["Site-Id"], normalized_path)
+  local locale = pick_locale(msg["Site-Id"], msg.Locale)
+  local key = ids.route_key(msg["Site-Id"], msg.Path, locale)
   state.routes[key] = {
     pageId = msg["Page-Id"],
     layoutId = msg["Layout-Id"],
     type = msg.Type or "page",
+    locale = locale,
   }
   return codec.ok { path = msg.Path, pageId = msg["Page-Id"], locale = locale }
 end
@@ -398,6 +436,7 @@ function handlers.UpsertLayout(msg)
     "Layout-Id",
     "Version",
     "Components",
+    "Locale",
     "Actor-Role",
     "Schema-Version",
     "Signature",
@@ -421,16 +460,22 @@ function handlers.UpsertLayout(msg)
   if not ok_layout and os.getenv "LAYOUT_STRICT" == "1" then
     return codec.error("INVALID_INPUT", "Layout components invalid", { warnings = layout_warnings })
   end
-  local key = ids.layout_key(msg["Layout-Id"], msg.Version)
-  state.layouts[key] = { content = msg.Components }
+  local locale = msg.Locale and msg.Locale:lower() or nil
+  local key = ids.layout_key(msg["Layout-Id"], msg.Version, locale)
+  state.layouts[key] = { content = msg.Components, locale = locale }
   audit.record(
     "site",
     "UpsertLayout",
     msg,
     nil,
-    { layoutId = msg["Layout-Id"], version = msg.Version }
+    { layoutId = msg["Layout-Id"], version = msg.Version, locale = locale }
   )
-  return codec.ok { layoutId = msg["Layout-Id"], version = msg.Version, warnings = layout_warnings }
+  return codec.ok {
+    layoutId = msg["Layout-Id"],
+    version = msg.Version,
+    locale = locale,
+    warnings = layout_warnings,
+  }
 end
 
 function handlers.RegisterAsset(msg)
@@ -595,7 +640,7 @@ function handlers.PublishVersion(msg)
       { expected = msg.ExpectedVersion, current = current }
     )
   end
-  -- promote drafts to versioned pages for this site and bundle snapshot
+  -- promote drafts to versioned pages for this site and bundle snapshot (locale-aware)
   local prefix = "page:" .. site .. ":"
   for key, draft in pairs(state.drafts) do
     if key:sub(1, #prefix) == prefix then
@@ -604,9 +649,10 @@ function handlers.PublishVersion(msg)
         table.insert(parts, part)
       end
       local page_id = parts[3]
-      local target_key = ids.page_key(site, page_id, msg.Version)
-      state.pages[target_key] = { content = draft.content }
-      table.insert(snapshots, { pageId = page_id, content = draft.content })
+      local locale = parts[5]
+      local target_key = ids.page_key(site, page_id, msg.Version, locale)
+      state.pages[target_key] = { content = draft.content, locale = locale }
+      table.insert(snapshots, { pageId = page_id, content = draft.content, locale = locale })
     end
   end
 
@@ -642,6 +688,7 @@ function handlers.ArchivePage(msg)
     "Site-Id",
     "Page-Id",
     "Version",
+    "Locale",
     "Actor-Role",
     "Schema-Version",
     "Signature",
@@ -664,11 +711,15 @@ function handlers.ArchivePage(msg)
     end
   end
   local version = msg.Version or state.active_versions[msg["Site-Id"]] or "active"
-  local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], version)
+  local locale = pick_locale(msg["Site-Id"], msg.Locale)
+  local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], version, locale)
+  local fallback = ids.page_key(msg["Site-Id"], msg["Page-Id"], version)
   if state.pages[key] then
     state.pages[key].archived = true
+  elseif state.pages[fallback] then
+    state.pages[fallback].archived = true
   end
-  return codec.ok { pageId = msg["Page-Id"], version = version, archived = true }
+  return codec.ok { pageId = msg["Page-Id"], version = version, locale = locale, archived = true }
 end
 
 function handlers.RecordOrder(msg)

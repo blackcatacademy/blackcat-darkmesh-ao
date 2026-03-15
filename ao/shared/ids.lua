@@ -27,19 +27,32 @@ function IDs.version_key(site_id, version_id)
   return ("version:%s:%s"):format(site_id, version_id)
 end
 
-function IDs.route_key(site_id, path)
-  return ("route:%s:%s"):format(site_id, normalize_path(path))
+function IDs.route_key(site_id, path, locale)
+  local normalized = normalize_path(path)
+  if locale and locale ~= "" then
+    return ("route:%s:%s:%s"):format(site_id, normalized, locale:lower())
+  end
+  return ("route:%s:%s"):format(site_id, normalized)
 end
 
-function IDs.page_key(site_id, page_id, version_id)
+function IDs.page_key(site_id, page_id, version_id, locale)
+  if locale and locale ~= "" then
+    return ("page:%s:%s:%s:%s"):format(site_id, page_id, version_id or "active", locale:lower())
+  end
   return ("page:%s:%s:%s"):format(site_id, page_id, version_id or "active")
 end
 
-function IDs.layout_key(layout_id, version_id)
+function IDs.layout_key(layout_id, version_id, locale)
+  if locale and locale ~= "" then
+    return ("layout:%s:%s:%s"):format(layout_id, version_id or "active", locale:lower())
+  end
   return ("layout:%s:%s"):format(layout_id, version_id or "active")
 end
 
-function IDs.menu_key(site_id, menu_id, version_id)
+function IDs.menu_key(site_id, menu_id, version_id, locale)
+  if locale and locale ~= "" then
+    return ("menu:%s:%s:%s:%s"):format(site_id, menu_id, version_id or "active", locale:lower())
+  end
   return ("menu:%s:%s:%s"):format(site_id, menu_id, version_id or "active")
 end
 
