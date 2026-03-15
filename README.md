@@ -84,6 +84,7 @@ tests/             # integration, message-contracts, snapshots, security
 - Metrics: set `METRICS_ENABLED=1` and `METRICS_LOG` path to emit NDJSON counters; see `ao/shared/metrics.lua`.
 - Prometheus export: set `METRICS_PROM_PATH` to write text exposition on flush.
 - Flush cadence: `METRICS_FLUSH_INTERVAL_SEC` (tick-based timer) or `METRICS_FLUSH_EVERY` (per-N increments); no shell/background dependency.
+- Trust manifest verify (resolvers list): set `TRUST_MANIFEST_HMAC` and run `lua scripts/verify/trust_manifest_verify.lua manifest.signed.json` before publishing txId to Arweave.
 - Arweave HTTP: retries/backoff (`ARWEAVE_HTTP_RETRIES`, `ARWEAVE_HTTP_BACKOFF_MS`), manifest cap (`ARWEAVE_MAX_MANIFEST_BYTES`), signer hash logged when present.
 - Arweave dry-run: `ARWEAVE_HTTP_DRYRUN=1` skips curl; errors on HTTP >=400 return `http_error`.
 - Fuzz tests: set `RUN_FUZZ=1` to run `scripts/verify/fuzz.lua` during preflight.
