@@ -12,6 +12,7 @@ local since_flush = 0
 local last_flush = os.time()
 local last_tick = os.time()
 local timer = require("ao.shared.timer")
+local started = false
 
 local function ensure_dir(path)
   local dir = path:match("(.+)/[^/]+$")
@@ -82,9 +83,14 @@ function Metrics._reset()
 end
 
 function Metrics.start_background()
+  if started then return end
+  started = true
   if FLUSH_INTERVAL > 0 then
     timer.start(FLUSH_INTERVAL, Metrics.flush_prom)
   end
 end
+
+-- auto-start if interval specified
+Metrics.start_background()
 
 return Metrics
