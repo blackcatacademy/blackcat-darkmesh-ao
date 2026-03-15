@@ -1,0 +1,17 @@
+[Unit]
+Description=Blackcat AO checksum monitor
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/blackcat-darkmesh-ao
+# Export in /etc/blackcat/ao.env: CHECKSUM_INTERVAL_SEC, AO_QUEUE_PATH, AO_WAL_PATH, AUDIT_LOG_DIR
+EnvironmentFile=/etc/blackcat/ao.env
+ExecStart=/usr/bin/env CHECKSUM_INTERVAL_SEC=${CHECKSUM_INTERVAL_SEC:-300} AO_QUEUE_PATH=${AO_QUEUE_PATH} AO_WAL_PATH=${AO_WAL_PATH} AUDIT_LOG_DIR=${AUDIT_LOG_DIR} bash scripts/verify/checksum_daemon.sh
+Restart=always
+RestartSec=2
+User=blackcat
+Group=blackcat
+
+[Install]
+WantedBy=multi-user.target
