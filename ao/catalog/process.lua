@@ -39,6 +39,7 @@ local FEED_EXPORT_PATH = os.getenv "CATALOG_FEED_EXPORT_PATH"
 local MERCHANT_CENTER_PATH = os.getenv "CATALOG_MERCHANT_CENTER_PATH"
 local MERCHANT_CENTER_COUNTRY = os.getenv "CATALOG_MERCHANT_CENTER_COUNTRY" or "US"
 local MERCHANT_CENTER_CURRENCY = os.getenv "CATALOG_MERCHANT_CENTER_CURRENCY" or "USD"
+local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" -- optional, e.g. "curl -X POST https://api.fastly.com/service/... -H 'Fastly-Key: ...' -H 'Surrogate-Key: %s'"
 
 local handlers = {}
 local allowed_actions = {
@@ -1687,9 +1688,15 @@ function handlers.PurgeCache(msg)
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
   local path = msg.Path or "/*"
-  -- stub: in real deployment call CDN API; here just audit
+  local result = { purged = path }
+  if CDN_PURGE_CMD and CDN_PURGE_CMD ~= "" then
+    local cmd = string.format(CDN_PURGE_CMD, path)
+    local rc = os.execute(cmd)
+    result.command = cmd
+    result.success = (rc == true or rc == 0)
+  end
   audit.record("catalog", "PurgeCache", msg, nil, { siteId = msg["Site-Id"], path = path })
-  return codec.ok { purged = path }
+  return codec.ok(result)
 end
 
 function handlers.ApplyOrderEvent(msg)
