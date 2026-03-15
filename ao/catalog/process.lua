@@ -8,7 +8,6 @@ local idem = require("ao.shared.idempotency")
 local audit = require("ao.shared.audit")
 local schema = require("ao.shared.schema")
 local metrics = require("ao.shared.metrics")
-local metrics = require("ao.shared.metrics")
 
 local handlers = {}
 local allowed_actions = {
@@ -132,6 +131,10 @@ function handlers.SearchCatalog(msg)
         local price = payload.price
         local locale = payload.locale or payload.Locale
         local available = payload.is_available or payload.available
+        if not available and state.inventory[msg["Site-Id"]] then
+          local inv = state.inventory[msg["Site-Id"]][sku]
+          available = inv and inv.quantity and inv.quantity > 0 or false
+        end
         local ok_price = true
         if min_price and price and price < min_price then ok_price = false end
         if max_price and price and price > max_price then ok_price = false end
@@ -143,7 +146,13 @@ function handlers.SearchCatalog(msg)
         end
         local ok_cat = (not msg["Category-Id"]) or (payload.categoryId == msg["Category-Id"]) or (payload.category and payload.category.id == msg["Category-Id"]) or false
         if ok_price and ok_locale and ok_available and ok_cat then
-          table.insert(results, { sku = sku, payload = payload, price = price, name = payload.name or sku })
+          local score = 0
+          if q ~= "" then
+            if sku:lower():find("^" .. q, 1, false) then score = score + 5 end
+            if (payload.name or ""):lower():find(q, 1, true) then score = score + 3 end
+            if (payload.description or ""):lower():find(q, 1, true) then score = score + 1 end
+          end
+          table.insert(results, { sku = sku, payload = payload, price = price, name = payload.name or sku, score = score, available = available })
         end
       end
     end
@@ -152,7 +161,9 @@ function handlers.SearchCatalog(msg)
     if sort == "price" then return (a.price or 0) < (b.price or 0) end
     if sort == "-price" then return (a.price or 0) > (b.price or 0) end
     if sort == "name" then return tostring(a.name) < tostring(b.name) end
-    return (a.sku) < (b.sku)
+    -- default relevance
+    if a.score ~= b.score then return (a.score or 0) > (b.score or 0) end
+    return (a.price or 0) < (b.price or 0)
   end)
   return codec.ok({
     siteId = msg["Site-Id"],
