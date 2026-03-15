@@ -14,6 +14,9 @@ local allowed_actions = {
   "GetProduct",
   "ListCategoryProducts",
   "SearchCatalog",
+  "GetOrder",
+  "ListOrders",
+  "ApplyOrderEvent",
   "UpsertProduct",
   "UpsertCategory",
   "PublishCatalogVersion",
@@ -29,6 +32,7 @@ local role_policy = {
   SetInventoryReservation = { "catalog-admin", "admin" },
   SyncShipment = { "catalog-admin", "admin" },
   SyncReturn = { "catalog-admin", "admin" },
+  ApplyOrderEvent = { "admin", "catalog-admin" },
 }
 
 local state = {
@@ -37,6 +41,9 @@ local state = {
   active_versions = {}, -- site -> version
   inventory = {},       -- site -> sku -> { quantity }
   reservations = {},    -- orderId -> { siteId, items = { { sku, qty } }, released=false }
+  orders = {},          -- orderId -> { siteId, status, totals, currency, customerId, coupons, address, shipping, paymentStatus, updatedAt }
+  shipments = {},       -- shipmentId -> { status, tracking, carrier, eta, orderId }
+  returns = {},         -- returnId -> { status, reason, orderId }
 }
 
 local MAX_PAYLOAD_BYTES = tonumber(os.getenv("CATALOG_MAX_PAYLOAD_BYTES") or "") or (64 * 1024)
@@ -217,6 +224,99 @@ function handlers.SearchCatalog(msg)
     total = #results,
     facets = facets,
   })
+end
+
+function handlers.ApplyOrderEvent(msg)
+  local ok, missing = validation.require_fields(msg, { "Event" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing Event", { missing = missing }) end
+  local ev = msg.Event
+  if type(ev) ~= "table" or not ev.type then
+    return codec.error("INVALID_INPUT", "Event.type required")
+  end
+  -- allow verification with hmac if present
+  msg["Order-Id"] = msg["Order-Id"] or ev.orderId or ev["Order-Id"]
+  local ok_hmac, hmac_err = auth.verify_outbox_hmac(msg)
+  if not ok_hmac then return codec.error("FORBIDDEN", hmac_err) end
+
+  if ev.type == "OrderCreated" then
+    state.orders[ev.orderId] = {
+      siteId = ev.siteId,
+      customerId = ev.customerId,
+      currency = ev.currency,
+      totals = ev.totals,
+      coupon = ev.coupon,
+      coupons = ev.coupons,
+      vatRate = ev.vatRate,
+      shipping = ev.shipping,
+      address = ev.address,
+      status = ev.status or "pending",
+      updatedAt = os.time(),
+    }
+  elseif ev.type == "OrderStatusUpdated" then
+    local o = state.orders[ev.orderId] or { siteId = ev.siteId }
+    o.status = ev.status or o.status
+    o.reason = ev.reason or o.reason
+    o.updatedAt = os.time()
+    state.orders[ev.orderId] = o
+  elseif ev.type == "PaymentStatusChanged" then
+    if ev.orderId then
+      local o = state.orders[ev.orderId] or {}
+      o.paymentStatus = ev.status or o.paymentStatus
+      o.updatedAt = os.time()
+      state.orders[ev.orderId] = o
+    end
+  elseif ev.type == "ShipmentTrackingUpdated" then
+    state.shipments[ev.shipmentId] = {
+      tracking = ev.tracking,
+      carrier = ev.carrier,
+      eta = ev.eta,
+      status = ev.status,
+      orderId = ev.orderId,
+      updatedAt = os.time(),
+    }
+  elseif ev.type == "ReturnUpdated" then
+    state.returns[ev.returnId] = {
+      status = ev.status,
+      reason = ev.reason,
+      orderId = ev.orderId,
+      updatedAt = os.time(),
+    }
+  end
+  audit.record("catalog", "ApplyOrderEvent", msg, nil, { type = ev.type, orderId = ev.orderId })
+  metrics.inc("catalog.ApplyOrderEvent.count")
+  metrics.tick()
+  return codec.ok({ applied = ev.type, orderId = ev.orderId })
+end
+
+function handlers.GetOrder(msg)
+  local ok, missing = validation.require_fields(msg, { "Order-Id" })
+  if not ok then return codec.error("INVALID_INPUT", "Order-Id required", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Order-Id", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local order = state.orders[msg["Order-Id"]]
+  if not order then return codec.error("NOT_FOUND", "order not found") end
+  return codec.ok({ orderId = msg["Order-Id"], order = order })
+end
+
+function handlers.ListOrders(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Customer-Id", "Status", "Limit", "Offset", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local limit = tonumber(msg.Limit) or 50
+  local offset = tonumber(msg.Offset) or 0
+  local items = {}
+  for oid, o in pairs(state.orders) do
+    if (not msg["Site-Id"] or o.siteId == msg["Site-Id"]) and
+       (not msg["Customer-Id"] or o.customerId == msg["Customer-Id"]) and
+       (not msg.Status or o.status == msg.Status) then
+      table.insert(items, { orderId = oid, order = o })
+    end
+  end
+  table.sort(items, function(a, b) return (a.order.updatedAt or 0) > (b.order.updatedAt or 0) end)
+  local slice = {}
+  for i = offset + 1, math.min(#items, offset + limit) do
+    table.insert(slice, items[i])
+  end
+  return codec.ok({ total = #items, items = slice })
 end
 
 function handlers.SetInventoryReservation(msg)
