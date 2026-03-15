@@ -262,6 +262,12 @@ function handlers.SearchCatalog(msg)
     if sort == "price" then return (a.price or 0) < (b.price or 0) end
     if sort == "-price" then return (a.price or 0) > (b.price or 0) end
     if sort == "name" then return tostring(a.name) < tostring(b.name) end
+    if sort == "available" then
+      if a.available ~= b.available then return a.available and not b.available end
+      -- fall back to relevance if availability matches
+      if a.score ~= b.score then return (a.score or 0) > (b.score or 0) end
+      return (a.price or 0) < (b.price or 0)
+    end
     if sort == "newest" then
       return (a.payload.updatedAt or 0) > (b.payload.updatedAt or 0)
     end
