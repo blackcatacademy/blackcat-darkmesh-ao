@@ -32,6 +32,7 @@ local GA4_MEASUREMENT_ID = os.getenv "CATALOG_GA4_MEASUREMENT_ID"
 local PAYMENT_WEBHOOK_SECRET = os.getenv "CATALOG_PAYMENT_WEBHOOK_SECRET"
 local CARRIER_WEBHOOK_SECRET = os.getenv "CATALOG_CARRIER_WEBHOOK_SECRET"
 local RETURN_LABEL_BASE = os.getenv "CATALOG_RETURN_LABEL_BASE" or CARRIER_LABEL_BASE
+local JWT_HMAC_SECRET = os.getenv "CATALOG_JWT_SECRET" or os.getenv "JWT_SECRET"
 
 local handlers = {}
 local allowed_actions = {
@@ -94,6 +95,12 @@ local allowed_actions = {
   "HandleCarrierWebhook",
   "UpdateReturnStatus",
   "CreateReturnLabel",
+  "CreateWebhook",
+  "GetWebhook",
+  "ListWebhooks",
+  "DeleteWebhook",
+  "SignPayload",
+  "VerifySignature",
 }
 
 local role_policy = {
@@ -151,6 +158,12 @@ local role_policy = {
   HandlePaymentWebhook = { "admin", "catalog-admin" },
   HandleCarrierWebhook = { "admin", "catalog-admin", "support" },
   CreateReturnLabel = { "support", "catalog-admin", "admin" },
+  CreateWebhook = { "admin", "catalog-admin" },
+  GetWebhook = { "admin", "catalog-admin" },
+  ListWebhooks = { "admin", "catalog-admin" },
+  DeleteWebhook = { "admin", "catalog-admin" },
+  SignPayload = { "admin", "catalog-admin" },
+  VerifySignature = { "admin", "catalog-admin" },
 }
 
 local state = {
@@ -180,6 +193,7 @@ local state = {
   invoice_seq = {}, -- siteId -> last number
   invoice_seq_year = {}, -- siteId -> year -> last number
   event_log = {}, -- siteId -> list of { ts, sku, event }
+  webhooks = {}, -- siteId -> id -> { url, secret, events }
 }
 
 local function gen_id(prefix)
@@ -1098,7 +1112,7 @@ local function verify_shared_secret(msg, secret)
   if not secret or secret == "" then
     return true
   end
-  local sig = msg.Signature or msg.signature or msg.auth
+  local sig = msg.Signature or msg.signature or msg.auth or msg["X-Signature"]
   if not sig then
     return false
   end
@@ -1185,6 +1199,171 @@ function handlers.HandleCarrierWebhook(msg)
     { shipmentId = msg["Shipment-Id"], status = sh.status }
   )
   return codec.ok(sh)
+end
+
+local function sign_hmac(body)
+  if not JWT_HMAC_SECRET then
+    return nil, "SECRET_MISSING"
+  end
+  return auth.hmac(body, JWT_HMAC_SECRET)
+end
+
+function handlers.SignPayload(msg)
+  local ok, missing = validation.require_fields(msg, { "Payload" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Payload",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  if not json_ok then
+    return codec.error("PROVIDER_ERROR", "json not available")
+  end
+  local ok_enc, body = pcall(cjson.encode, msg.Payload)
+  if not ok_enc then
+    return codec.error("INVALID_INPUT", "Payload not encodable")
+  end
+  local sig, err = sign_hmac(body)
+  if not sig then
+    return codec.error("PROVIDER_ERROR", err)
+  end
+  return codec.ok { signature = sig }
+end
+
+function handlers.VerifySignature(msg)
+  local ok, missing = validation.require_fields(msg, { "Payload", "Signature" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  if not json_ok then
+    return codec.error("PROVIDER_ERROR", "json not available")
+  end
+  local ok_enc, body = pcall(cjson.encode, msg.Payload)
+  if not ok_enc then
+    return codec.error("INVALID_INPUT", "Payload not encodable")
+  end
+  local expected, err = sign_hmac(body)
+  if not expected then
+    return codec.error("PROVIDER_ERROR", err)
+  end
+  if expected ~= msg.Signature then
+    return codec.error("FORBIDDEN", "Signature mismatch")
+  end
+  return codec.ok { valid = true }
+end
+
+function handlers.CreateWebhook(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Url", "Events" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Url",
+    "Events",
+    "Secret",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_events, err_events = validation.assert_type(msg.Events, "table", "Events")
+  if not ok_events then
+    return codec.error("INVALID_INPUT", err_events, { field = "Events" })
+  end
+  local id = gen_id "wh"
+  state.webhooks[msg["Site-Id"]] = state.webhooks[msg["Site-Id"]] or {}
+  state.webhooks[msg["Site-Id"]][id] = {
+    url = msg.Url,
+    secret = msg.Secret,
+    events = msg.Events,
+    createdAt = os.time(),
+  }
+  audit.record("catalog", "CreateWebhook", msg, nil, { siteId = msg["Site-Id"], webhookId = id })
+  return codec.ok { webhookId = id }
+end
+
+function handlers.GetWebhook(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Webhook-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Webhook-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local wh = state.webhooks[msg["Site-Id"]] and state.webhooks[msg["Site-Id"]][msg["Webhook-Id"]]
+  if not wh then
+    return codec.error("NOT_FOUND", "Webhook not found")
+  end
+  return codec.ok { webhookId = msg["Webhook-Id"], webhook = wh }
+end
+
+function handlers.ListWebhooks(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local list = {}
+  for id, wh in pairs(state.webhooks[msg["Site-Id"]] or {}) do
+    table.insert(list, { webhookId = id, webhook = wh })
+  end
+  return codec.ok { siteId = msg["Site-Id"], items = list, total = #list }
+end
+
+function handlers.DeleteWebhook(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Webhook-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Webhook-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  if state.webhooks[msg["Site-Id"]] then
+    state.webhooks[msg["Site-Id"]][msg["Webhook-Id"]] = nil
+  end
+  audit.record("catalog", "DeleteWebhook", msg, nil, { webhookId = msg["Webhook-Id"] })
+  return codec.ok { deleted = msg["Webhook-Id"] }
 end
 
 function handlers.ApplyOrderEvent(msg)
