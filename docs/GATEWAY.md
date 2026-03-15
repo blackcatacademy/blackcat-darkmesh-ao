@@ -102,6 +102,21 @@
 - Finalize trusted list format (AR-hosted manifest?).
 - Provide sample config + env for sandbox deployment.
 - Add integration tests for signature verification and replay defence.
+- Add explicit constraints for shared-hosting deployments (no system-level OpenSSL; prefer static binary with bundled crypto, minimal deps).
+- Define hardening checklist (below).
+
+## Hardening checklist (shared-hosting friendly)
+- **Binary build:** ship static binary (Go/Rust) with bundled crypto; no external OpenSSL/luasocket dependencies. Avoid setuid, avoid writing outside app dir.
+- **Backpressure:** set connection limits + request queue; return 429 when queue full.
+- **Cache stampede:** single-flight per key on misses; jittered TTL to desynchronize expiry.
+- **Write allowlist:** only permit enumerated actions on `/write` (e.g., `order.create`, `telemetry.push`, `inventory.adjust`); reject others.
+- **Size limits:** cap path/header length; cap write body size (e.g., 256 KB) to prevent abuse.
+- **Content integrity:** store last-good hash per tenant/page; on mismatch, serve stale and alert.
+- **Clock sync:** require NTP; reject signatures with skew > 300s.
+- **Privacy defaults:** redact PII in logs/metrics; default retention (e.g., access logs 7d, metrics 30d).
+- **Fail policy:** if trusted list cannot refresh, continue with last-good for grace window (e.g., 24h), then fail closed.
+- **Regional data rules:** pin writes to region; do not forward cross-region.
+- **Security headers:** add HSTS, X-Content-Type-Options, Referrer-Policy on responses by default.
 
 ## Key/manifest rotation (proposal)
 - Gateway pulls trusted list from AR every `TRUST_REFRESH_SEC` (e.g., 5 min).
