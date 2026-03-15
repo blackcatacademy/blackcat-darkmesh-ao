@@ -508,6 +508,7 @@ function handlers.PutDraft(msg)
   local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], "draft", locale)
   local previous = state.drafts[key]
   local conflicts = {}
+  local block_conflicts = {}
   if previous and previous.content then
     local changed_fields = {}
     for k, v in pairs(msg.Content) do
@@ -516,6 +517,15 @@ function handlers.PutDraft(msg)
       end
     end
     previous.versions = previous.versions or {}
+    -- block-level conflict detection by id
+    local prev_blocks = {}
+    if previous.content.blocks then
+      for _, b in ipairs(previous.content.blocks) do
+        if type(b) == "table" and b.id then
+          prev_blocks[b.id] = b
+        end
+      end
+    end
     if msg.Merge == true and type(previous.content) == "table" then
       for k, v in pairs(msg.Content) do
         if type(v) == "table" and type(previous.content[k]) == "table" then
@@ -525,6 +535,13 @@ function handlers.PutDraft(msg)
           msg.Content[k] = previous.content[k]
         elseif previous.content[k] ~= v and previous.content[k] ~= nil then
           conflicts[k] = { incoming = v, existing = previous.content[k] }
+        end
+      end
+    end
+    if msg.Content.blocks then
+      for _, b in ipairs(msg.Content.blocks) do
+        if type(b) == "table" and b.id and prev_blocks[b.id] and prev_blocks[b.id] ~= b then
+          block_conflicts[b.id] = { incoming = b, existing = prev_blocks[b.id] }
         end
       end
     end
@@ -538,6 +555,7 @@ function handlers.PutDraft(msg)
       fields = changed_fields,
       conflicts = conflicts,
       versions = previous.versions,
+      block_conflicts = block_conflicts,
     })
   end
   state.drafts[key] = {
