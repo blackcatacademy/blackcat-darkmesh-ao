@@ -60,7 +60,6 @@ function Metrics.tick()
     last_flush = now
     since_flush = 0
   end
-  last_tick = now
   if FLUSH_INTERVAL > 0 then
     timer.start(FLUSH_INTERVAL, Metrics.flush_prom)
   end
