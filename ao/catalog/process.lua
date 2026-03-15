@@ -136,6 +136,7 @@ local allowed_actions = {
   "TokenizePaymentMethod",
   "HandlePaymentProviderWebhook",
   "CleanupRetention",
+  "ExportRecommendations",
 }
 
 local role_policy = {
@@ -216,6 +217,7 @@ local role_policy = {
   TokenizePaymentMethod = { "catalog-admin", "support", "admin" },
   HandlePaymentProviderWebhook = { "catalog-admin", "support", "admin" },
   CleanupRetention = { "admin", "catalog-admin" },
+  ExportRecommendations = { "catalog-admin", "support", "admin", "viewer" },
 }
 
 local state = {
@@ -4319,6 +4321,47 @@ function handlers.CleanupRetention(msg)
   cleanup_retention()
   audit.record("catalog", "CleanupRetention", msg, nil, { retentionDays = RETENTION_DAYS })
   return codec.ok { retentionDays = RETENTION_DAYS }
+end
+
+function handlers.ExportRecommendations(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Limit",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local limit = tonumber(msg.Limit) or 20
+  if limit < 1 then
+    limit = 1
+  end
+  if limit > 200 then
+    limit = 200
+  end
+  local events = state.events[msg["Site-Id"]] or {}
+  local list = {}
+  for sku, stats in pairs(events) do
+    local score = (stats.purchases or 0) * 3
+      + (stats.add_to_cart or 0) * 1.5
+      + (stats.views or 0) * 0.2
+    table.insert(list, { sku = sku, score = score, stats = stats })
+  end
+  table.sort(list, function(a, b)
+    return (a.score or 0) > (b.score or 0)
+  end)
+  while #list > limit do
+    table.remove(list)
+  end
+  return codec.ok { siteId = msg["Site-Id"], items = list, total = #list }
 end
 
 function handlers.RequestReturn(msg)
