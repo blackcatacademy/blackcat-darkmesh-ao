@@ -107,18 +107,28 @@ local MAX_CONTENT_BYTES = tonumber(os.getenv "SITE_MAX_CONTENT_BYTES" or "") or 
 local MAX_PUBLISH_RETRY = tonumber(os.getenv "SITE_MAX_PUBLISH_RETRY" or "") or 5
 local PUBLISH_LOG_LIMIT = tonumber(os.getenv "SITE_PUBLISH_LOG_LIMIT" or "") or 1000
 local PUBLISH_ALERT_PATH = os.getenv "SITE_PUBLISH_ALERT_PATH"
+local PUBLISH_ALERT_WEBHOOK = os.getenv "SITE_PUBLISH_ALERT_WEBHOOK"
 
 local function publish_alert(entry, msg)
-  if not PUBLISH_ALERT_PATH then
-    return
+  local payload = require("cjson").encode {
+    ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
+    entry = entry,
+    message = msg,
+  }
+  if PUBLISH_ALERT_PATH then
+    local f = io.open(PUBLISH_ALERT_PATH, "a")
+    if f then
+      f:write(payload, "\n")
+      f:close()
+    end
   end
-  local f = io.open(PUBLISH_ALERT_PATH, "a")
-  if f then
-    f:write(
-      require("cjson").encode { ts = os.date "!%Y-%m-%dT%H:%M:%SZ", entry = entry, message = msg },
-      "\n"
+  if PUBLISH_ALERT_WEBHOOK and PUBLISH_ALERT_WEBHOOK ~= "" then
+    local cmd = string.format(
+      "curl -s -X POST -H 'Content-Type: application/json' --data %q %s >/dev/null 2>&1",
+      payload,
+      PUBLISH_ALERT_WEBHOOK
     )
-    f:close()
+    os.execute(cmd)
   end
 end
 
@@ -427,6 +437,15 @@ function handlers.PutDraft(msg)
   then
     return codec.error("INVALID_INPUT", "Unknown content type", { contentType = content_type })
   end
+  -- enforce lazy/blur on block images by default
+  if msg.Content.blocks then
+    for _, block in ipairs(msg.Content.blocks) do
+      if type(block) == "table" and block.image and type(block.image) == "table" then
+        block.image.loading = block.image.loading or "lazy"
+        block.image.placeholder = block.image.placeholder or "blur"
+      end
+    end
+  end
   local content_len = validation.estimate_json_length(msg.Content)
   local ok_size, err_size = validation.check_size(content_len, MAX_CONTENT_BYTES, "Content")
   if not ok_size then
@@ -461,6 +480,7 @@ function handlers.PutDraft(msg)
         table.insert(changed_fields, k)
       end
     end
+    local conflicts = {}
     if msg.Merge == true and type(previous.content) == "table" then
       for k, v in pairs(msg.Content) do
         if type(v) == "table" and type(previous.content[k]) == "table" then
@@ -468,6 +488,8 @@ function handlers.PutDraft(msg)
             previous.content[k][subk] = subv
           end
           msg.Content[k] = previous.content[k]
+        elseif previous.content[k] ~= v and previous.content[k] ~= nil then
+          conflicts[k] = { incoming = v, existing = previous.content[k] }
         end
       end
     end
@@ -476,6 +498,7 @@ function handlers.PutDraft(msg)
       ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
       actor = msg.Subject or msg["Actor-Role"],
       fields = changed_fields,
+      conflicts = conflicts,
     })
   end
   state.drafts[key] = {
@@ -941,6 +964,7 @@ function handlers.ForceUnlockDraft(msg)
     fields = { "lock" },
     action = "force_unlock",
     reason = msg.Reason,
+    code = msg["Reason-Code"],
   })
   return codec.ok { draftId = msg["Draft-Id"], unlocked = true, forced = true, reason = msg.Reason }
 end

@@ -1727,6 +1727,7 @@ function handlers.RelatedProducts(msg)
     "Site-Id",
     "Sku",
     "Limit",
+    "Format",
     "Actor-Role",
     "Schema-Version",
     "Signature",
@@ -1765,6 +1766,18 @@ function handlers.RelatedProducts(msg)
   end)
   while #ranked > limit do
     table.remove(ranked)
+  end
+  if msg.Format == "csv" then
+    local lines = { "sku,score" }
+    for _, r in ipairs(ranked) do
+      table.insert(lines, string.format("%s,%s", r.sku, r.score or 0))
+    end
+    return codec.ok {
+      siteId = msg["Site-Id"],
+      sku = msg.Sku,
+      format = "csv",
+      body = table.concat(lines, "\n"),
+    }
   end
   return codec.ok { siteId = msg["Site-Id"], sku = msg.Sku, items = ranked, total = #ranked }
 end
@@ -1844,7 +1857,7 @@ function handlers.Bestsellers(msg)
   local scores = state.events[msg["Site-Id"]] or {}
   local ranked = {}
   for sku, s in pairs(scores) do
-    local score = (s.purchases or 0) * 3 + (s.add_to_cart or 0)
+    local score = (s.purchases or 0) * 4 + (s.add_to_cart or 0) * 2 + (s.views or 0) * 0.2
     if score > 0 then
       local pkey = ids.product_key(msg["Site-Id"], sku)
       if state.products[pkey] then
