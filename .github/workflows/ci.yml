@@ -18,7 +18,7 @@ jobs:
       - name: Install Lua 5.4
         run: |
           sudo apt-get update
-          sudo apt-get install -y lua5.4 luarocks
+          sudo apt-get install -y lua5.4 lua5.4-dev luarocks
 
       - name: "Install required rocks (Lua 5.4: lua-cjson/luv/lsqlite3/luaossl)"
         run: |
