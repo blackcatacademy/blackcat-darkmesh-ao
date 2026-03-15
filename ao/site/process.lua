@@ -25,9 +25,11 @@ local allowed_actions = {
   "RequestPublish",
   "ApprovePublish",
   "SchedulePublish",
+  "RunPublishScheduler",
   "LockDraft",
   "UnlockDraft",
   "RegisterContentType",
+  "ListContentTypes",
   "SetPerfBudgets",
   "RecordWebVital",
   "UpsertRoute",
@@ -48,9 +50,11 @@ local role_policy = {
   RequestPublish = { "editor", "publisher", "admin" },
   ApprovePublish = { "publisher", "admin" },
   SchedulePublish = { "publisher", "admin" },
+  RunPublishScheduler = { "publisher", "admin" },
   LockDraft = { "editor", "publisher", "admin" },
   UnlockDraft = { "editor", "publisher", "admin" },
   RegisterContentType = { "admin" },
+  ListContentTypes = { "editor", "publisher", "admin" },
   SetPerfBudgets = { "admin" },
   RecordWebVital = { "viewer", "support", "editor", "publisher", "admin" },
   UpsertRoute = { "editor", "publisher", "admin" },
@@ -343,6 +347,7 @@ function handlers.PutDraft(msg)
     "Page-Id",
     "Content",
     "Locale",
+    "Content-Type",
     "Actor-Role",
     "Schema-Version",
     "ExpectedVersion",
@@ -370,6 +375,12 @@ function handlers.PutDraft(msg)
   if not msg.Content.blocks then
     msg.Content.blocks = {}
   end
+  local content_type = msg["Content-Type"] or "page"
+  if
+    state.content_types[msg["Site-Id"]] and not state.content_types[msg["Site-Id"]][content_type]
+  then
+    return codec.error("INVALID_INPUT", "Unknown content type", { contentType = content_type })
+  end
   local content_len = validation.estimate_json_length(msg.Content)
   local ok_size, err_size = validation.check_size(content_len, MAX_CONTENT_BYTES, "Content")
   if not ok_size then
@@ -396,8 +407,14 @@ function handlers.PutDraft(msg)
     status = "draft",
     publishAt = msg.PublishAt,
     expireAt = msg.ExpireAt,
+    contentType = content_type,
   }
-  return codec.ok { draftId = key, warnings = a11y_warnings, locale = locale }
+  return codec.ok {
+    draftId = key,
+    warnings = a11y_warnings,
+    locale = locale,
+    contentType = content_type,
+  }
 end
 
 function handlers.AddDraftComment(msg)
@@ -872,14 +889,134 @@ function handlers.SchedulePublish(msg)
   return codec.ok { siteId = msg["Site-Id"], count = #state.publish_schedules[msg["Site-Id"]] }
 end
 
+local function iso_to_ts(iso)
+  if not iso or iso == "" then
+    return nil
+  end
+  local year, mon, day, hour, min, sec =
+    iso:match "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)Z$"
+  if not year then
+    return nil
+  end
+  return os.time {
+    year = tonumber(year),
+    month = tonumber(mon),
+    day = tonumber(day),
+    hour = tonumber(hour),
+    min = tonumber(min),
+    sec = tonumber(sec),
+    isdst = false,
+  }
+end
+
+function handlers.RunPublishScheduler(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+
+  local now_ts = os.time()
+  local sites = {}
+  if msg["Site-Id"] then
+    sites = { msg["Site-Id"] }
+  else
+    for site_id in pairs(state.publish_schedules) do
+      table.insert(sites, site_id)
+    end
+  end
+
+  local published = {}
+  local expired = {}
+
+  for _, site_id in ipairs(sites) do
+    local pending = {}
+    for _, entry in ipairs(state.publish_schedules[site_id] or {}) do
+      local publish_ts = iso_to_ts(entry.publishAt)
+      local expire_ts = iso_to_ts(entry.expireAt)
+      local should_publish = publish_ts and publish_ts <= now_ts
+      local should_expire = expire_ts and expire_ts <= now_ts
+
+      if should_publish then
+        local draft_key = ids.page_key(site_id, entry.pageId, "draft", entry.locale)
+        local draft_fallback = ids.page_key(site_id, entry.pageId, "draft")
+        local draft = state.drafts[draft_key] or state.drafts[draft_fallback]
+        if draft then
+          local target_key = ids.page_key(site_id, entry.pageId, entry.version, entry.locale)
+          state.pages[target_key] = {
+            content = draft.content,
+            locale = entry.locale,
+            publishedAt = entry.publishAt,
+          }
+          draft.status = "published"
+          state.active_versions[site_id] = entry.version
+          table.insert(published, {
+            siteId = site_id,
+            pageId = entry.pageId,
+            version = entry.version,
+            locale = entry.locale,
+          })
+        else
+          table.insert(pending, entry) -- no draft yet; keep waiting
+        end
+      end
+
+      if should_expire then
+        local page_key = ids.page_key(site_id, entry.pageId, entry.version, entry.locale)
+        local page = state.pages[page_key]
+        if page then
+          page.archived = true
+          table.insert(expired, {
+            siteId = site_id,
+            pageId = entry.pageId,
+            version = entry.version,
+            locale = entry.locale,
+          })
+        end
+      end
+
+      if (not should_publish) and not should_expire then
+        table.insert(pending, entry)
+      end
+    end
+    state.publish_schedules[site_id] = pending
+  end
+
+  return codec.ok {
+    published = published,
+    expired = expired,
+    remaining = state.publish_schedules,
+  }
+end
+
 function handlers.RegisterContentType(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Name", "Schema" })
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
+  if type(msg.Schema) ~= "table" then
+    return codec.error("INVALID_INPUT", "Schema must be object", { field = "Schema" })
+  end
   state.content_types[msg["Site-Id"]] = state.content_types[msg["Site-Id"]] or {}
   state.content_types[msg["Site-Id"]][msg.Name] = msg.Schema
   return codec.ok { siteId = msg["Site-Id"], name = msg.Name }
+end
+
+function handlers.ListContentTypes(msg)
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    { "Action", "Request-Id", "Site-Id", "Actor-Role", "Schema-Version" }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  return codec.ok { siteId = msg["Site-Id"], types = state.content_types[msg["Site-Id"]] or {} }
 end
 
 function handlers.SetPerfBudgets(msg)
