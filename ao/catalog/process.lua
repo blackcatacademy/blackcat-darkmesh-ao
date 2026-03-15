@@ -123,6 +123,7 @@ local allowed_actions = {
   "ListCategories",
   "DeliverLowStockAlerts",
   "ForgetSubject",
+  "ListBackorders",
 }
 
 local role_policy = {
@@ -199,6 +200,7 @@ local role_policy = {
   ListCategories = { "catalog-admin", "support", "admin", "viewer" },
   DeliverLowStockAlerts = { "catalog-admin", "admin", "support" },
   ForgetSubject = { "admin", "catalog-admin", "support" },
+  ListBackorders = { "catalog-admin", "admin", "support" },
 }
 
 local state = {
@@ -233,6 +235,7 @@ local state = {
   category_deletions = {}, -- siteId -> list of { key, deletedAt }
   stock_policies = {}, -- siteId -> sku -> { allow_backorder, preorder_at, low_stock_threshold }
   stock_alerts = {}, -- siteId -> list of { sku, total, threshold, ts }
+  backorders = {}, -- siteId -> list of { sku, qty, preorder_at, eta_days, createdAt, source, ref }
 }
 
 local function gen_id(prefix)
@@ -3272,6 +3275,7 @@ function handlers.SetStockPolicy(msg)
     "Sku",
     "Allow-Backorder",
     "Preorder-At",
+    "ETA-Days",
     "Low-Stock-Threshold",
     "Actor-Role",
     "Schema-Version",
@@ -3297,11 +3301,16 @@ function handlers.SetStockPolicy(msg)
       { field = "Preorder-At" }
     )
   end
+  local eta_days = msg["ETA-Days"] and tonumber(msg["ETA-Days"]) or nil
+  if eta_days and eta_days < 0 then
+    return codec.error("INVALID_INPUT", "ETA-Days must be >=0", { field = "ETA-Days" })
+  end
   state.stock_policies[msg["Site-Id"]] = state.stock_policies[msg["Site-Id"]] or {}
   state.stock_policies[msg["Site-Id"]][msg.Sku] = {
     allow_backorder = allow_backorder,
     preorder_at = preorder_at,
     low_stock_threshold = threshold,
+    eta_days = eta_days,
   }
   audit.record(
     "catalog",
@@ -3316,6 +3325,7 @@ function handlers.SetStockPolicy(msg)
     allowBackorder = allow_backorder,
     preorderAt = preorder_at,
     lowStockThreshold = threshold,
+    etaDays = eta_days,
   }
 end
 
@@ -3331,6 +3341,19 @@ local function push_low_stock(site_id, sku, total, threshold)
     table.insert(state.stock_alerts[site_id], alert)
     deliver_stock_alert(site_id, alert)
   end
+end
+
+local function record_backorder(site_id, sku, qty, source, ref, preorder_at, eta_days)
+  state.backorders[site_id] = state.backorders[site_id] or {}
+  table.insert(state.backorders[site_id], {
+    sku = sku,
+    qty = qty,
+    source = source,
+    ref = ref,
+    preorder_at = preorder_at,
+    eta_days = eta_days,
+    createdAt = os.time(),
+  })
 end
 
 function handlers.ListLowStock(msg)
@@ -3370,6 +3393,63 @@ function handlers.DeliverLowStockAlerts(msg)
     deliver_stock_alert(msg["Site-Id"], alert)
   end
   return codec.ok { siteId = msg["Site-Id"], delivered = #alerts }
+end
+
+function handlers.ListBackorders(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Sku",
+    "Source",
+    "Cursor",
+    "Limit",
+    "Clear",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local limit = tonumber(msg.Limit) or 200
+  if limit < 1 then
+    limit = 1
+  end
+  if limit > 1000 then
+    limit = 1000
+  end
+  local cursor = tonumber(msg.Cursor) or 0
+  local out = {}
+  local all = state.backorders[msg["Site-Id"]] or {}
+  local filtered = {}
+  for _, bo in ipairs(all) do
+    if (not msg.Sku or msg.Sku == bo.sku) and (not msg.Source or msg.Source == bo.source) then
+      table.insert(filtered, bo)
+    end
+  end
+  table.sort(filtered, function(a, b)
+    return (a.createdAt or 0) > (b.createdAt or 0)
+  end)
+  for i = cursor + 1, math.min(#filtered, cursor + limit) do
+    table.insert(out, filtered[i])
+  end
+  local next_cursor = (#filtered > cursor + limit) and (cursor + limit) or nil
+  if msg.Clear == true or msg.Clear == "true" then
+    state.backorders[msg["Site-Id"]] = {}
+  end
+  return codec.ok {
+    siteId = msg["Site-Id"],
+    items = out,
+    nextCursor = next_cursor,
+    total = #out,
+    filterSku = msg.Sku,
+    filterSource = msg.Source,
+  }
 end
 
 function handlers.ForgetSubject(msg)
@@ -3417,7 +3497,12 @@ local function reserve_inventory(site_id, items)
     if needed > 0 then
       local policy = state.stock_policies[site_id] and state.stock_policies[site_id][item.sku] or {}
       if policy.allow_backorder then
-        table.insert(backorders, { sku = item.sku, qty = needed, preorder_at = policy.preorder_at })
+        table.insert(backorders, {
+          sku = item.sku,
+          qty = needed,
+          preorder_at = policy.preorder_at,
+          eta_days = policy.eta_days,
+        })
       else
         -- rollback
         for _, c in ipairs(changes) do
@@ -3433,6 +3518,17 @@ local function reserve_inventory(site_id, items)
     end
     local policy = state.stock_policies[site_id] and state.stock_policies[site_id][item.sku] or {}
     push_low_stock(site_id, item.sku, total_after, policy.low_stock_threshold)
+    if needed > 0 then
+      record_backorder(
+        site_id,
+        item.sku,
+        needed,
+        "reserve",
+        nil,
+        policy.preorder_at,
+        policy.eta_days
+      )
+    end
   end
   return true, changes, backorders
 end
@@ -3605,6 +3701,17 @@ function handlers.StartCheckout(msg)
       method = msg["Payment-Method"],
       require3ds = msg.Require3DS,
     }
+  end
+  for _, bo in ipairs(backorders or {}) do
+    record_backorder(
+      msg["Site-Id"],
+      bo.sku,
+      bo.qty,
+      "checkout",
+      checkout_id,
+      bo.preorder_at,
+      bo.eta_days
+    )
   end
   return codec.ok {
     checkoutId = checkout_id,
@@ -4323,6 +4430,9 @@ function handlers.CheckoutPurchaseOrder(msg)
     poId = po.poId,
     risk = risk_score { quote = { total = po.total, shipping = po.shipping }, address = po.address },
   }
+  for _, bo in ipairs(backorders or {}) do
+    record_backorder(po.siteId, bo.sku, bo.qty, "po", checkout_id, bo.preorder_at, bo.eta_days)
+  end
   local payment = create_payment_intent_internal {
     siteId = po.siteId,
     checkoutId = checkout_id,
