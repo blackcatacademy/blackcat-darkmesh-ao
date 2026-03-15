@@ -19,15 +19,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y lua5.4 luarocks
 
-      - name: Pin rocks (install from lockfile)
+      - name: Install required rocks (cjson/luv/lsqlite3/luaossl)
         run: |
-          if [ -f ops/rocks.lock ]; then
-            luarocks install --local --only-deps ops/rocks.lock || true
-            echo "$HOME/.luarocks/bin" >> $GITHUB_PATH
-          else
-            echo "ops/rocks.lock missing" >&2
-            exit 1
-          fi
+          rocks=(
+            "cjson 2.1.0-1"
+            "luv 1.51.0-1"
+            "lsqlite3 0.9.5-1"
+            "luaossl 20230929-0"
+          )
+          for entry in "${rocks[@]}"; do
+            set -- $entry
+            luarocks install --local "$1" "$2" || exit 1
+          done
+          echo "$HOME/.luarocks/bin" >> $GITHUB_PATH
 
       - name: Install luacheck/stylua
         run: |
@@ -41,9 +45,7 @@ jobs:
 
       - name: Install gitleaks
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64.tar.gz -o /tmp/gitleaks.tar.gz
-          tar -xzf /tmp/gitleaks.tar.gz -C /tmp
-          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/scripts/install.sh | bash -s -- -b /usr/local/bin
 
       - name: Preflight (schemas + Lua syntax + deps)
         env:
