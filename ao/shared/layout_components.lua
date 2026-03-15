@@ -15,6 +15,10 @@ validators.hero = function(comp, warnings)
   if comp.image and (not comp.image.alt or comp.image.alt == "") then
     warn(warnings, "hero.image.alt required when image set")
   end
+  if comp.image then
+    comp.image.loading = comp.image.loading or "lazy"
+    comp.image.placeholder = comp.image.placeholder or "blur"
+  end
 end
 
 validators.grid = function(comp, warnings)
@@ -34,6 +38,8 @@ validators.carousel = function(comp, warnings)
     elseif not slide.alt or slide.alt == "" then
       warn(warnings, "carousel.slide.alt required")
     end
+    slide.loading = slide.loading or "lazy"
+    slide.placeholder = slide.placeholder or "blur"
   end
 end
 

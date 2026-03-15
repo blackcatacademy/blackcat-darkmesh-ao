@@ -29,6 +29,7 @@ local allowed_actions = {
   "LockDraft",
   "UnlockDraft",
   "ForceUnlockDraft",
+  "RenewDraftLock",
   "RegisterContentType",
   "ListContentTypes",
   "SetPerfBudgets",
@@ -43,6 +44,7 @@ local allowed_actions = {
   "RecordOrder",
   "GetOrder",
   "ListOrders",
+  "GetPublishLog",
 }
 
 local role_policy = {
@@ -55,6 +57,7 @@ local role_policy = {
   LockDraft = { "editor", "publisher", "admin" },
   UnlockDraft = { "editor", "publisher", "admin" },
   ForceUnlockDraft = { "publisher", "admin" },
+  RenewDraftLock = { "editor", "publisher", "admin" },
   RegisterContentType = { "admin" },
   ListContentTypes = { "editor", "publisher", "admin" },
   SetPerfBudgets = { "admin" },
@@ -69,6 +72,7 @@ local role_policy = {
   RecordOrder = { "support", "admin" },
   GetOrder = { "support", "admin" },
   ListOrders = { "support", "admin" },
+  GetPublishLog = { "publisher", "admin", "support" },
 }
 
 -- pseudo-state for scaffolding
@@ -89,6 +93,7 @@ local state = {
   perf_budgets = {}, -- siteId -> { lcp_ms, cls, tbt_ms }
   perf_vitals = {}, -- siteId -> { last = { metric, value, ts } }
   publish_log = {}, -- list of publish/expire actions for observability
+  draft_audit = {}, -- draftId -> { { ts, fields, actor } }
 }
 
 local MAX_CONTENT_BYTES = tonumber(os.getenv "SITE_MAX_CONTENT_BYTES" or "") or (64 * 1024)
@@ -167,6 +172,19 @@ function handlers.ResolveRoute(msg)
   local route = state.routes[key_locale] or state.routes[key_default] or state.routes[key_plain]
   if not route then
     return codec.error("NOT_FOUND", "Route not found", { path = msg.Path })
+  end
+  local perf = state.perf_vitals[msg["Site-Id"]]
+  local budgets = state.perf_budgets[msg["Site-Id"]]
+  if perf and budgets then
+    if perf.metric == "LCP" and budgets.lcp_ms and perf.value > budgets.lcp_ms then
+      return codec.error("PERF_BUDGET_EXCEEDED", "LCP over budget", { lcp = perf.value })
+    end
+    if perf.metric == "CLS" and budgets.cls and perf.value > budgets.cls then
+      return codec.error("PERF_BUDGET_EXCEEDED", "CLS over budget", { cls = perf.value })
+    end
+    if perf.metric == "TBT" and budgets.tbt_ms and perf.value > budgets.tbt_ms then
+      return codec.error("PERF_BUDGET_EXCEEDED", "TBT over budget", { tbt = perf.value })
+    end
   end
   local cache_policy = state.edge_cache
     and state.edge_cache[msg["Site-Id"]]
@@ -410,6 +428,21 @@ function handlers.PutDraft(msg)
   end
   local locale = pick_locale(msg["Site-Id"], msg.Locale)
   local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], "draft", locale)
+  local previous = state.drafts[key]
+  if previous and previous.content then
+    local changed_fields = {}
+    for k, v in pairs(msg.Content) do
+      if previous.content[k] ~= v then
+        table.insert(changed_fields, k)
+      end
+    end
+    state.draft_audit[key] = state.draft_audit[key] or {}
+    table.insert(state.draft_audit[key], {
+      ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
+      actor = msg.Subject or msg["Actor-Role"],
+      fields = changed_fields,
+    })
+  end
   state.drafts[key] = {
     content = msg.Content,
     updatedAt = os.date "!%Y-%m-%dT%H:%M:%SZ",
@@ -857,8 +890,27 @@ function handlers.ForceUnlockDraft(msg)
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
   state.draft_locks[msg["Draft-Id"]] = nil
-  audit.record("site", "ForceUnlockDraft", msg, nil, { draftId = msg["Draft-Id"] })
-  return codec.ok { draftId = msg["Draft-Id"], unlocked = true, forced = true }
+  audit.record(
+    "site",
+    "ForceUnlockDraft",
+    msg,
+    nil,
+    { draftId = msg["Draft-Id"], reason = msg.Reason or "unspecified" }
+  )
+  return codec.ok { draftId = msg["Draft-Id"], unlocked = true, forced = true, reason = msg.Reason }
+end
+
+function handlers.RenewDraftLock(msg)
+  local ok, missing = validation.require_fields(msg, { "Draft-Id", "Subject" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local lock = state.draft_locks[msg["Draft-Id"]]
+  if not lock or lock.subject ~= msg.Subject then
+    return codec.error("FORBIDDEN", "Lock not held by subject")
+  end
+  lock.ts = os.time()
+  return codec.ok { draftId = msg["Draft-Id"], renewed = true }
 end
 
 function handlers.RequestPublish(msg)
@@ -1007,6 +1059,8 @@ function handlers.RunPublishScheduler(msg)
             locale = entry.locale,
             action = "missing_draft",
           })
+          entry.retryCount = (entry.retryCount or 0) + 1
+          entry.lastError = "draft_missing"
         end
       end
 
@@ -1052,6 +1106,25 @@ function handlers.RunPublishScheduler(msg)
     remaining = state.publish_schedules,
     logSize = #state.publish_log,
   }
+end
+
+function handlers.GetPublishLog(msg)
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    { "Action", "Request-Id", "Site-Id", "Limit", "Actor-Role", "Schema-Version", "Signature" }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local limit = tonumber(msg.Limit or 100) or 100
+  local items = {}
+  for i = math.max(1, #state.publish_log - limit + 1), #state.publish_log do
+    local entry = state.publish_log[i]
+    if not msg["Site-Id"] or (entry and entry.siteId == msg["Site-Id"]) then
+      table.insert(items, entry)
+    end
+  end
+  return codec.ok { siteId = msg["Site-Id"], items = items, total = #items }
 end
 
 function handlers.RegisterContentType(msg)

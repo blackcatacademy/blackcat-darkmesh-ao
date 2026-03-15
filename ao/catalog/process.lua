@@ -1428,8 +1428,11 @@ function handlers.SearchCatalog(msg)
     currency = {},
     locales = {},
     carriers = {},
+    brands = {},
+    tags = {},
   }
   local prefix = "product:" .. msg["Site-Id"] .. ":"
+  local flags = state.feature_flags and state.feature_flags[msg["Site-Id"]] or {}
   for key, product in pairs(state.products) do
     if key:sub(1, #prefix) == prefix then
       local sku = key:match "product:[^:]+:(.+)"
@@ -1447,6 +1450,30 @@ function handlers.SearchCatalog(msg)
         local price = payload.price
         local locale = payload.locale or payload.Locale
         local available = payload.is_available or payload.available
+        local required_flags = payload.flags and payload.flags.required
+        local segments = payload.segments
+        if required_flags and type(required_flags) == "table" then
+          local all_on = true
+          for _, f in ipairs(required_flags) do
+            if not (flags and flags[f]) then
+              all_on = false
+            end
+          end
+          if not all_on then
+            goto continue
+          end
+        end
+        if segments and msg.Segment then
+          local ok_seg = false
+          for _, s in ipairs(segments) do
+            if s == msg.Segment then
+              ok_seg = true
+            end
+          end
+          if not ok_seg then
+            goto continue
+          end
+        end
         if not available and state.inventory[msg["Site-Id"]] then
           local inv = state.inventory[msg["Site-Id"]] or {}
           local qty = 0
@@ -1496,6 +1523,16 @@ function handlers.SearchCatalog(msg)
         if locale then
           facets.locales[locale] = (facets.locales[locale] or 0) + 1
         end
+        if payload.brand then
+          facets.brands[payload.brand] = (facets.brands[payload.brand] or 0) + 1
+        end
+        if payload.tags and type(payload.tags) == "table" then
+          for _, tag in ipairs(payload.tags) do
+            if type(tag) == "string" then
+              facets.tags[tag] = (facets.tags[tag] or 0) + 1
+            end
+          end
+        end
         local ok_cat = not msg["Category-Id"]
           or (payload.categoryId == msg["Category-Id"])
           or (payload.category and payload.category.id == msg["Category-Id"])
@@ -1535,9 +1572,9 @@ function handlers.SearchCatalog(msg)
                 end
               end
               -- lightweight token typo for short tokens
-              if #tok <= 4 then
-                local d = levenshtein((payload.name or ""):lower(), tok)
-                if d == 1 then
+              if #tok <= 5 then
+                local d2 = levenshtein((payload.name or ""):lower(), tok)
+                if d2 == 1 then
                   score = score + 1
                 end
               end
@@ -1545,6 +1582,9 @@ function handlers.SearchCatalog(msg)
           end
           score = score + (events.purchases or 0) * 2 + (events.views or 0) * 0.1
           if msg.Locale and locale == msg.Locale then
+            score = score + 1
+          end
+          if msg.Segment and segments then
             score = score + 1
           end
           table.insert(results, {
@@ -1565,6 +1605,7 @@ function handlers.SearchCatalog(msg)
         end
       end
     end
+    ::continue::
   end
   table.sort(results, function(a, b)
     if sort == "price" or sort == "price_asc" then
