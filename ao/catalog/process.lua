@@ -52,6 +52,8 @@ local RETENTION_DAYS = tonumber(os.getenv "CATALOG_RETENTION_DAYS" or "") or 30
 local SEARCH_SYNONYMS_PATH = os.getenv "CATALOG_SEARCH_SYNONYMS_PATH"
 local SEARCH_STOPWORDS_PATH = os.getenv "CATALOG_SEARCH_STOPWORDS_PATH"
 local CUSTOMER_WEBHOOK = os.getenv "CATALOG_CUSTOMER_WEBHOOK"
+local NOTIFY_RETRIES = tonumber(os.getenv "CATALOG_NOTIFY_RETRIES" or "") or 2
+local NOTIFY_BACKOFF_MS = tonumber(os.getenv "CATALOG_NOTIFY_BACKOFF_MS" or "") or 200
 
 local handlers = {}
 local allowed_actions = {
@@ -138,6 +140,7 @@ local allowed_actions = {
   "HandlePaymentProviderWebhook",
   "CleanupRetention",
   "ExportRecommendations",
+  "ListNotificationFailures",
 }
 
 local role_policy = {
@@ -219,6 +222,7 @@ local role_policy = {
   HandlePaymentProviderWebhook = { "catalog-admin", "support", "admin" },
   CleanupRetention = { "admin", "catalog-admin" },
   ExportRecommendations = { "catalog-admin", "support", "admin", "viewer" },
+  ListNotificationFailures = { "admin", "catalog-admin", "support" },
 }
 
 local state = {
@@ -257,6 +261,7 @@ local state = {
   shipment_events = {}, -- shipmentId -> list of { ts, status, meta }
   search_synonyms = {}, -- siteId -> map term -> {synonyms}
   search_stopwords = {}, -- siteId -> set of stopwords
+  notification_failures = {}, -- siteId -> list of { type, target, payload, attempts, ts }
 }
 
 local function gen_id(prefix)
@@ -3526,16 +3531,16 @@ end
 
 local function push_low_stock(site_id, sku, total, threshold)
   if threshold and threshold > 0 and total <= threshold then
-    state.stock_alerts[site_id] = state.stock_alerts[site_id] or {}
-    local alert = {
-      sku = sku,
-      total = total,
-      threshold = threshold,
-      ts = os.time(),
-    }
-    table.insert(state.stock_alerts[site_id], alert)
-    deliver_stock_alert(site_id, alert)
-  end
+  state.stock_alerts[site_id] = state.stock_alerts[site_id] or {}
+  local alert = {
+    sku = sku,
+    total = total,
+    threshold = threshold,
+    ts = os.time(),
+  }
+  table.insert(state.stock_alerts[site_id], alert)
+  deliver_stock_alert(site_id, alert)
+end
 end
 
 local function record_backorder(site_id, sku, qty, source, ref, preorder_at, eta_days)
@@ -3810,23 +3815,54 @@ local function notify_rma(site_id, return_id, event, payload)
   os.execute(cmd)
 end
 
-local function notify_customer(event, payload)
-  if not CUSTOMER_WEBHOOK or CUSTOMER_WEBHOOK == "" or not json_ok then
-    return
+local function send_with_retry(site_id, target, body, kind)
+  if not target or target == "" or not json_ok then
+    return false, "target_missing"
   end
-  local body = { type = event, payload = payload }
   local ok, json_body = pcall(cjson.encode, body)
   if not ok then
-    return
+    return false, "encode_failed"
   end
   local safe = json_body:gsub("'", "'\\''")
-  local cmd = string.format(
-    "curl -sS -m %d -H 'Content-Type: application/json' -d '%s' %s >/dev/null 2>&1",
-    HTTP_TIMEOUT,
-    safe,
-    CUSTOMER_WEBHOOK
-  )
-  os.execute(cmd)
+  local attempts = 0
+  local success = false
+  local err = nil
+  while attempts <= NOTIFY_RETRIES do
+    attempts = attempts + 1
+    local cmd = string.format(
+      "curl -sS -m %d -H 'Content-Type: application/json' -d '%s' %s >/dev/null 2>&1",
+      HTTP_TIMEOUT,
+      safe,
+      target
+    )
+    local rc = os.execute(cmd)
+    success = (rc == true or rc == 0)
+    if success then
+      break
+    end
+    err = "curl_failed"
+    if attempts <= NOTIFY_RETRIES then
+      -- backoff
+      os.execute(string.format("sleep %.3f", NOTIFY_BACKOFF_MS / 1000))
+    end
+  end
+  if not success then
+    state.notification_failures[site_id or "global"] = state.notification_failures[site_id or "global"]
+      or {}
+    table.insert(state.notification_failures[site_id or "global"], {
+      type = kind,
+      target = target,
+      payload = body,
+      attempts = attempts,
+      ts = os.time(),
+      error = err,
+    })
+  end
+  return success, err
+end
+
+local function notify_customer(event, payload)
+  return send_with_retry(payload.siteId, CUSTOMER_WEBHOOK, { type = event, payload = payload }, event)
 end
 
 local function record_shipment_event(shipment_id, status, meta)
@@ -3899,17 +3935,7 @@ local function deliver_stock_alert(site_id, alert)
     threshold = alert.threshold,
     ts = alert.ts,
   }
-  local ok, payload = pcall(cjson.encode, body)
-  if not ok then
-    return
-  end
-  local cmd = string.format(
-    "curl -sS -m %d -H 'Content-Type: application/json' -d '%s' %s >/dev/null 2>&1",
-    HTTP_TIMEOUT,
-    payload:gsub("'", "'\\''"),
-    STOCK_ALERT_WEBHOOK
-  )
-  os.execute(cmd)
+  send_with_retry(site_id, STOCK_ALERT_WEBHOOK, body, "low_stock")
 end
 
 function handlers.StartCheckout(msg)
