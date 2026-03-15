@@ -457,20 +457,44 @@ function handlers.ValidateAddress(msg)
   local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Country", "Region", "City", "Postal", "Line1", "Line2", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   if #msg.Country ~= 2 then return codec.error("INVALID_INPUT", "Country must be ISO2") end
+  local postal_re = os.getenv("ADDRESS_POSTAL_REGEX")
+  if postal_re and msg.Postal and not tostring(msg.Postal):match(postal_re) then
+    return codec.error("INVALID_INPUT", "Postal format invalid", { field = "Postal" })
+  end
+
+  local validated = {
+    country = msg.Country:upper(),
+    region = msg.Region,
+    city = msg.City,
+    postal = msg.Postal,
+    line1 = msg.Line1,
+    line2 = msg.Line2,
+  }
+
   local cmd = os.getenv("ADDRESS_VALIDATE_CMD")
   if cmd and cmd ~= "" then
-    os.execute(cmd .. " >/dev/null 2>&1")
+    local pipe = io.popen(cmd, "r")
+    if pipe then
+      local out = pipe:read("*a")
+      pipe:close()
+      if out and #out > 0 then
+        local ok_json, obj = pcall(cjson.decode, out)
+        if ok_json and obj and obj.normalized then
+          validated = obj.normalized
+        elseif os.getenv("ADDRESS_VALIDATE_STRICT") == "1" then
+          return codec.error("PROVIDER_ERROR", "address_validate_failed", { output = out })
+        end
+      elseif os.getenv("ADDRESS_VALIDATE_STRICT") == "1" then
+        return codec.error("PROVIDER_ERROR", "address_validate_empty")
+      end
+    elseif os.getenv("ADDRESS_VALIDATE_STRICT") == "1" then
+      return codec.error("PROVIDER_ERROR", "address_validate_io")
+    end
   end
+
   return codec.ok({
     valid = true,
-    normalized = {
-      country = msg.Country:upper(),
-      region = msg.Region,
-      city = msg.City,
-      postal = msg.Postal,
-      line1 = msg.Line1,
-      line2 = msg.Line2,
-    },
+    normalized = validated,
   })
 end
 
