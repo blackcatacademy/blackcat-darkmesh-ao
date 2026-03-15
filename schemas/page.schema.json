@@ -1,13 +1,14 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Page",
   "type": "object",
   "required": ["id", "title", "blocks"],
   "properties": {
-    "id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
     "title": {"type": "string", "minLength": 1, "maxLength": 512},
     "locale": {"type": "string", "pattern": "^[a-z]{2}(-[A-Z]{2})?$"},
-    "layoutId": {"type": "string", "minLength": 1, "maxLength": 128},
-    "blocks": {"type": "array", "items": {"type": "object"}, "minItems": 0}
-  }
+    "layoutId": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
+    "blocks": {"type": "array", "items": {"type": "object"}, "minItems": 1}
+  },
+  "additionalProperties": false
 }
