@@ -22,6 +22,7 @@ local CARRIER_API_TOKEN = os.getenv "CATALOG_CARRIER_API_TOKEN"
 local INVOICE_PDF_DIR = os.getenv "CATALOG_INVOICE_PDF_DIR"
 local INVOICE_NUMBER_WITH_YEAR = os.getenv "CATALOG_INVOICE_YEAR" ~= "0"
 local INVOICE_S3_BUCKET = os.getenv "CATALOG_INVOICE_S3_BUCKET"
+local HTTP_TIMEOUT = tonumber(os.getenv "CATALOG_HTTP_TIMEOUT" or "") or 5
 
 local handlers = {}
 local allowed_actions = {
@@ -288,7 +289,8 @@ local function http_post_json(url, payload)
     auth = "-H 'Authorization: Bearer " .. CARRIER_API_TOKEN .. "' "
   end
   local cmd = string.format(
-    "curl -sS -X POST %s -H 'Content-Type: application/json' %s --data-binary @%s",
+    "curl -sS --max-time %d -X POST %s -H 'Content-Type: application/json' %s --data-binary @%s",
+    HTTP_TIMEOUT,
     url,
     auth,
     tmp
