@@ -2904,8 +2904,13 @@ local function pick_tax_rate(site_id, address, tax_class)
   return best_rate
 end
 
-local function pick_shipping(site_id, address, total, weight)
+local function pick_shipping(site_id, address, total, weight, dims)
   local rules = state.shipping_rules[site_id] or state.shipping_rates[site_id] or {}
+  local billable_weight = weight or 0
+  if dims and dims.length and dims.width and dims.height then
+    billable_weight =
+      math.max(weight or 0, dimensional_weight(dims.length, dims.width, dims.height, 5000))
+  end
   local best = nil
   for _, r in ipairs(rules) do
     if
@@ -2913,8 +2918,8 @@ local function pick_shipping(site_id, address, total, weight)
       and (not r.region or r.region == address.Region)
       and (not r.min_total or total >= r.min_total)
       and (not r.max_total or total <= r.max_total)
-      and (not r.min_weight or (weight or 0) >= r.min_weight)
-      and (not r.max_weight or (weight or 0) <= r.max_weight)
+      and (not r.min_weight or billable_weight >= r.min_weight)
+      and (not r.max_weight or billable_weight <= r.max_weight)
     then
       if not best or (r.rate or 0) < (best.rate or 0) then
         best = r
@@ -2924,8 +2929,20 @@ local function pick_shipping(site_id, address, total, weight)
   return best or { rate = 0, carrier = "standard", service = "ground" }
 end
 
-local function shop_shipping(site_id, address, total, weight)
+local function dimensional_weight(l, w, h, divisor)
+  if not l or not w or not h then
+    return 0
+  end
+  return (l * w * h) / (divisor or 5000)
+end
+
+local function shop_shipping(site_id, address, total, weight, dims)
   local rules = state.shipping_rules[site_id] or state.shipping_rates[site_id] or {}
+  local billable_weight = weight or 0
+  if dims and dims.length and dims.width and dims.height then
+    billable_weight =
+      math.max(weight or 0, dimensional_weight(dims.length, dims.width, dims.height, 5000))
+  end
   local options = {}
   for _, r in ipairs(rules) do
     if
@@ -2933,8 +2950,8 @@ local function shop_shipping(site_id, address, total, weight)
       and (not r.region or r.region == address.Region)
       and (not r.min_total or total >= r.min_total)
       and (not r.max_total or total <= r.max_total)
-      and (not r.min_weight or (weight or 0) >= r.min_weight)
-      and (not r.max_weight or (weight or 0) <= r.max_weight)
+      and (not r.min_weight or billable_weight >= r.min_weight)
+      and (not r.max_weight or billable_weight <= r.max_weight)
     then
       table.insert(options, {
         carrier = r.carrier or "standard",
@@ -3165,7 +3182,15 @@ function handlers.RateShopCarriers(msg)
   if not cart then
     return codec.error("INVALID_INPUT", cart_err or "Pricing failed")
   end
-  local options = shop_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight)
+  local dims = nil
+  if msg.Dimensions then
+    dims = {
+      length = tonumber(msg.Dimensions.Length),
+      width = tonumber(msg.Dimensions.Width),
+      height = tonumber(msg.Dimensions.Height),
+    }
+  end
+  local options = shop_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight, dims)
   return codec.ok {
     siteId = msg["Site-Id"],
     subtotal = cart.subtotal,
@@ -3649,7 +3674,15 @@ function handlers.StartCheckout(msg)
   if type(address) ~= "table" or not address.Country then
     return codec.error("INVALID_INPUT", "Address.Country required", { field = "Address" })
   end
-  local shipping = pick_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight)
+  local dims = nil
+  if msg.Dimensions then
+    dims = {
+      length = tonumber(msg.Dimensions.Length),
+      width = tonumber(msg.Dimensions.Width),
+      height = tonumber(msg.Dimensions.Height),
+    }
+  end
+  local shipping = pick_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight, dims)
   local tax_rate = pick_tax_rate(msg["Site-Id"], address)
   local tax = cart.subtotal * tax_rate / 100
   local total = cart.subtotal + shipping.rate + tax
@@ -4286,7 +4319,15 @@ function handlers.CreatePurchaseOrder(msg)
   if type(address) ~= "table" or not address.Country then
     return codec.error("INVALID_INPUT", "Address.Country required", { field = "Address" })
   end
-  local shipping = pick_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight)
+  local dims = nil
+  if msg.Dimensions then
+    dims = {
+      length = tonumber(msg.Dimensions.Length),
+      width = tonumber(msg.Dimensions.Width),
+      height = tonumber(msg.Dimensions.Height),
+    }
+  end
+  local shipping = pick_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight, dims)
   local tax_rate = pick_tax_rate(msg["Site-Id"], address)
   local tax = cart.subtotal * tax_rate / 100
   local total = cart.subtotal + shipping.rate + tax
