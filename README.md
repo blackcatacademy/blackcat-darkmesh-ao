@@ -124,6 +124,13 @@ Handy CLI helpers:
 - Export only the collections you need: `python scripts/setup/schema_helper.py export --presets core,commerce,content --out dev/schema-bundles/prod.tar.gz`.
 - Deploy that prod bundle with arkb from a secured environment.
 
+### Write-bridge observability (from `blackcat-darkmesh-write`)
+When you deploy the write bridge alongside this repo, enable its logging so AO ops can audit downstream delivery:
+- Queue: set `AO_QUEUE_PATH=/var/lib/ao/outbox-queue.ndjson`, `AO_QUEUE_LOG_PATH=/var/log/ao/queue-log.ndjson`, `AO_QUEUE_MAX_RETRIES=5`.
+- Bridge hashes: optionally enforce downstream body hash with `AO_EXPECT_RESPONSE_HASH=<sha256>`.
+- WAL on write-side: `WRITE_WAL_PATH=/var/log/ao/write-wal.ndjson` (stores request/response hashes for every command).
+These live in the **write** service; keep paths under your ops log/data locations.
+
 ## Schemas (WeaveDB-first)
 - Canonical table definitions (columns, types, constraints) live in `schemas/canonical-db/tables/` plus the map `schemas/canonical-db/schema-map.yaml`.
 - WeaveDB-ready collections are in `schemas/weavedb/collections/*.yaml` (JSON Schema + indexes); manifest v3 carries them under `weavedb`.
