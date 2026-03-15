@@ -20,6 +20,7 @@ local allowed_actions = {
   "UpsertRoute",
   "PublishVersion",
   "ArchivePage",
+  "RecordOrder",
 }
 
 local role_policy = {
@@ -27,6 +28,7 @@ local role_policy = {
   UpsertRoute = { "editor", "publisher", "admin" },
   PublishVersion = { "publisher", "admin" },
   ArchivePage = { "publisher", "admin" },
+  RecordOrder = { "support", "admin" },
 }
 
 -- pseudo-state for scaffolding
@@ -36,7 +38,8 @@ local state = {
   layouts = {},       -- layout:<id>:<version> -> { content }
   menus = {},         -- menu:<site>:<menu>:<version> -> { items }
   drafts = {},        -- page:<site>:<page>:draft -> { content }
-  active_versions = {} -- siteId -> versionId
+  active_versions = {}, -- siteId -> versionId
+  orders = {},        -- siteId -> orderId -> { status, totalAmount, currency, vatRate, updatedAt }
 }
 
 local MAX_CONTENT_BYTES = tonumber(os.getenv("SITE_MAX_CONTENT_BYTES") or "") or (64 * 1024)
@@ -260,6 +263,31 @@ function handlers.ArchivePage(msg)
     state.pages[key].archived = true
   end
   return codec.ok({ pageId = msg["Page-Id"], version = version, archived = true })
+end
+
+function handlers.RecordOrder(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Order-Id", "Status" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action", "Request-Id", "Site-Id", "Order-Id", "Status", "TotalAmount", "Currency", "VatRate", "Actor-Role", "Schema-Version"
+  })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  state.orders[msg["Site-Id"]] = state.orders[msg["Site-Id"]] or {}
+  state.orders[msg["Site-Id"]][msg["Order-Id"]] = {
+    status = msg.Status,
+    totalAmount = msg.TotalAmount,
+    currency = msg.Currency,
+    vatRate = msg.VatRate,
+    updatedAt = msg.Timestamp,
+  }
+  return codec.ok({
+    siteId = msg["Site-Id"],
+    orderId = msg["Order-Id"],
+    status = msg.Status,
+    totalAmount = msg.TotalAmount,
+    currency = msg.Currency,
+    vatRate = msg.VatRate,
+  })
 end
 
 local function route(msg)
