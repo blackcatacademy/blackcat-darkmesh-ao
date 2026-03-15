@@ -20,26 +20,48 @@ local function assert_code(resp, code, label)
 end
 
 local function assert_status(resp, status, label)
-  assert_eq(resp.status, status, label .. " status")
+  if resp.status ~= status then
+    error(string.format("%s expected %s, got %s (code=%s, msg=%s)", label, tostring(status), tostring(resp.status), tostring(resp.code), tostring(resp.message)))
+  end
 end
 
 local SIG_SECRET = os.getenv("AUTH_SIGNATURE_SECRET")
+local REQUIRE_SIGNATURE = os.getenv("AUTH_REQUIRE_SIGNATURE") == "1"
 local openssl_ok, openssl = pcall(require, "openssl")
+local sodium_ok, sodium = pcall(require, "sodium")
+if not sodium_ok then
+  sodium_ok, sodium = pcall(require, "luasodium")
+end
 
 local function hmac_sign(action, site_id, request_id)
-  if not (SIG_SECRET and SIG_SECRET ~= "" and openssl_ok and openssl.hmac and openssl.hex) then
-    return nil
-  end
+  if not (SIG_SECRET and SIG_SECRET ~= "") then return nil end
   local target = string.format("%s|%s|%s", action or "", site_id or "", request_id or "")
-  local raw = openssl.hmac.digest("sha256", target, SIG_SECRET, true)
-  return openssl.hex(raw)
+
+  if openssl_ok and openssl.hmac and openssl.hex then
+    local raw = openssl.hmac.digest("sha256", target, SIG_SECRET, true)
+    if raw then return openssl.hex(raw) end
+  end
+
+  if sodium_ok and sodium.crypto_auth then
+    local tag = sodium.crypto_auth(target, SIG_SECRET)
+    if tag then
+      if sodium.to_hex then return sodium.to_hex(tag) end
+      return (tag:gsub(".", function(c) return string.format("%02x", string.byte(c)) end))
+    end
+  end
+
+  return nil
 end
 
 local function with_req(fields)
   fields["Request-Id"] = fields["Request-Id"] or tostring(math.random())
   if SIG_SECRET then
     local sig = hmac_sign(fields.Action, fields["Site-Id"], fields["Request-Id"])
-    if sig then fields.Signature = sig end
+    if sig then
+      fields.Signature = sig
+    elseif REQUIRE_SIGNATURE then
+      error("AUTH_REQUIRE_SIGNATURE=1 but could not generate signature (missing openssl/luasodium?)")
+    end
   end
   return fields
 end
@@ -73,14 +95,14 @@ do
   assert_code(conflict, "VERSION_CONFLICT", "set version conflict code")
 
   -- Idempotent bind (same Request-Id)
-  local idem_req = { Action = "BindDomain", ["Site-Id"] = "site-2", Host = "example.com", ["Actor-Role"] = "registry-admin", ["Request-Id"] = "rid-bind" }
+  local idem_req = with_req({ Action = "BindDomain", ["Site-Id"] = "site-2", Host = "example.com", ["Actor-Role"] = "registry-admin", ["Request-Id"] = "rid-bind" })
   local b1 = registry.route(idem_req)
   local b2 = registry.route(idem_req)
   assert_eq(b1.payload.host, b2.payload.host, "idempotent bind host")
 
   -- Conflict on GrantRole with different payload same Request-Id returns original
-  local g1 = registry.route({ Action = "GrantRole", ["Site-Id"] = "site-2", Subject = "userA", Role = "editor", ["Actor-Role"] = "registry-admin", ["Request-Id"] = "rid-grant" })
-  local g2 = registry.route({ Action = "GrantRole", ["Site-Id"] = "site-2", Subject = "userA", Role = "admin", ["Actor-Role"] = "registry-admin", ["Request-Id"] = "rid-grant" })
+  local g1 = registry.route(with_req({ Action = "GrantRole", ["Site-Id"] = "site-2", Subject = "userA", Role = "editor", ["Actor-Role"] = "registry-admin", ["Request-Id"] = "rid-grant" }))
+  local g2 = registry.route(with_req({ Action = "GrantRole", ["Site-Id"] = "site-2", Subject = "userA", Role = "admin", ["Actor-Role"] = "registry-admin", ["Request-Id"] = "rid-grant" }))
   assert_eq(g2.payload.role, g1.payload.role, "grant role idempotent keeps first role")
 
   -- Unexpected field in register
@@ -260,7 +282,7 @@ do
   assert_code(denied, "FORBIDDEN", "publish forbidden code")
 
   -- Idempotent publish with same Request-Id returns same manifest
-  local req = { Action = "PublishVersion", ["Site-Id"] = "site-4", Version = "v1", ["Actor-Role"] = "publisher", ["Request-Id"] = "rid-same" }
+  local req = with_req({ Action = "PublishVersion", ["Site-Id"] = "site-4", Version = "v1", ["Actor-Role"] = "publisher", ["Request-Id"] = "rid-same" })
   local first = site.route(req)
   local second = site.route(req)
   assert_eq(first.payload.manifestTx, second.payload.manifestTx, "idempotent publish manifest")
@@ -357,13 +379,13 @@ do
   assert_code(denied, "FORBIDDEN", "catalog forbidden code")
 
   -- Idempotent upsert
-  local idem_req = { Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-idem", Payload = { name = "Idem" }, ["Actor-Role"] = "catalog-admin", ["Request-Id"] = "rid-upsert" }
+  local idem_req = with_req({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-idem", Payload = { name = "Idem" }, ["Actor-Role"] = "catalog-admin", ["Request-Id"] = "rid-upsert" })
   local first = catalog.route(idem_req)
   local second = catalog.route(idem_req)
   assert_eq(first.payload.sku, second.payload.sku, "idempotent upsert sku")
 
   -- Conflicting payload same Request-Id keeps original
-  local conflict = catalog.route({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-idem", Payload = { name = "changed" }, ["Actor-Role"] = "catalog-admin", ["Request-Id"] = "rid-upsert" })
+  local conflict = catalog.route(with_req({ Action = "UpsertProduct", ["Site-Id"] = "site-1", Sku = "sku-idem", Payload = { name = "changed" }, ["Actor-Role"] = "catalog-admin", ["Request-Id"] = "rid-upsert" }))
   assert_status(conflict, "OK", "idempotent conflict status")
   assert_eq(conflict.payload.sku, first.payload.sku, "idempotent conflict ignores change")
 
@@ -416,13 +438,13 @@ do
   assert_code(deny, "FORBIDDEN", "grant forbidden code")
 
   -- Idempotent grant (same Request-Id returns same ref)
-  local idem_req = { Action = "GrantEntitlement", Subject = "u3", Asset = "asset-3", Policy = "view", ["Actor-Role"] = "admin", ["Request-Id"] = "idem-grant" }
+  local idem_req = with_req({ Action = "GrantEntitlement", Subject = "u3", Asset = "asset-3", Policy = "view", ["Actor-Role"] = "admin", ["Request-Id"] = "idem-grant" })
   local first = access.route(idem_req)
   local second = access.route(idem_req)
   assert_eq(first.payload.subject, second.payload.subject, "idempotent grant subject")
 
   -- Conflicting payload with same Request-Id returns original
-  local conflict = access.route({ Action = "GrantEntitlement", Subject = "u3", Asset = "asset-3", Policy = "edit", ["Actor-Role"] = "admin", ["Request-Id"] = "idem-grant" })
+  local conflict = access.route(with_req({ Action = "GrantEntitlement", Subject = "u3", Asset = "asset-3", Policy = "edit", ["Actor-Role"] = "admin", ["Request-Id"] = "idem-grant" }))
   assert_eq(conflict.payload.policy, first.payload.policy, "idempotent ignores new payload")
 
   -- Unexpected field in grant
