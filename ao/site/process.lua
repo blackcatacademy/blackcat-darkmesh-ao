@@ -9,6 +9,7 @@ local idem = require "ao.shared.idempotency"
 local audit = require "ao.shared.audit"
 local metrics = require "ao.shared.metrics"
 local schema = require "ao.shared.schema"
+local i18n = require "ao.shared.i18n"
 
 local handlers = {}
 local allowed_actions = {
@@ -18,6 +19,7 @@ local allowed_actions = {
   "GetNavigation",
   "PutDraft",
   "UpsertRoute",
+  "SetLocales",
   "PublishVersion",
   "ArchivePage",
   "RecordOrder",
@@ -28,6 +30,7 @@ local allowed_actions = {
 local role_policy = {
   PutDraft = { "editor", "publisher", "admin" },
   UpsertRoute = { "editor", "publisher", "admin" },
+  SetLocales = { "admin", "publisher" },
   PublishVersion = { "publisher", "admin" },
   ArchivePage = { "publisher", "admin" },
   RecordOrder = { "support", "admin" },
@@ -44,9 +47,42 @@ local state = {
   drafts = {}, -- page:<site>:<page>:draft -> { content }
   active_versions = {}, -- siteId -> versionId
   orders = {}, -- siteId -> orderId -> { status, totalAmount, currency, vatRate, updatedAt }
+  locales = {}, -- siteId -> { default = "en", supported = { "en" } }
 }
 
 local MAX_CONTENT_BYTES = tonumber(os.getenv "SITE_MAX_CONTENT_BYTES" or "") or (64 * 1024)
+
+local function get_locale_cfg(site_id)
+  return state.locales[site_id] or { default = "en", supported = { "en" } }
+end
+
+local function validate_locales(msg)
+  local supported = msg.Locales or { msg["Default-Locale"] or "en" }
+  local default_locale = (msg["Default-Locale"] or supported[1]):lower()
+  if #supported == 0 or #supported > 16 then
+    return nil, nil, "Locales must contain 1-16 entries"
+  end
+  for _, loc in ipairs(supported) do
+    local ok_len_loc, err_loc = validation.check_length(loc, 10, "Locales")
+    if not ok_len_loc then
+      return nil, nil, err_loc
+    end
+    if not loc:match "^[A-Za-z][A-Za-z%-]*$" then
+      return nil, nil, "Locale must be alpha/alpha-dash"
+    end
+  end
+  local found_default = false
+  for _, loc in ipairs(supported) do
+    if loc:lower() == default_locale then
+      found_default = true
+      break
+    end
+  end
+  if not found_default then
+    return nil, nil, "Default-Locale must be listed in Locales"
+  end
+  return supported, default_locale
+end
 
 function handlers.ResolveRoute(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Path" })
@@ -68,7 +104,10 @@ function handlers.ResolveRoute(msg)
   if not ok_len_path then
     return codec.error("INVALID_INPUT", err_path, { field = "Path" })
   end
-  local key = ids.route_key(msg["Site-Id"], msg.Path)
+  local locale_cfg = get_locale_cfg(msg["Site-Id"])
+  local locale, normalized_path =
+    i18n.detect_locale(msg.Path, locale_cfg.supported, locale_cfg.default)
+  local key = ids.route_key(msg["Site-Id"], normalized_path)
   local route = state.routes[key]
   if not route then
     return codec.error("NOT_FOUND", "Route not found", { path = msg.Path })
@@ -76,6 +115,7 @@ function handlers.ResolveRoute(msg)
   return codec.ok {
     siteId = msg["Site-Id"],
     path = msg.Path,
+    locale = locale,
     pageId = route.pageId,
     layoutId = route.layoutId,
     type = route.type or "page",
@@ -317,13 +357,56 @@ function handlers.UpsertRoute(msg)
       return codec.error("INVALID_INPUT", err_type, { field = "Type" })
     end
   end
-  local key = ids.route_key(msg["Site-Id"], msg.Path)
+  local locale_cfg = get_locale_cfg(msg["Site-Id"])
+  local locale, normalized_path =
+    i18n.detect_locale(msg.Path, locale_cfg.supported, locale_cfg.default)
+  local key = ids.route_key(msg["Site-Id"], normalized_path)
   state.routes[key] = {
     pageId = msg["Page-Id"],
     layoutId = msg["Layout-Id"],
     type = msg.Type or "page",
   }
-  return codec.ok { path = msg.Path, pageId = msg["Page-Id"] }
+  return codec.ok { path = msg.Path, pageId = msg["Page-Id"], locale = locale }
+end
+
+function handlers.SetLocales(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Locales" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    {
+      "Action",
+      "Request-Id",
+      "Site-Id",
+      "Locales",
+      "Default-Locale",
+      "Actor-Role",
+      "Schema-Version",
+      "Signature",
+    }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
+  if not ok_len_site then
+    return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" })
+  end
+  local supported, default_locale, err_loc = validate_locales(msg)
+  if not supported then
+    return codec.error("INVALID_INPUT", err_loc, { field = "Locales" })
+  end
+  state.locales[msg["Site-Id"]] = { supported = supported, default = default_locale }
+  audit.record(
+    "site",
+    "SetLocales",
+    msg,
+    nil,
+    { siteId = msg["Site-Id"], default = default_locale }
+  )
+  return codec.ok { siteId = msg["Site-Id"], defaultLocale = default_locale, locales = supported }
 end
 
 function handlers.PublishVersion(msg)
