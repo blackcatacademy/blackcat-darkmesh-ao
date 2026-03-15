@@ -77,6 +77,11 @@ do
   local ar4 = require("ao.shared.arweave")
   local tx2, err2 = ar4.put_snapshot({ dummy = "ok" })
   if err2 ~= "http_response_schema_invalid" then error("expected schema invalid on bad body") end
+  os.setenv("ARWEAVE_HTTP_SIM_BODY", '{"status":"error","message":"fail"}') -- missing tx
+  package.loaded["ao.shared.arweave"] = nil
+  local ar5 = require("ao.shared.arweave")
+  local tx3, err3 = ar5.put_snapshot({ dummy = "ok" })
+  if err3 ~= "http_response_schema_invalid" then error("expected schema invalid on missing tx") end
   os.setenv("ARWEAVE_HTTP_SIM_BODY", nil)
   os.setenv("ARWEAVE_MODE", "mock")
   package.loaded["ao.shared.arweave"] = nil
@@ -163,6 +168,10 @@ do
       end
     end
   end
+  -- Final schema validation sanity
+  local last = reg3.route(with_req({ Action = "GetSiteConfig", ["Site-Id"] = "conc-reg3" }))
+  local ok_env, errs = require("ao.shared.schema").validate_envelope({ action = "noop", requestId = "x", actor = "a", tenant = "t", timestamp = "2026-03-15T00:00:00Z", nonce = "n", signatureRef = "s", payload = {} })
+  if not ok_env then error("envelope schema should validate minimal payload: " .. tostring(errs[1])) end
 end
 
 -- Rate limit sqlite smoke
