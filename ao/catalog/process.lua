@@ -1767,6 +1767,15 @@ function handlers.RelatedProducts(msg)
   while #ranked > limit do
     table.remove(ranked)
   end
+  if msg.Format == "json" then
+    return codec.ok {
+      siteId = msg["Site-Id"],
+      sku = msg.Sku,
+      items = ranked,
+      total = #ranked,
+      format = "json",
+    }
+  end
   if msg.Format == "csv" then
     local lines = { "sku,score" }
     for _, r in ipairs(ranked) do
@@ -1785,6 +1794,7 @@ function handlers.RelatedProducts(msg)
     items = ranked,
     total = #ranked,
     facets = { events = state.events[msg["Site-Id"]] and state.events[msg["Site-Id"]][msg.Sku] },
+    format = "json",
   }
 end
 

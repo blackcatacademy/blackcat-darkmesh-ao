@@ -394,12 +394,21 @@ function handlers.GetNavigation(msg)
       { menuId = msg["Menu-Id"], version = version }
     )
   end
+  if menu.items then
+    for _, item in ipairs(menu.items) do
+      if item.image then
+        item.image.loading = item.image.loading or "lazy"
+        item.image.placeholder = item.image.placeholder or "blur"
+      end
+    end
+  end
   return codec.ok {
     siteId = msg["Site-Id"],
     menuId = msg["Menu-Id"],
     version = version,
     locale = locale,
     items = menu.items,
+    warnings = menu.warnings,
   }
 end
 
@@ -973,7 +982,7 @@ function handlers.ForceUnlockDraft(msg)
     "ForceUnlockDraft",
     msg,
     nil,
-    { draftId = msg["Draft-Id"], reason = msg.Reason or "unspecified" }
+    { draftId = msg["Draft-Id"], reason = msg.Reason or "unspecified", code = msg["Reason-Code"] }
   )
   state.draft_audit[msg["Draft-Id"]] = state.draft_audit[msg["Draft-Id"]] or {}
   table.insert(state.draft_audit[msg["Draft-Id"]], {
