@@ -10,6 +10,7 @@ local audit = require "ao.shared.audit"
 local metrics = require "ao.shared.metrics"
 local schema = require "ao.shared.schema"
 local assets = require "ao.shared.assets"
+local a11y = require "ao.shared.a11y"
 local i18n = require "ao.shared.i18n"
 
 local handlers = {}
@@ -314,9 +315,17 @@ function handlers.PutDraft(msg)
   if not ok_schema then
     return codec.error("INVALID_INPUT", "Content failed schema", { errors = schema_err })
   end
+  local ok_a11y, a11y_warnings = a11y.validate_page(msg.Content)
+  if not ok_a11y and os.getenv "A11Y_STRICT" == "1" then
+    return codec.error(
+      "INVALID_INPUT",
+      "Accessibility validation failed",
+      { warnings = a11y_warnings }
+    )
+  end
   local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], "draft")
   state.drafts[key] = { content = msg.Content, updatedAt = os.date "!%Y-%m-%dT%H:%M:%SZ" }
-  return codec.ok { draftId = key }
+  return codec.ok { draftId = key, warnings = a11y_warnings }
 end
 
 function handlers.UpsertRoute(msg)
