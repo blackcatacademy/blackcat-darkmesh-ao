@@ -122,7 +122,7 @@ end
 function handlers.GetProduct(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Sku" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Sku", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Sku", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -144,7 +144,7 @@ end
 function handlers.ListCategoryProducts(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Category-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Category-Id", "Page", "PageSize", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Category-Id", "Page", "PageSize", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -183,7 +183,7 @@ end
 function handlers.SearchCatalog(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Query", "MinPrice", "MaxPrice", "Locale", "Available", "Category-Id", "Sort", "Currency", "Carrier", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Query", "MinPrice", "MaxPrice", "Locale", "Available", "Category-Id", "Sort", "Currency", "Carrier", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -555,7 +555,7 @@ end
 function handlers.UpsertProduct(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Sku", "Payload" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Sku", "Payload", "Version", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Sku", "Payload", "Version", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -585,7 +585,7 @@ end
 function handlers.UpsertCategory(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Category-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Category-Id", "Payload", "Products", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Category-Id", "Payload", "Products", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -613,7 +613,7 @@ end
 function handlers.PublishCatalogVersion(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Version" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Version", "ExpectedVersion", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Version", "ExpectedVersion", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
