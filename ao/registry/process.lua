@@ -79,7 +79,7 @@ function handlers.GetSiteByHost(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Host is required", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Host", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Host", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len, err = validation.check_length(msg.Host, 255, "Host")
   if not ok_len then return codec.error("INVALID_INPUT", err, { field = "Host" }) end
@@ -98,7 +98,7 @@ function handlers.GetSiteConfig(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Site-Id is required", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len, err = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len then return codec.error("INVALID_INPUT", err, { field = "Site-Id" }) end
@@ -118,7 +118,7 @@ function handlers.RegisterSite(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Site-Id is required", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Config", "Version", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Config", "Version", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len, err = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len then return codec.error("INVALID_INPUT", err, { field = "Site-Id" }) end
@@ -161,7 +161,7 @@ function handlers.BindDomain(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Host", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Host", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_id, err_id = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_id then return codec.error("INVALID_INPUT", err_id, { field = "Site-Id" }) end
@@ -184,7 +184,7 @@ function handlers.SetActiveVersion(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Version", "ExpectedVersion", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Version", "ExpectedVersion", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_id, err_id = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_id then return codec.error("INVALID_INPUT", err_id, { field = "Site-Id" }) end
@@ -216,7 +216,7 @@ function handlers.GrantRole(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Subject", "Role", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Subject", "Role", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_id, err_id = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_id then return codec.error("INVALID_INPUT", err_id, { field = "Site-Id" }) end
@@ -238,7 +238,7 @@ function handlers.GrantRole(msg)
 end
 
 function handlers.UpdateTrustResolvers(msg)
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Manifest-Tx", "Resolvers", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Manifest-Tx", "Resolvers", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   if msg.Resolvers and type(msg.Resolvers) ~= "table" then
     return codec.error("INVALID_INPUT", "Resolvers must be array")
@@ -252,7 +252,7 @@ function handlers.UpdateTrustResolvers(msg)
 end
 
 function handlers.GetTrustedResolvers(msg)
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   return codec.ok({
     manifestTx = state.trust.manifestTx,
@@ -273,7 +273,7 @@ function handlers.FlagResolver(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Resolver-Id", "Flag", "Reason", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Resolver-Id", "Flag", "Reason", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_id, err_id = validate_resolver_id(msg["Resolver-Id"])
   if not ok_id then return codec.error("INVALID_INPUT", err_id, { field = "Resolver-Id" }) end
@@ -307,7 +307,7 @@ function handlers.UnflagResolver(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Resolver-Id", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Resolver-Id", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_id, err_id = validate_resolver_id(msg["Resolver-Id"])
   if not ok_id then return codec.error("INVALID_INPUT", err_id, { field = "Resolver-Id" }) end
@@ -323,7 +323,7 @@ function handlers.UnflagResolver(msg)
 end
 
 function handlers.GetResolverFlags(msg)
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Resolver-Id", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Resolver-Id", "Actor-Role", "Schema-Version", "Signature" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   if msg["Resolver-Id"] then
     local ok_id, err_id = validate_resolver_id(msg["Resolver-Id"])
