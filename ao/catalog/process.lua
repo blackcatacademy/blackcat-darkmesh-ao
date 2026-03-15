@@ -41,6 +41,26 @@ local state = {
 
 local MAX_PAYLOAD_BYTES = tonumber(os.getenv("CATALOG_MAX_PAYLOAD_BYTES") or "") or (64 * 1024)
 
+-- tiny Levenshtein for typo tolerance on short queries
+local function levenshtein(a, b)
+  if not a or not b then return 99 end
+  local la, lb = #a, #b
+  if la == 0 then return lb end
+  if lb == 0 then return la end
+  local prev = {}
+  for j = 0, lb do prev[j] = j end
+  for i = 1, la do
+    local cur = {}
+    cur[0] = i
+    for j = 1, lb do
+      local cost = (a:byte(i) == b:byte(j)) and 0 or 1
+      cur[j] = math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+    end
+    prev = cur
+  end
+  return prev[lb]
+end
+
 function handlers.GetProduct(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Sku" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
@@ -163,6 +183,11 @@ function handlers.SearchCatalog(msg)
             if sku:lower():find("^" .. q, 1, false) then score = score + 5 end
             if (payload.name or ""):lower():find(q, 1, true) then score = score + 3 end
             if (payload.description or ""):lower():find(q, 1, true) then score = score + 1 end
+            -- typo tolerance for short queries (distance <=1)
+            if #q <= 6 then
+              local d = levenshtein((payload.name or ""):lower(), q)
+              if d == 1 then score = score + 2 end
+            end
           end
           table.insert(results, { sku = sku, payload = payload, price = price, name = payload.name or sku, score = score, available = available })
         end
