@@ -31,4 +31,4 @@
 
 ## Dependency pinning
 - Rocks pinned via `ops/rocks.lock`. CI installs from lockfile; ensure updates go through `luarocks` + lock refresh.
-- No npm/pip runtime deps today; if added, pin versions and add lock files to ops/.
+- No npm/pip runtime deps today; if added, pin versions and add lock files to ops/ (package-lock.json/pip-tools).
