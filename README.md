@@ -125,7 +125,8 @@ Handy CLI helpers:
   - `AUTH_ALLOW_SHELL_FALLBACK=0` (fail-closed if openssl/shell is missing)  
   - `AUTH_RATE_LIMIT_SQLITE=/var/lib/ao/rate.db` (persistent per-actor rate limit)  
   - `METRICS_PROM_PATH=/var/lib/ao/metrics.prom` and optionally `METRICS_FLUSH_INTERVAL_SEC=10`
-- Enable checksum watchdog for audit/queue/WAL: `ops/systemd/ao-checksum.service` + `scripts/daemon/checksum_daemon.sh` (env `AO_QUEUE_PATH`, `AO_WAL_PATH`, `AO_CHECKSUM_INTERVAL`).
+  - Enable checksum watchdog for audit/queue/WAL: `ops/systemd/ao-checksum.service` + `scripts/daemon/checksum_daemon.sh` (env `AO_QUEUE_PATH`, `AO_WAL_PATH`, `AO_CHECKSUM_INTERVAL`).
+  - Resolver flags: set `AO_FLAGS_PATH=/etc/ao/resolver-flags.ndjson` to block/readonly resolvers before routing.
 - Key management: store public keys under `/etc/ao/keys`, record their `sha256sum` in your ops vault, and rotate on a schedule; never check private keys into the repo or CI artifacts.
 
 ### Ops runbook
