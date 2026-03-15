@@ -115,7 +115,12 @@ Handy CLI helpers:
 - Dependency check: `lua scripts/verify/deps_check.lua`
 
 **Production reminders**
-- Start from `ops/env.prod.example` and set: `AUTH_REQUIRE_SIGNATURE=1`, `AUTH_SIGNATURE_TYPE=ed25519`, `AUTH_ALLOW_SHELL_FALLBACK=0`, `AUTH_RATE_LIMIT_SQLITE=/var/lib/ao/rate.db`, `METRICS_PROM_PATH=/var/lib/ao/metrics.prom`.
+- Start from `ops/env.prod.example` and set:  
+  - `AUTH_REQUIRE_SIGNATURE=1`  
+  - `AUTH_SIGNATURE_TYPE=ed25519` and `AUTH_SIGNATURE_PUBLIC=/etc/ao/keys/registry-ed25519.pub` (or your path)  
+  - `AUTH_ALLOW_SHELL_FALLBACK=0` (fail-closed if openssl/shell is missing)  
+  - `AUTH_RATE_LIMIT_SQLITE=/var/lib/ao/rate.db` (persistent per-actor rate limit)  
+  - `METRICS_PROM_PATH=/var/lib/ao/metrics.prom` and optionally `METRICS_FLUSH_INTERVAL_SEC=10`
 - Export only the collections you need: `python scripts/setup/schema_helper.py export --presets core,commerce,content --out dev/schema-bundles/prod.tar.gz`.
 - Deploy that prod bundle with arkb from a secured environment.
 
