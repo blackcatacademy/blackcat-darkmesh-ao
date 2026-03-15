@@ -54,6 +54,7 @@ local SEARCH_STOPWORDS_PATH = os.getenv "CATALOG_SEARCH_STOPWORDS_PATH"
 local CUSTOMER_WEBHOOK = os.getenv "CATALOG_CUSTOMER_WEBHOOK"
 local NOTIFY_RETRIES = tonumber(os.getenv "CATALOG_NOTIFY_RETRIES" or "") or 2
 local NOTIFY_BACKOFF_MS = tonumber(os.getenv "CATALOG_NOTIFY_BACKOFF_MS" or "") or 200
+local IMPORT_MAX_ROWS = tonumber(os.getenv "CATALOG_IMPORT_MAX_ROWS" or "") or 5000
 
 local handlers = {}
 local allowed_actions = {
@@ -141,6 +142,8 @@ local allowed_actions = {
   "CleanupRetention",
   "ExportRecommendations",
   "ListNotificationFailures",
+  "ImportCatalogCSV",
+  "BulkPriceUpdate",
 }
 
 local role_policy = {
@@ -223,6 +226,8 @@ local role_policy = {
   CleanupRetention = { "admin", "catalog-admin" },
   ExportRecommendations = { "catalog-admin", "support", "admin", "viewer" },
   ListNotificationFailures = { "admin", "catalog-admin", "support" },
+  ImportCatalogCSV = { "catalog-admin", "admin" },
+  BulkPriceUpdate = { "catalog-admin", "admin" },
 }
 
 local state = {
@@ -3952,6 +3957,32 @@ local function cleanup_retention()
   end
 end
 
+local function parse_csv_line(line)
+  local res = {}
+  local i = 1
+  local in_quote = false
+  local field = ""
+  while i <= #line do
+    local c = line:sub(i, i)
+    if c == '"' then
+      if in_quote and line:sub(i + 1, i + 1) == '"' then
+        field = field .. '"'
+        i = i + 1
+      else
+        in_quote = not in_quote
+      end
+    elseif c == "," and not in_quote then
+      table.insert(res, field)
+      field = ""
+    else
+      field = field .. c
+    end
+    i = i + 1
+  end
+  table.insert(res, field)
+  return res
+end
+
 local function deliver_stock_alert(site_id, alert)
   if not STOCK_ALERT_WEBHOOK or STOCK_ALERT_WEBHOOK == "" or not json_ok then
     return
@@ -4476,6 +4507,127 @@ function handlers.ExportRecommendations(msg)
     table.remove(list)
   end
   return codec.ok { siteId = msg["Site-Id"], items = list, total = #list }
+end
+
+function handlers.ImportCatalogCSV(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Path" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Path",
+    "DryRun",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local f = io.open(msg.Path, "r")
+  if not f then
+    return codec.error("NOT_FOUND", "File not found", { path = msg.Path })
+  end
+  local header = f:read "*l"
+  if not header then
+    f:close()
+    return codec.error("INVALID_INPUT", "Empty file")
+  end
+  local cols = parse_csv_line(header)
+  local idx = {}
+  for i, col in ipairs(cols) do
+    idx[col:lower()] = i
+  end
+  local required = { "sku", "name", "price", "currency" }
+  for _, r in ipairs(required) do
+    if not idx[r] then
+      f:close()
+      return codec.error("INVALID_INPUT", "Missing column " .. r)
+    end
+  end
+  local imported = 0
+  local dry = msg.DryRun == true or msg.DryRun == "true"
+  for line in f:lines() do
+    if line ~= "" then
+      local fields = parse_csv_line(line)
+      local sku = fields[idx.sku]
+      local name = fields[idx.name]
+      local price = tonumber(fields[idx.price])
+      local currency = fields[idx.currency]
+      if not (sku and name and price and currency) then
+        f:close()
+        return codec.error("INVALID_INPUT", "Missing required fields on line", { line = line })
+      end
+      imported = imported + 1
+      if imported > IMPORT_MAX_ROWS then
+        f:close()
+        return codec.error("INVALID_INPUT", "Import too large", { limit = IMPORT_MAX_ROWS })
+      end
+      if not dry then
+        local payload = {
+          sku = sku,
+          name = name,
+          price = price,
+          currency = currency,
+          description = idx.description and fields[idx.description] or nil,
+          categoryId = idx.category and fields[idx.category] or nil,
+        }
+        local key = ids.product_key(msg["Site-Id"], sku)
+        state.products[key] = { payload = payload }
+      end
+    end
+  end
+  f:close()
+  audit.record(
+    "catalog",
+    "ImportCatalogCSV",
+    msg,
+    nil,
+    { siteId = msg["Site-Id"], imported = imported, dryRun = dry }
+  )
+  return codec.ok { imported = imported, dryRun = dry }
+end
+
+function handlers.BulkPriceUpdate(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Updates" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Updates",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_updates, err_updates = validation.assert_type(msg.Updates, "table", "Updates")
+  if not ok_updates then
+    return codec.error("INVALID_INPUT", err_updates, { field = "Updates" })
+  end
+  local count = 0
+  for _, row in ipairs(msg.Updates) do
+    if not row.Sku or not row.Price then
+      return codec.error("INVALID_INPUT", "Update requires Sku and Price")
+    end
+    local key = ids.product_key(msg["Site-Id"], row.Sku)
+    if state.products[key] and state.products[key].payload then
+      state.products[key].payload.price = tonumber(row.Price)
+      if row.Currency then
+        state.products[key].payload.currency = row.Currency
+      end
+      count = count + 1
+    end
+  end
+  audit.record("catalog", "BulkPriceUpdate", msg, nil, { siteId = msg["Site-Id"], count = count })
+  return codec.ok { updated = count }
 end
 
 function handlers.RequestReturn(msg)
