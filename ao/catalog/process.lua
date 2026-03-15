@@ -1362,6 +1362,7 @@ function handlers.SearchCatalog(msg)
     "Request-Id",
     "Site-Id",
     "Query",
+    "Segment",
     "MinPrice",
     "MaxPrice",
     "Locale",
@@ -1433,6 +1434,7 @@ function handlers.SearchCatalog(msg)
   }
   local prefix = "product:" .. msg["Site-Id"] .. ":"
   local flags = state.feature_flags and state.feature_flags[msg["Site-Id"]] or {}
+  local segment = msg.Segment
   for key, product in pairs(state.products) do
     if key:sub(1, #prefix) == prefix then
       local sku = key:match "product:[^:]+:(.+)"
@@ -1463,10 +1465,10 @@ function handlers.SearchCatalog(msg)
             goto continue
           end
         end
-        if segments and msg.Segment then
+        if segments and segment then
           local ok_seg = false
           for _, s in ipairs(segments) do
-            if s == msg.Segment then
+            if s == segment then
               ok_seg = true
             end
           end

@@ -78,6 +78,8 @@ function Assets.build_image_variants(src, opts)
     formats = formats,
     variants = variants,
     srcset = srcset,
+    loading = "lazy",
+    placeholder = "blur",
   }
 end
 

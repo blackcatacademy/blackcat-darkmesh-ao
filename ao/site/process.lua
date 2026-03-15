@@ -30,6 +30,7 @@ local allowed_actions = {
   "UnlockDraft",
   "ForceUnlockDraft",
   "RenewDraftLock",
+  "GetDraftAudit",
   "RegisterContentType",
   "ListContentTypes",
   "SetPerfBudgets",
@@ -58,6 +59,7 @@ local role_policy = {
   UnlockDraft = { "editor", "publisher", "admin" },
   ForceUnlockDraft = { "publisher", "admin" },
   RenewDraftLock = { "editor", "publisher", "admin" },
+  GetDraftAudit = { "editor", "publisher", "admin", "support" },
   RegisterContentType = { "admin" },
   ListContentTypes = { "editor", "publisher", "admin" },
   SetPerfBudgets = { "admin" },
@@ -97,6 +99,8 @@ local state = {
 }
 
 local MAX_CONTENT_BYTES = tonumber(os.getenv "SITE_MAX_CONTENT_BYTES" or "") or (64 * 1024)
+local MAX_PUBLISH_RETRY = tonumber(os.getenv "SITE_MAX_PUBLISH_RETRY" or "") or 5
+local PUBLISH_LOG_LIMIT = tonumber(os.getenv "SITE_PUBLISH_LOG_LIMIT" or "") or 1000
 
 local function get_locale_cfg(site_id)
   return state.locales[site_id] or { default = "en", supported = { "en" } }
@@ -647,6 +651,8 @@ function handlers.RegisterAsset(msg)
     meta.formats = manifest.formats
     meta.sizes = manifest.sizes
     meta.src = manifest.src
+    meta.loading = manifest.loading
+    meta.placeholder = manifest.placeholder
   end
   state.assets[msg["Site-Id"]][msg["Asset-Id"]] = meta
   audit.record(
@@ -957,6 +963,9 @@ function handlers.SchedulePublish(msg)
     locale = locale,
     publishAt = msg["Publish-At"],
     expireAt = msg["Expire-At"],
+    status = "pending",
+    retryCount = 0,
+    lastError = nil,
   })
   return codec.ok { siteId = msg["Site-Id"], count = #state.publish_schedules[msg["Site-Id"]] }
 end
@@ -1015,6 +1024,11 @@ function handlers.RunPublishScheduler(msg)
       local should_publish = publish_ts and publish_ts <= now_ts
       local should_expire = expire_ts and expire_ts <= now_ts
 
+      if entry.status == "failed" then
+        table.insert(pending, entry)
+        goto continue
+      end
+
       if should_publish then
         local draft_key = ids.page_key(site_id, entry.pageId, "draft", entry.locale)
         local draft_fallback = ids.page_key(site_id, entry.pageId, "draft")
@@ -1049,6 +1063,8 @@ function handlers.RunPublishScheduler(msg)
             locale = entry.locale,
             action = "publish",
           })
+          entry.status = "published"
+          entry.lastError = nil
         else
           table.insert(pending, entry) -- no draft yet; keep waiting
           table.insert(state.publish_log, {
@@ -1061,6 +1077,25 @@ function handlers.RunPublishScheduler(msg)
           })
           entry.retryCount = (entry.retryCount or 0) + 1
           entry.lastError = "draft_missing"
+          if entry.retryCount >= MAX_PUBLISH_RETRY then
+            entry.status = "failed"
+            audit.record("site", "RunPublishScheduler", msg, nil, {
+              siteId = site_id,
+              pageId = entry.pageId,
+              version = entry.version,
+              locale = entry.locale,
+              action = "failed_retry",
+            })
+            table.insert(state.publish_log, {
+              ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
+              siteId = site_id,
+              pageId = entry.pageId,
+              version = entry.version,
+              locale = entry.locale,
+              action = "failed_retry",
+              retryCount = entry.retryCount,
+            })
+          end
         end
       end
 
@@ -1100,6 +1135,14 @@ function handlers.RunPublishScheduler(msg)
     state.publish_schedules[site_id] = pending
   end
 
+  -- prune publish log to limit
+  if #state.publish_log > PUBLISH_LOG_LIMIT then
+    local drop = #state.publish_log - PUBLISH_LOG_LIMIT
+    for _ = 1, drop do
+      table.remove(state.publish_log, 1)
+    end
+  end
+
   return codec.ok {
     published = published,
     expired = expired,
@@ -1109,22 +1152,58 @@ function handlers.RunPublishScheduler(msg)
 end
 
 function handlers.GetPublishLog(msg)
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    { "Action", "Request-Id", "Site-Id", "Limit", "Actor-Role", "Schema-Version", "Signature" }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Limit",
+    "Offset",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
   local limit = tonumber(msg.Limit or 100) or 100
+  local offset = tonumber(msg.Offset or 0) or 0
   local items = {}
-  for i = math.max(1, #state.publish_log - limit + 1), #state.publish_log do
+  local start = math.max(1, #state.publish_log - limit - offset + 1)
+  for i = start, math.max(start, #state.publish_log - offset) do
     local entry = state.publish_log[i]
     if not msg["Site-Id"] or (entry and entry.siteId == msg["Site-Id"]) then
       table.insert(items, entry)
     end
   end
-  return codec.ok { siteId = msg["Site-Id"], items = items, total = #items }
+  return codec.ok { siteId = msg["Site-Id"], items = items, total = #items, offset = offset }
+end
+
+function handlers.GetDraftAudit(msg)
+  local ok, missing = validation.require_fields(msg, { "Draft-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Draft-Id",
+    "Limit",
+    "Offset",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local limit = tonumber(msg.Limit or 50) or 50
+  local offset = tonumber(msg.Offset or 0) or 0
+  local audit_log = state.draft_audit[msg["Draft-Id"]] or {}
+  local items = {}
+  for i = math.max(1, #audit_log - limit - offset + 1), math.max(0, #audit_log - offset) do
+    items[#items + 1] = audit_log[i]
+  end
+  return codec.ok { draftId = msg["Draft-Id"], items = items, total = #items, offset = offset }
 end
 
 function handlers.RegisterContentType(msg)
