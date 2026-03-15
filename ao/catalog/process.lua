@@ -23,6 +23,8 @@ local INVOICE_PDF_DIR = os.getenv "CATALOG_INVOICE_PDF_DIR"
 local INVOICE_NUMBER_WITH_YEAR = os.getenv "CATALOG_INVOICE_YEAR" ~= "0"
 local INVOICE_S3_BUCKET = os.getenv "CATALOG_INVOICE_S3_BUCKET"
 local HTTP_TIMEOUT = tonumber(os.getenv "CATALOG_HTTP_TIMEOUT" or "") or 5
+local S3_TIMEOUT = tonumber(os.getenv "CATALOG_S3_TIMEOUT" or "") or 10
+local S3_RETRIES = tonumber(os.getenv "CATALOG_S3_RETRIES" or "") or 2
 
 local handlers = {}
 local allowed_actions = {
@@ -307,6 +309,27 @@ local function http_post_json(url, payload)
     return nil, "CURL_EXIT_" .. tostring(code or why)
   end
   return out, nil
+end
+
+local function s3_copy_with_retry(path, bucket)
+  if not bucket or bucket == "" then
+    return false
+  end
+  for attempt = 1, (S3_RETRIES + 1) do
+    local cmd = string.format(
+      "aws s3 cp %s s3://%s/ --no-progress --expected-size %d --cli-read-timeout %d --cli-connect-timeout %d",
+      path,
+      bucket,
+      0,
+      S3_TIMEOUT,
+      S3_TIMEOUT
+    )
+    local rc = os.execute(cmd)
+    if rc == true or rc == 0 then
+      return true
+    end
+  end
+  return false
 end
 
 local function risk_score(checkout)
@@ -1693,6 +1716,18 @@ function handlers.SetTaxRules(msg)
     if r.priority and type(r.priority) ~= "number" then
       return codec.error("INVALID_INPUT", "priority must be number", { rule = r })
     end
+    if r.rate and (type(r.rate) ~= "number" or r.rate < 0 or r.rate > 100) then
+      return codec.error("INVALID_INPUT", "rate must be 0-100 percent", { rule = r })
+    end
+    if r.Rate and (type(r.Rate) ~= "number" or r.Rate < 0 or r.Rate > 100) then
+      return codec.error("INVALID_INPUT", "Rate must be 0-100 percent", { rule = r })
+    end
+    if r.country and (type(r.country) ~= "string" or #r.country ~= 2) then
+      return codec.error("INVALID_INPUT", "country must be ISO2", { rule = r })
+    end
+    if r.region and type(r.region) ~= "string" then
+      return codec.error("INVALID_INPUT", "region must be string", { rule = r })
+    end
   end
   state.tax_rules[msg["Site-Id"]] = msg.Rules
   audit.record("catalog", "SetTaxRules", msg, nil, { siteId = msg["Site-Id"], count = #msg.Rules })
@@ -2907,9 +2942,8 @@ local function persist_invoice(inv)
     end
   end
   if INVOICE_S3_BUCKET and INVOICE_S3_BUCKET ~= "" and inv.pdfPath then
-    local cmd = string.format("aws s3 cp %s s3://%s/", inv.pdfPath, INVOICE_S3_BUCKET)
-    local rc = os.execute(cmd)
-    if rc then
+    local ok = s3_copy_with_retry(inv.pdfPath, INVOICE_S3_BUCKET)
+    if ok then
       inv.s3Url = string.format("s3://%s/%s", INVOICE_S3_BUCKET, inv.invoiceId .. ".pdf")
     end
   end
