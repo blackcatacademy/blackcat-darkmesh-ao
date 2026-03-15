@@ -136,19 +136,16 @@ function handlers.RegisterSite(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Site-Id is required", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Config",
-      "Version",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Config",
+    "Version",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -233,19 +230,16 @@ function handlers.SetActiveVersion(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Version",
-      "ExpectedVersion",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Version",
+    "ExpectedVersion",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -289,19 +283,16 @@ function handlers.GrantRole(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Subject",
-      "Role",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Subject",
+    "Role",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -331,18 +322,15 @@ function handlers.GrantRole(msg)
 end
 
 function handlers.UpdateTrustResolvers(msg)
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Manifest-Tx",
-      "Resolvers",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Manifest-Tx",
+    "Resolvers",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -390,19 +378,16 @@ function handlers.FlagResolver(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Resolver-Id",
-      "Flag",
-      "Reason",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Resolver-Id",
+    "Flag",
+    "Reason",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
