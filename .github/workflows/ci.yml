@@ -33,6 +33,13 @@ jobs:
       - name: Secret scan (gitleaks)
         run: gitleaks detect --no-git -v
 
+      - name: Arweave hash verify (optional)
+        if: env.ARWEAVE_VERIFY_FILE != '' && env.ARWEAVE_VERIFY_TX != ''
+        env:
+          ARWEAVE_VERIFY_FILE: ${{ env.ARWEAVE_VERIFY_FILE }}
+          ARWEAVE_VERIFY_TX: ${{ env.ARWEAVE_VERIFY_TX }}
+        run: scripts/verify/verify_arweave_hash.sh "$ARWEAVE_VERIFY_FILE" "$ARWEAVE_VERIFY_TX"
+
       - name: Luacheck (if available)
         run: |
           if command -v luacheck >/dev/null 2>&1; then
