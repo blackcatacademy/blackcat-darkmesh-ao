@@ -108,6 +108,8 @@ local allowed_actions = {
   "GetProduct",
   "ListCategoryProducts",
   "SearchCatalog",
+  "FacetSearch",
+  "GetRecommendations",
   "GetOrder",
   "ListOrders",
   "ApplyOrderEvent",
@@ -126,6 +128,9 @@ local allowed_actions = {
   "GetShipment",
   "SetPriceList",
   "AddPromo",
+  "ApplyCoupon",
+  "UpsertPriceList",
+  "SetPriceList",
   "QuotePrice",
   "SetTaxRules",
   "SetShippingRules",
@@ -135,11 +140,19 @@ local allowed_actions = {
   "SetInventory",
   "GetInventory",
   "TrackCatalogEvent",
+  "ExportEvents",
   "RelatedProducts",
   "RecentlyViewed",
+  "GetRecommendations",
   "CreatePaymentIntent",
   "CapturePayment",
   "RefundPayment",
+  "SavePaymentToken",
+  "AddStoreCredit",
+  "ApplyStoreCredit",
+  "SaveAddress",
+  "ListAddresses",
+  "SetConsents",
   "RequestReturn",
   "ApproveReturn",
   "RefundReturn",
@@ -164,6 +177,8 @@ local allowed_actions = {
   "HandleCarrierWebhook",
   "UpdateReturnStatus",
   "CreateReturnLabel",
+  "SetEdgeCachePolicy",
+  "SetFeatureFlags",
   "CreateWebhook",
   "GetWebhook",
   "ListWebhooks",
@@ -210,7 +225,9 @@ local role_policy = {
   ValidateAddress = { "support", "admin" },
   GetShipment = { "support", "admin" },
   SetPriceList = { "catalog-admin", "admin" },
+  UpsertPriceList = { "catalog-admin", "admin" },
   AddPromo = { "catalog-admin", "admin" },
+  ApplyCoupon = { "catalog-admin", "support", "admin", "viewer" },
   QuotePrice = { "catalog-admin", "support", "admin" },
   SetTaxRules = { "catalog-admin", "admin" },
   SetShippingRules = { "catalog-admin", "admin" },
@@ -220,11 +237,19 @@ local role_policy = {
   SetInventory = { "catalog-admin", "admin" },
   GetInventory = { "catalog-admin", "support", "admin" },
   TrackCatalogEvent = { "catalog-admin", "support", "admin", "viewer" },
+  ExportEvents = { "admin", "catalog-admin", "support" },
   RelatedProducts = { "catalog-admin", "support", "admin", "viewer" },
   RecentlyViewed = { "catalog-admin", "support", "admin", "viewer" },
+  GetRecommendations = { "catalog-admin", "support", "admin", "viewer" },
   CreatePaymentIntent = { "catalog-admin", "support", "admin" },
   CapturePayment = { "catalog-admin", "support", "admin" },
   RefundPayment = { "catalog-admin", "support", "admin" },
+  SavePaymentToken = { "catalog-admin", "support", "admin", "viewer" },
+  AddStoreCredit = { "support", "catalog-admin", "admin" },
+  ApplyStoreCredit = { "catalog-admin", "support", "admin", "viewer" },
+  SaveAddress = { "catalog-admin", "support", "admin", "viewer" },
+  ListAddresses = { "catalog-admin", "support", "admin", "viewer" },
+  SetConsents = { "catalog-admin", "support", "admin", "viewer" },
   RequestReturn = { "support", "catalog-admin", "admin" },
   ApproveReturn = { "support", "catalog-admin", "admin" },
   RefundReturn = { "support", "catalog-admin", "admin" },
@@ -249,6 +274,8 @@ local role_policy = {
   HandlePaymentWebhook = { "admin", "catalog-admin" },
   HandleCarrierWebhook = { "admin", "catalog-admin", "support" },
   CreateReturnLabel = { "support", "catalog-admin", "admin" },
+  SetEdgeCachePolicy = { "catalog-admin", "admin" },
+  SetFeatureFlags = { "catalog-admin", "admin" },
   CreateWebhook = { "admin", "catalog-admin" },
   GetWebhook = { "admin", "catalog-admin" },
   ListWebhooks = { "admin", "catalog-admin" },
@@ -294,6 +321,7 @@ local state = {
   price_lists = {}, -- siteId -> currency -> { sku -> price }
   price_windows = {}, -- siteId -> currency -> { { region, valid_from, valid_to, prices = {sku=price} } }
   promos = {}, -- code -> { type = "percent"|"amount", value, skus }
+  coupons = {}, -- code -> { type, value, applies_to, free_shipping }
   variants = {}, -- siteId -> parentSku -> { variants = { { sku, attrs, price } } }
   tax_rules = {}, -- siteId -> list { country, region?, rate }
   shipping_rules = {}, -- siteId -> list { country, min_total, max_total, rate, carrier, service }
@@ -301,6 +329,10 @@ local state = {
   events = {}, -- siteId -> sku -> { views, add_to_cart, purchases }
   recent = {}, -- subject -> list of { siteId, sku } (most recent first, capped)
   payments = {}, -- paymentId -> { status, amount, currency, method, siteId, orderId, checkoutId, requiresAction }
+  payment_tokens = {}, -- subject -> { { provider, token, last4, brand, exp, default=true? } }
+  store_credit = {}, -- subject -> { balance, currency }
+  address_book = {}, -- subject -> { entries = { ... } }
+  consents = {}, -- subject -> map of consent flags
   telemetry = {}, -- buffered events for export
   companies = {}, -- companyId -> { name, users = { [userId] = role } }
   purchase_orders = {}, -- poId -> { siteId, companyId, items, totals, status, approvals = {} }
@@ -1565,6 +1597,11 @@ function handlers.RecentlyViewed(msg)
   return codec.ok { subject = msg.Subject, items = items, total = #items }
 end
 
+function handlers.GetRecommendations(msg)
+  local limit = msg.Limit or 10
+  return handlers.RelatedProducts { ["Site-Id"] = msg["Site-Id"], Sku = msg.Sku, Limit = limit }
+end
+
 function handlers.Bestsellers(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id" })
   if not ok then
@@ -1740,6 +1777,152 @@ function handlers.StreamTelemetry(msg)
   end
   state.telemetry = {}
   return codec.ok { streamed = #payload.events, response = out }
+end
+
+-- Addresses, consents, tokens, credit -----------------------------------
+function handlers.SaveAddress(msg)
+  local ok, missing = validation.require_fields(msg, { "Subject", "Address" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    {
+      "Action",
+      "Request-Id",
+      "Subject",
+      "Address",
+      "Label",
+      "Actor-Role",
+      "Schema-Version",
+      "Signature",
+    }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  state.address_book[msg.Subject] = state.address_book[msg.Subject] or {}
+  table.insert(
+    state.address_book[msg.Subject],
+    { label = msg.Label or "default", address = msg.Address }
+  )
+  return codec.ok { subject = msg.Subject, count = #state.address_book[msg.Subject] }
+end
+
+function handlers.ListAddresses(msg)
+  local ok, missing = validation.require_fields(msg, { "Subject" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    { "Action", "Request-Id", "Subject", "Actor-Role", "Schema-Version" }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  return codec.ok { subject = msg.Subject, addresses = state.address_book[msg.Subject] or {} }
+end
+
+function handlers.SetConsents(msg)
+  local ok, missing = validation.require_fields(msg, { "Subject", "Consents" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    { "Action", "Request-Id", "Subject", "Consents", "Actor-Role" }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  state.consents[msg.Subject] = msg.Consents
+  return codec.ok { subject = msg.Subject, consents = msg.Consents }
+end
+
+function handlers.SavePaymentToken(msg)
+  local ok, missing = validation.require_fields(msg, { "Subject", "Provider", "Token", "Last4" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  state.payment_tokens[msg.Subject] = state.payment_tokens[msg.Subject] or {}
+  table.insert(state.payment_tokens[msg.Subject], {
+    provider = msg.Provider,
+    token = msg.Token,
+    last4 = msg.Last4,
+    brand = msg.Brand,
+    exp = msg.Exp,
+    default = msg.Default == true,
+  })
+  return codec.ok { subject = msg.Subject, count = #state.payment_tokens[msg.Subject] }
+end
+
+function handlers.AddStoreCredit(msg)
+  local ok, missing = validation.require_fields(msg, { "Subject", "Amount", "Currency" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local balance = state.store_credit[msg.Subject] or { balance = 0, currency = msg.Currency }
+  balance.balance = balance.balance + tonumber(msg.Amount)
+  balance.currency = msg.Currency
+  state.store_credit[msg.Subject] = balance
+  return codec.ok(balance)
+end
+
+function handlers.ApplyStoreCredit(msg)
+  local ok, missing = validation.require_fields(msg, { "Subject", "Checkout-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local credit = state.store_credit[msg.Subject]
+  if not credit or credit.balance <= 0 then
+    return codec.error("INSUFFICIENT_CREDIT", "No store credit available")
+  end
+  local checkout = state.checkouts[msg["Checkout-Id"]]
+  if not checkout then
+    return codec.error("NOT_FOUND", "Checkout not found")
+  end
+  local apply = math.min(credit.balance, checkout.total or 0)
+  credit.balance = credit.balance - apply
+  checkout.total = (checkout.total or 0) - apply
+  checkout.storeCredit = apply
+  return codec.ok { remaining = credit.balance, applied = apply, currency = credit.currency }
+end
+
+function handlers.ExportEvents(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id" })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  if msg["Site-Id"] then
+    return codec.ok(state.event_log[msg["Site-Id"]] or {})
+  end
+  return codec.ok(state.event_log)
+end
+
+function handlers.SetFeatureFlags(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Flags" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  state.feature_flags = state.feature_flags or {}
+  state.feature_flags[msg["Site-Id"]] = msg.Flags
+  return codec.ok { siteId = msg["Site-Id"], flags = msg.Flags }
+end
+
+function handlers.SetEdgeCachePolicy(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Path", "Cache-Control" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  state.edge_cache = state.edge_cache or {}
+  state.edge_cache[msg["Site-Id"]] = state.edge_cache[msg["Site-Id"]] or {}
+  state.edge_cache[msg["Site-Id"]][msg.Path] = {
+    cache_control = msg["Cache-Control"],
+    etag = msg.ETag,
+    ttl = msg.TTL,
+  }
+  return codec.ok { siteId = msg["Site-Id"], path = msg.Path }
 end
 
 local function verify_shared_secret(msg, secret)
@@ -3414,6 +3597,42 @@ function handlers.AddPromo(msg)
   return codec.ok { code = msg.Code, type = typ, value = value }
 end
 
+function handlers.UpsertPriceList(msg)
+  return handlers.SetPriceList(msg)
+end
+
+function handlers.ApplyCoupon(msg)
+  local ok, missing = validation.require_fields(msg, { "Code" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Code",
+    "Type",
+    "Value",
+    "Applies-To",
+    "FreeShipping",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local typ = msg.Type or "percent"
+  local value = tonumber(msg.Value or 0) or 0
+  state.coupons[msg.Code] = {
+    type = typ,
+    value = value,
+    applies_to = msg["Applies-To"],
+    free_shipping = msg.FreeShipping == true,
+  }
+  audit.record("catalog", "ApplyCoupon", msg, nil, { code = msg.Code, type = typ })
+  return codec.ok { code = msg.Code, type = typ, freeShipping = msg.FreeShipping }
+end
+
 local function price_match_region(window_region, target_region)
   if not window_region or window_region == "" then
     return true
@@ -3516,27 +3735,55 @@ local function apply_pricing(site_id, sku, currency, promo_code, region)
     price = override
     base_currency = o_cur
   end
-  if promo_code and state.promos[promo_code] then
-    local promo = state.promos[promo_code]
-    local applies = #promo.skus == 0
-    if not applies then
-      for _, s in ipairs(promo.skus) do
-        if s == sku then
-          applies = true
-          break
+  local free_shipping = false
+  local bogo = false
+  if promo_code then
+    local coupon = state.coupons[promo_code]
+    if coupon then
+      local applies = not coupon.applies_to or #coupon.applies_to == 0
+      if coupon.applies_to then
+        for _, s in ipairs(coupon.applies_to) do
+          if s == sku then
+            applies = true
+            break
+          end
+        end
+      end
+      if applies then
+        if coupon.type == "percent" then
+          price = price * (1 - coupon.value / 100)
+        elseif coupon.type == "amount" then
+          price = math.max(0, price - coupon.value)
+        elseif coupon.type == "bogo" then
+          bogo = true
+        end
+        if coupon.free_shipping then
+          free_shipping = true
         end
       end
     end
-    if not applies then
-      return { price = price, currency = base_currency }, nil
-    end
-    if promo.type == "percent" then
-      price = price * (1 - promo.value / 100)
-    elseif promo.type == "amount" then
-      price = math.max(0, price - promo.value)
+    local promo = state.promos[promo_code]
+    if promo then
+      local applies = #promo.skus == 0
+      if not applies then
+        for _, s in ipairs(promo.skus) do
+          if s == sku then
+            applies = true
+            break
+          end
+        end
+      end
+      if applies then
+        if promo.type == "percent" then
+          price = price * (1 - promo.value / 100)
+        elseif promo.type == "amount" then
+          price = math.max(0, price - promo.value)
+        end
+      end
     end
   end
-  return { price = price, currency = base_currency }, nil
+  return { price = price, currency = base_currency, free_shipping = free_shipping, bogo = bogo },
+    nil
 end
 
 function handlers.QuotePrice(msg)
