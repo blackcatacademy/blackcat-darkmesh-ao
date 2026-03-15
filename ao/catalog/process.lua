@@ -51,6 +51,7 @@ local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" -- optional, e.g. "curl 
 local RETENTION_DAYS = tonumber(os.getenv "CATALOG_RETENTION_DAYS" or "") or 30
 local SEARCH_SYNONYMS_PATH = os.getenv "CATALOG_SEARCH_SYNONYMS_PATH"
 local SEARCH_STOPWORDS_PATH = os.getenv "CATALOG_SEARCH_STOPWORDS_PATH"
+local CUSTOMER_WEBHOOK = os.getenv "CATALOG_CUSTOMER_WEBHOOK"
 
 local handlers = {}
 local allowed_actions = {
@@ -1414,8 +1415,18 @@ function handlers.HandleCarrierWebhook(msg)
   if sh.orderId and state.orders[sh.orderId] then
     if sh.status == "delivered" then
       state.orders[sh.orderId].status = "delivered"
+      notify_customer(
+        "shipment.delivered",
+        { orderId = sh.orderId, shipmentId = msg["Shipment-Id"] }
+      )
     elseif sh.status == "exception" or sh.status == "delayed" then
       state.orders[sh.orderId].status = "shipment_issue"
+      notify_customer("shipment.issue", {
+        orderId = sh.orderId,
+        shipmentId = msg["Shipment-Id"],
+        status = sh.status,
+        tracking = sh.tracking,
+      })
     end
   end
   audit.record(
@@ -2362,6 +2373,14 @@ function handlers.ApplyTrackingEvent(msg)
     sh.status or "in_transit",
     { source = "track", tracking = sh.tracking }
   )
+  if sh.orderId and sh.status == "in_transit" then
+    notify_customer("shipment.in_transit", {
+      orderId = sh.orderId,
+      shipmentId = msg["Shipment-Id"],
+      tracking = sh.tracking,
+      eta = sh.eta,
+    })
+  end
   audit.record(
     "catalog",
     "ApplyTrackingEvent",
@@ -3787,6 +3806,25 @@ local function notify_rma(site_id, return_id, event, payload)
     HTTP_TIMEOUT,
     json_body:gsub("'", "'\\''"),
     RMA_WEBHOOK
+  )
+  os.execute(cmd)
+end
+
+local function notify_customer(event, payload)
+  if not CUSTOMER_WEBHOOK or CUSTOMER_WEBHOOK == "" or not json_ok then
+    return
+  end
+  local body = { type = event, payload = payload }
+  local ok, json_body = pcall(cjson.encode, body)
+  if not ok then
+    return
+  end
+  local safe = json_body:gsub("'", "'\\''")
+  local cmd = string.format(
+    "curl -sS -m %d -H 'Content-Type: application/json' -d '%s' %s >/dev/null 2>&1",
+    HTTP_TIMEOUT,
+    safe,
+    CUSTOMER_WEBHOOK
   )
   os.execute(cmd)
 end
