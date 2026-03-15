@@ -20,6 +20,7 @@ local CARRIER_TRACK_BASE = os.getenv "CATALOG_CARRIER_TRACK_BASE" or "https://tr
 local CARRIER_API_URL = os.getenv "CATALOG_CARRIER_API_URL" -- optional external rate/label stub
 local CARRIER_API_TOKEN = os.getenv "CATALOG_CARRIER_API_TOKEN"
 local INVOICE_PDF_DIR = os.getenv "CATALOG_INVOICE_PDF_DIR"
+local INVOICE_NUMBER_WITH_YEAR = os.getenv "CATALOG_INVOICE_YEAR" ~= "0"
 
 local handlers = {}
 local allowed_actions = {
@@ -150,6 +151,7 @@ local state = {
   purchase_orders = {}, -- poId -> { siteId, companyId, items, address, currency, subtotal, tax, shipping, total, status, approvals = {} }
   invoices = {}, -- invoiceId -> { orderId, siteId, total, currency, lines, issuedAt, status }
   invoice_seq = {}, -- siteId -> last number
+  invoice_seq_year = {}, -- siteId -> year -> last number
 }
 
 local function gen_id(prefix)
@@ -265,6 +267,38 @@ local function record_telemetry(kind, data)
   })
 end
 
+local function http_post_json(url, payload)
+  if not json_ok then
+    return nil, "JSON_ENCODE_DISABLED"
+  end
+  local ok_enc, body = pcall(cjson.encode, payload)
+  if not ok_enc or not body then
+    return nil, "ENCODE_FAILED"
+  end
+  local auth = ""
+  if CARRIER_API_TOKEN and CARRIER_API_TOKEN ~= "" then
+    auth = "-H 'Authorization: Bearer " .. CARRIER_API_TOKEN .. "' "
+  end
+  local cmd = string.format(
+    "curl -sS -X POST %s -H 'Content-Type: application/json' %s --data-binary @-",
+    url,
+    auth
+  )
+  local proc = io.popen(cmd, "w")
+  if not proc then
+    return nil, "CURL_WRITE_FAILED"
+  end
+  proc:write(body)
+  proc:close()
+  local reader = io.popen(cmd:gsub("--data%-binary @%-", ""), "r")
+  if not reader then
+    return nil, "CURL_READ_FAILED"
+  end
+  local out = reader:read "*a"
+  reader:close()
+  return out, nil
+end
+
 local function risk_score(checkout)
   local score = 0
   if checkout.quote.total and checkout.quote.total > 500 then
@@ -309,19 +343,7 @@ local function build_label(carrier, service, weight)
       shipmentId = shipment_id,
       weight = weight,
     }
-    local ok_enc, body = pcall(cjson.encode, payload)
-    if ok_enc then
-      local cmd = string.format(
-        "curl -sSf -X POST %s/label -H 'Content-Type: application/json'%s --data-binary @-",
-        CARRIER_API_URL,
-        CARRIER_API_TOKEN and (" -H 'Authorization: Bearer " .. CARRIER_API_TOKEN .. "'") or ""
-      )
-      local proc = io.popen(cmd, "w")
-      if proc then
-        proc:write(body)
-        proc:close()
-      end
-    end
+    http_post_json(CARRIER_API_URL .. "/label", payload)
   end
   return label
 end
@@ -1745,38 +1767,19 @@ local function shop_shipping(site_id, address, total, weight)
       weight = weight,
       currency = address.Currency or "USD",
     }
-    if json_ok then
-      local ok_enc, body = pcall(cjson.encode, payload)
-      if ok_enc then
-        local cmd = string.format(
-          "curl -sSf -X POST %s -H 'Content-Type: application/json'%s --data-binary @-",
-          CARRIER_API_URL,
-          CARRIER_API_TOKEN and (" -H 'Authorization: Bearer " .. CARRIER_API_TOKEN .. "'") or ""
-        )
-        local proc = io.popen(cmd, "w")
-        if proc then
-          proc:write(body)
-          proc:close()
-        end
-        local resp = io.popen(cmd:gsub("--data%-binary @%-", ""), "r")
-        if resp then
-          local out = resp:read "*a"
-          resp:close()
-          if out and out ~= "" then
-            local ok, arr = pcall(cjson.decode, out)
-            if ok and type(arr) == "table" then
-              for _, o in ipairs(arr) do
-                if o.rate then
-                  table.insert(options, {
-                    carrier = o.carrier or "external",
-                    service = o.service or "standard",
-                    rate = o.rate,
-                    transitDays = o.transitDays,
-                    currency = o.currency or payload.currency,
-                  })
-                end
-              end
-            end
+    local out = http_post_json(CARRIER_API_URL .. "/rates", payload)
+    if out and out ~= "" then
+      local ok, arr = pcall(cjson.decode, out)
+      if ok and type(arr) == "table" then
+        for _, o in ipairs(arr) do
+          if o.rate then
+            table.insert(options, {
+              carrier = o.carrier or "external",
+              service = o.service or "standard",
+              rate = o.rate,
+              transitDays = o.transitDays,
+              currency = o.currency or payload.currency,
+            })
           end
         end
       end
@@ -2900,9 +2903,19 @@ function handlers.CreateInvoice(msg)
     return codec.error("INVALID_INPUT", "Total must be non-negative number")
   end
   local inv_id = gen_id "inv"
-  local seq = (state.invoice_seq[msg["Site-Id"]] or 0) + 1
-  state.invoice_seq[msg["Site-Id"]] = seq
-  local invoice_number = string.format("%s-%06d", msg["Site-Id"], seq)
+  local year = os.date "%Y"
+  local seq
+  if INVOICE_NUMBER_WITH_YEAR then
+    state.invoice_seq_year[msg["Site-Id"]] = state.invoice_seq_year[msg["Site-Id"]] or {}
+    seq = (state.invoice_seq_year[msg["Site-Id"]][year] or 0) + 1
+    state.invoice_seq_year[msg["Site-Id"]][year] = seq
+  else
+    seq = (state.invoice_seq[msg["Site-Id"]] or 0) + 1
+    state.invoice_seq[msg["Site-Id"]] = seq
+  end
+  local invoice_number = INVOICE_NUMBER_WITH_YEAR
+      and string.format("%s-%s-%06d", msg["Site-Id"], year, seq)
+    or string.format("%s-%06d", msg["Site-Id"], seq)
   local inv = {
     invoiceId = inv_id,
     invoiceNumber = invoice_number,
