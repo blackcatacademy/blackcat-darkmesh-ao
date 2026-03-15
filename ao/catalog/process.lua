@@ -3940,7 +3940,8 @@ local function pick_tax_rate(site_id, address, tax_class)
   return rate
 end
 
-local function pick_shipping(site_id, address, total, weight, dims)
+local function pick_shipping(site_id, address, total, weight, dims, opts)
+  opts = opts or {}
   local rules = state.shipping_rules[site_id] or state.shipping_rates[site_id] or {}
   local billable_weight = weight or 0
   if dims and dims.length and dims.width and dims.height then
@@ -3962,7 +3963,12 @@ local function pick_shipping(site_id, address, total, weight, dims)
       end
     end
   end
-  return best or { rate = 0, carrier = "standard", service = "ground" }
+  local chosen = best or { rate = 0, carrier = "standard", service = "ground" }
+  if opts.free_shipping then
+    chosen.rate = 0
+    chosen.service = "free"
+  end
+  return chosen
 end
 
 local function dimensional_weight(l, w, h, divisor)
@@ -4040,6 +4046,7 @@ local function compute_cart(site_id, items, currency, promo)
   local subtotal = 0
   local weight = 0
   local lines = {}
+  local free_shipping = false
   for _, it in ipairs(items) do
     local qty = tonumber(it.Qty or it.qty) or 0
     if qty <= 0 then
@@ -4050,7 +4057,12 @@ local function compute_cart(site_id, items, currency, promo)
     if not quote then
       return nil, err or "NOT_FOUND"
     end
-    local line_total = quote.price * qty
+    if quote.free_shipping then
+      free_shipping = true
+    end
+    local free_units = quote.bogo and math.floor(qty / 2) or 0
+    local charge_qty = qty - free_units
+    local line_total = quote.price * charge_qty
     subtotal = subtotal + line_total
     local pkey = ids.product_key(site_id, sku)
     local payload = state.products[pkey] and state.products[pkey].payload or {}
@@ -4058,6 +4070,7 @@ local function compute_cart(site_id, items, currency, promo)
     table.insert(lines, {
       sku = sku,
       qty = qty,
+      free_units = free_units,
       unit_price = quote.price,
       currency = quote.currency,
       line_total = line_total,
@@ -4065,7 +4078,7 @@ local function compute_cart(site_id, items, currency, promo)
       taxInclusive = payload.taxInclusive or payload.TaxInclusive,
     })
   end
-  return { subtotal = subtotal, weight = weight, lines = lines }, nil
+  return { subtotal = subtotal, weight = weight, lines = lines, free_shipping = free_shipping }, nil
 end
 
 function handlers.QuoteOrder(msg)
@@ -5086,7 +5099,14 @@ function handlers.StartCheckout(msg)
       height = tonumber(msg.Dimensions.Height),
     }
   end
-  local shipping = pick_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight, dims)
+  local shipping = pick_shipping(
+    msg["Site-Id"],
+    address,
+    cart.subtotal,
+    cart.weight,
+    dims,
+    { free_shipping = cart.free_shipping }
+  )
   local tax, _, subtotal_ex, ship_tax =
     calculate_tax_breakdown(msg["Site-Id"], address, cart, shipping.rate)
   local total = subtotal_ex + shipping.rate + ship_tax + tax
