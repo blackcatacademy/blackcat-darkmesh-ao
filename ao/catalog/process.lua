@@ -183,7 +183,7 @@ end
 function handlers.SearchCatalog(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Query", "MinPrice", "MaxPrice", "Locale", "Available", "Category-Id", "Sort", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Query", "MinPrice", "MaxPrice", "Locale", "Available", "Category-Id", "Sort", "Currency", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -223,6 +223,7 @@ function handlers.SearchCatalog(msg)
         if min_price and price and price < min_price then ok_price = false end
         if max_price and price and price > max_price then ok_price = false end
         local ok_locale = (not msg.Locale) or (locale == msg.Locale)
+        local ok_currency = (not msg.Currency) or (payload.currency == msg.Currency)
         local ok_available = (msg.Available == nil) or (available == msg.Available)
         if available then facets.availability.available = facets.availability.available + 1 else facets.availability.unavailable = facets.availability.unavailable + 1 end
         if payload.categoryId then
@@ -239,7 +240,7 @@ function handlers.SearchCatalog(msg)
           facets.locales[locale] = (facets.locales[locale] or 0) + 1
         end
         local ok_cat = (not msg["Category-Id"]) or (payload.categoryId == msg["Category-Id"]) or (payload.category and payload.category.id == msg["Category-Id"]) or false
-        if ok_price and ok_locale and ok_available and ok_cat then
+        if ok_price and ok_locale and ok_currency and ok_available and ok_cat then
           local score = 0
           if q ~= "" then
             if sku:lower():find("^" .. q, 1, false) then score = score + 5 end
