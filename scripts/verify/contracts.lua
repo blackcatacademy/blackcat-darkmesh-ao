@@ -105,6 +105,22 @@ do
   local oversize_cfg = registry.route(with_req({ Action = "RegisterSite", ["Site-Id"] = "site-big", Config = big_cfg, ["Actor-Role"] = "admin" }))
   assert_status(oversize_cfg, "ERROR", "register oversize status")
   assert_code(oversize_cfg, "INVALID_INPUT", "register oversize code")
+
+  -- Resolver flagging
+  local flag = registry.route(with_req({ Action = "FlagResolver", ["Resolver-Id"] = "resolver-1", Flag = "suspicious", Reason = "high error rate", ["Actor-Role"] = "registry-admin" }))
+  assert_status(flag, "OK", "flag resolver status")
+  local listed = registry.route(with_req({ Action = "GetResolverFlags", ["Resolver-Id"] = "resolver-1", ["Actor-Role"] = "registry-admin" }))
+  assert_eq(listed.payload.flag, "suspicious", "resolver flag stored")
+  local all_flags = registry.route(with_req({ Action = "GetResolverFlags", ["Actor-Role"] = "registry-admin" }))
+  assert_truthy(all_flags.payload.count >= 1, "resolver flags count")
+  local cleared = registry.route(with_req({ Action = "UnflagResolver", ["Resolver-Id"] = "resolver-1", ["Actor-Role"] = "registry-admin" }))
+  assert_status(cleared, "OK", "unflag status")
+  local cleared_get = registry.route(with_req({ Action = "GetResolverFlags", ["Resolver-Id"] = "resolver-1", ["Actor-Role"] = "registry-admin" }))
+  assert_eq(cleared_get.payload.flag, "none", "resolver flag cleared")
+
+  local bad_flag = registry.route(with_req({ Action = "FlagResolver", ["Resolver-Id"] = "resolver-2", Flag = "maybe", ["Actor-Role"] = "registry-admin" }))
+  assert_status(bad_flag, "ERROR", "bad flag status")
+  assert_code(bad_flag, "INVALID_INPUT", "bad flag code")
 end
 
 -- Site tests

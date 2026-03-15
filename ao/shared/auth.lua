@@ -24,10 +24,13 @@ local sodium_ok, sodium = pcall(require, "sodium")
 local ed25519_ok, ed25519 = pcall(require, "ed25519") -- pure-lua (MIT) if installed
 local sqlite_ok, sqlite = pcall(require, "lsqlite3")
 local SHELL_FALLBACK = os.getenv("AUTH_ALLOW_SHELL_FALLBACK") == "1" -- default now off
+local json_ok, json = pcall(require, "cjson.safe")
+local FLAGS_FILE = os.getenv("AUTH_RESOLVER_FLAGS_FILE") or os.getenv("AO_FLAGS_PATH")
 
 local nonce_store = {}
 local rate_store = {}
 local rate_db_loaded = false
+local resolver_flags = {}
 
 -- load persisted rate store (simple CSV key,count,reset)
 if RL_STATE_FILE then
@@ -309,6 +312,40 @@ function Auth.require_role_for_action(msg, policy_table)
   return Auth.require_role(msg, roles)
 end
 
+local function load_resolver_flags()
+  if not FLAGS_FILE or FLAGS_FILE == "" or not json_ok then return end
+  local f = io.open(FLAGS_FILE, "r")
+  if not f then return end
+  local tmp = {}
+  for line in f:lines() do
+    local obj = json.decode(line)
+    if obj and obj.resolverId and obj.flag then
+      tmp[obj.resolverId] = obj
+    end
+  end
+  f:close()
+  resolver_flags = tmp
+end
+
+local function check_resolver_flag(msg)
+  if not FLAGS_FILE then return true end
+  local rid = msg["Resolver-Id"] or msg.ResolverId or msg.resolverId or msg.resolver
+  if not rid then return true end
+  load_resolver_flags()
+  local entry = resolver_flags[rid]
+  if not entry then return true end
+  if entry.flag == "blocked" then
+    return false, "resolver_blocked"
+  elseif entry.flag == "suspicious" then
+    local action = msg.Action or ""
+    if action:match("^[Gg]et") or action:match("^[Ll]ist") then
+      return true
+    end
+    return false, "resolver_suspicious_readonly"
+  end
+  return true
+end
+
 -- Combined security gate used by routes
 function Auth.enforce(msg)
   local ok_jwt, err_jwt = Auth.consume_jwt(msg)
@@ -317,6 +354,8 @@ function Auth.enforce(msg)
   if not ok_nonce then return false, err_nonce end
   local ok_sig, err_sig = Auth.require_signature(msg)
   if not ok_sig then return false, err_sig end
+  local ok_flag, err_flag = check_resolver_flag(msg)
+  if not ok_flag then return false, err_flag end
   local ok_rl, err_rl = Auth.check_rate_limit(msg)
   if not ok_rl then return false, err_rl end
   return true

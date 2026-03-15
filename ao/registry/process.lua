@@ -9,6 +9,7 @@ local ids = require("ao.shared.ids")
 local audit = require("ao.shared.audit")
 local metrics = require("ao.shared.metrics")
 local schema = require("ao.shared.schema")
+local json_ok, json = pcall(require, "cjson.safe")
 
 local handlers = {}
 local allowed_actions = {
@@ -20,6 +21,9 @@ local allowed_actions = {
   "GrantRole",
   "UpdateTrustResolvers",
   "GetTrustedResolvers",
+  "FlagResolver",
+  "UnflagResolver",
+  "GetResolverFlags",
 }
 
 local role_policy = {
@@ -29,6 +33,9 @@ local role_policy = {
   GrantRole = { "admin", "registry-admin" },
   UpdateTrustResolvers = { "admin", "registry-admin" },
   GetTrustedResolvers = { "admin", "registry-admin" },
+  FlagResolver = { "admin", "registry-admin" },
+  UnflagResolver = { "admin", "registry-admin" },
+  GetResolverFlags = { "admin", "registry-admin" },
 }
 
 -- pseudo-state kept in-memory for now; AO runtime would persist this.
@@ -38,13 +45,33 @@ local state = {
   active_versions = {},-- siteId => versionId
   roles = {},          -- siteId => map[user] = role
   trust = { resolvers = {}, manifestTx = nil, updatedAt = nil },
+  resolver_flags = {}, -- resolverId => { flag = "suspicious"|"blocked"|"ok", reason, raisedAt, raisedBy }
 }
 
 local MAX_CONFIG_BYTES = tonumber(os.getenv("REGISTRY_MAX_CONFIG_BYTES") or "") or (16 * 1024)
+local FLAGS_PATH = os.getenv("AO_FLAGS_PATH")
+local WAL_PATH = os.getenv("AO_WAL_PATH")
 
 local function now_iso()
   -- coarse timestamp for audit/debug; determinism is sufficient here.
   return os.date("!%Y-%m-%dT%H:%M:%SZ")
+end
+
+local function append_log(path, obj)
+  if not path or path == "" or not json_ok then return end
+  local line = json.encode(obj)
+  if not line then return end
+  local f = io.open(path, "a")
+  if f then
+    f:write(line)
+    f:write("\n")
+    f:close()
+  end
+end
+
+local function persist_flag_event(ev)
+  append_log(WAL_PATH, ev)
+  append_log(FLAGS_PATH, ev)
 end
 
 function handlers.GetSiteByHost(msg)
@@ -232,6 +259,82 @@ function handlers.GetTrustedResolvers(msg)
     updatedAt = state.trust.updatedAt,
     resolvers = state.trust.resolvers,
   })
+end
+
+local function validate_resolver_id(id)
+  local ok_len, err = validation.check_length(id, 256, "Resolver-Id")
+  if not ok_len then return false, err end
+  return true
+end
+
+function handlers.FlagResolver(msg)
+  local required = { "Resolver-Id", "Flag" }
+  local ok, missing = validation.require_fields(msg, required)
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Resolver-Id", "Flag", "Reason", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_id, err_id = validate_resolver_id(msg["Resolver-Id"])
+  if not ok_id then return codec.error("INVALID_INPUT", err_id, { field = "Resolver-Id" }) end
+  local flag = msg.Flag
+  if flag ~= "suspicious" and flag ~= "blocked" and flag ~= "ok" then
+    return codec.error("INVALID_INPUT", "Flag must be suspicious|blocked|ok", { flag = flag })
+  end
+  local reason = msg.Reason or ""
+  local ok_len_reason, err_reason = validation.check_length(reason, 512, "Reason")
+  if not ok_len_reason then return codec.error("INVALID_INPUT", err_reason, { field = "Reason" }) end
+  state.resolver_flags[msg["Resolver-Id"]] = {
+    flag = flag,
+    reason = reason,
+    raisedAt = now_iso(),
+    raisedBy = msg["Actor-Role"],
+  }
+  persist_flag_event({
+    ts = now_iso(),
+    action = "FlagResolver",
+    resolverId = msg["Resolver-Id"],
+    flag = flag,
+    reason = reason,
+  })
+  audit.record("registry", "FlagResolver", msg, nil, { resolver = msg["Resolver-Id"], flag = flag })
+  return codec.ok({ resolverId = msg["Resolver-Id"], flag = flag, reason = reason })
+end
+
+function handlers.UnflagResolver(msg)
+  local required = { "Resolver-Id" }
+  local ok, missing = validation.require_fields(msg, required)
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing required field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Resolver-Id", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_id, err_id = validate_resolver_id(msg["Resolver-Id"])
+  if not ok_id then return codec.error("INVALID_INPUT", err_id, { field = "Resolver-Id" }) end
+  state.resolver_flags[msg["Resolver-Id"]] = nil
+  persist_flag_event({
+    ts = now_iso(),
+    action = "UnflagResolver",
+    resolverId = msg["Resolver-Id"],
+    flag = "cleared",
+  })
+  audit.record("registry", "UnflagResolver", msg, nil, { resolver = msg["Resolver-Id"] })
+  return codec.ok({ resolverId = msg["Resolver-Id"], flag = "cleared" })
+end
+
+function handlers.GetResolverFlags(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Resolver-Id", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  if msg["Resolver-Id"] then
+    local ok_id, err_id = validate_resolver_id(msg["Resolver-Id"])
+    if not ok_id then return codec.error("INVALID_INPUT", err_id, { field = "Resolver-Id" }) end
+    local entry = state.resolver_flags[msg["Resolver-Id"]]
+    if not entry then return codec.ok({ resolverId = msg["Resolver-Id"], flag = "none" }) end
+    return codec.ok({ resolverId = msg["Resolver-Id"], flag = entry.flag, reason = entry.reason, raisedAt = entry.raisedAt, raisedBy = entry.raisedBy })
+  end
+  local cnt = 0
+  for _ in pairs(state.resolver_flags) do cnt = cnt + 1 end
+  return codec.ok({ flags = state.resolver_flags, count = cnt })
 end
 
 local function route(msg)
