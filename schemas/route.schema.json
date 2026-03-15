@@ -1,13 +1,14 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Route",
   "type": "object",
   "required": ["siteId", "path", "pageId"],
   "properties": {
-    "siteId": {"type": "string", "minLength": 1, "maxLength": 128},
-    "path": {"type": "string", "minLength": 1, "maxLength": 2048, "pattern": "^/.*"},
+    "siteId": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
+    "path": {"type": "string", "minLength": 1, "maxLength": 2048, "pattern": "^/[^\\s]*$"},
     "locale": {"type": "string", "pattern": "^[a-z]{2}(-[A-Z]{2})?$"},
-    "pageId": {"type": "string", "minLength": 1, "maxLength": 128},
+    "pageId": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
     "type": {"type": "string", "enum": ["page", "redirect", "asset"]}
-  }
+  },
+  "additionalProperties": false
 }

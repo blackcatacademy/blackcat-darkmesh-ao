@@ -1,13 +1,14 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Publish",
   "type": "object",
   "required": ["publishId", "versionId", "manifestTx"],
   "properties": {
-    "publishId": {"type": "string", "minLength": 1, "maxLength": 128},
-    "versionId": {"type": "string", "minLength": 1, "maxLength": 128},
-    "manifestTx": {"type": "string", "minLength": 1, "maxLength": 128},
+    "publishId": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
+    "versionId": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$"},
+    "manifestTx": {"type": "string", "minLength": 43, "maxLength": 64, "pattern": "^[A-Za-z0-9_-]+$"},
     "activatedAt": {"type": "string", "format": "date-time"},
     "rollbackTo": {"type": "string", "minLength": 1, "maxLength": 128}
-  }
+  },
+  "additionalProperties": false
 }
