@@ -28,6 +28,7 @@ local allowed_actions = {
   "RunPublishScheduler",
   "LockDraft",
   "UnlockDraft",
+  "ForceUnlockDraft",
   "RegisterContentType",
   "ListContentTypes",
   "SetPerfBudgets",
@@ -53,6 +54,7 @@ local role_policy = {
   RunPublishScheduler = { "publisher", "admin" },
   LockDraft = { "editor", "publisher", "admin" },
   UnlockDraft = { "editor", "publisher", "admin" },
+  ForceUnlockDraft = { "publisher", "admin" },
   RegisterContentType = { "admin" },
   ListContentTypes = { "editor", "publisher", "admin" },
   SetPerfBudgets = { "admin" },
@@ -849,6 +851,16 @@ function handlers.UnlockDraft(msg)
   return codec.ok { draftId = msg["Draft-Id"], unlocked = true }
 end
 
+function handlers.ForceUnlockDraft(msg)
+  local ok, missing = validation.require_fields(msg, { "Draft-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  state.draft_locks[msg["Draft-Id"]] = nil
+  audit.record("site", "ForceUnlockDraft", msg, nil, { draftId = msg["Draft-Id"] })
+  return codec.ok { draftId = msg["Draft-Id"], unlocked = true, forced = true }
+end
+
 function handlers.RequestPublish(msg)
   local ok, missing = validation.require_fields(msg, { "Draft-Id", "Requested-By" })
   if not ok then
@@ -964,19 +976,13 @@ function handlers.RunPublishScheduler(msg)
           }
           draft.status = "published"
           state.active_versions[site_id] = entry.version
-          audit.record(
-            "site",
-            "RunPublishScheduler",
-            msg,
-            nil,
-            {
-              siteId = site_id,
-              pageId = entry.pageId,
-              version = entry.version,
-              locale = entry.locale,
-              action = "publish",
-            }
-          )
+          audit.record("site", "RunPublishScheduler", msg, nil, {
+            siteId = site_id,
+            pageId = entry.pageId,
+            version = entry.version,
+            locale = entry.locale,
+            action = "publish",
+          })
           table.insert(published, {
             siteId = site_id,
             pageId = entry.pageId,
@@ -993,6 +999,14 @@ function handlers.RunPublishScheduler(msg)
           })
         else
           table.insert(pending, entry) -- no draft yet; keep waiting
+          table.insert(state.publish_log, {
+            ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
+            siteId = site_id,
+            pageId = entry.pageId,
+            version = entry.version,
+            locale = entry.locale,
+            action = "missing_draft",
+          })
         end
       end
 
@@ -1001,19 +1015,13 @@ function handlers.RunPublishScheduler(msg)
         local page = state.pages[page_key]
         if page then
           page.archived = true
-          audit.record(
-            "site",
-            "RunPublishScheduler",
-            msg,
-            nil,
-            {
-              siteId = site_id,
-              pageId = entry.pageId,
-              version = entry.version,
-              locale = entry.locale,
-              action = "expire",
-            }
-          )
+          audit.record("site", "RunPublishScheduler", msg, nil, {
+            siteId = site_id,
+            pageId = entry.pageId,
+            version = entry.version,
+            locale = entry.locale,
+            action = "expire",
+          })
           table.insert(expired, {
             siteId = site_id,
             pageId = entry.pageId,
