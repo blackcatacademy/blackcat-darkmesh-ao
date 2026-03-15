@@ -26,6 +26,9 @@ local HTTP_TIMEOUT = tonumber(os.getenv "CATALOG_HTTP_TIMEOUT" or "") or 5
 local S3_TIMEOUT = tonumber(os.getenv "CATALOG_S3_TIMEOUT" or "") or 10
 local S3_RETRIES = tonumber(os.getenv "CATALOG_S3_RETRIES" or "") or 2
 local EVENT_LOG_LIMIT = tonumber(os.getenv "CATALOG_EVENT_LOG_LIMIT" or "") or 5000
+local GA4_ENDPOINT = os.getenv "CATALOG_GA4_ENDPOINT"
+local GA4_API_SECRET = os.getenv "CATALOG_GA4_API_SECRET"
+local GA4_MEASUREMENT_ID = os.getenv "CATALOG_GA4_MEASUREMENT_ID"
 
 local handlers = {}
 local allowed_actions = {
@@ -82,6 +85,8 @@ local allowed_actions = {
   "ListInvoices",
   "Bestsellers",
   "TrendingProducts",
+  "ExportEventLog",
+  "StreamTelemetry",
 }
 
 local role_policy = {
@@ -133,6 +138,8 @@ local role_policy = {
   ListInvoices = { "support", "admin", "catalog-admin" },
   Bestsellers = { "catalog-admin", "support", "admin", "viewer" },
   TrendingProducts = { "catalog-admin", "support", "admin", "viewer" },
+  ExportEventLog = { "admin", "catalog-admin" },
+  StreamTelemetry = { "admin", "catalog-admin" },
 }
 
 local state = {
@@ -1003,6 +1010,77 @@ function handlers.TrendingProducts(msg)
     table.remove(ranked)
   end
   return codec.ok { siteId = msg["Site-Id"], items = ranked, total = #ranked, window = window }
+end
+
+function handlers.ExportEventLog(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Limit",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local limit = tonumber(msg.Limit) or 500
+  if limit < 1 then
+    limit = 1
+  end
+  if limit > EVENT_LOG_LIMIT then
+    limit = EVENT_LOG_LIMIT
+  end
+  local log = state.event_log[msg["Site-Id"]] or {}
+  local slice = {}
+  for i = 1, math.min(limit, #log) do
+    table.insert(slice, log[i])
+  end
+  return codec.ok { siteId = msg["Site-Id"], events = slice, total = #slice }
+end
+
+function handlers.StreamTelemetry(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Events",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  if not (GA4_ENDPOINT and GA4_API_SECRET and GA4_MEASUREMENT_ID) then
+    return codec.error("PROVIDER_ERROR", "GA4 not configured")
+  end
+  local events = msg.Events or state.telemetry
+  if type(events) ~= "table" then
+    return codec.error("INVALID_INPUT", "Events must be array")
+  end
+  if #events == 0 then
+    return codec.ok { streamed = 0 }
+  end
+  local payload = {
+    client_id = "ao-catalog",
+    measurement_id = GA4_MEASUREMENT_ID,
+    api_secret = GA4_API_SECRET,
+    events = {},
+  }
+  for _, ev in ipairs(events) do
+    table.insert(payload.events, {
+      name = ev.kind or "catalog_event",
+      params = ev.data or ev,
+    })
+  end
+  local out, err = http_post_json(GA4_ENDPOINT, payload)
+  if err then
+    return codec.error("PROVIDER_ERROR", err)
+  end
+  state.telemetry = {}
+  return codec.ok { streamed = #payload.events, response = out }
 end
 
 function handlers.ApplyOrderEvent(msg)
