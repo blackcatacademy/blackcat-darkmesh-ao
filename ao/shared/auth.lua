@@ -113,7 +113,15 @@ function Auth.require_signature(msg)
     -- Prefer libsodium for detached ed25519 verification (hex signature expected)
     if sodium_ok and sodium.crypto_sign_verify_detached then
       local pub = assert(io.open(SIG_PUBLIC, "rb")):read("*a")
-      local raw_sig = sodium.from_hex(sig)
+      local raw_sig
+      if sodium.from_hex then
+        raw_sig = sodium.from_hex(sig)
+      else
+        -- manual hex decode fallback
+        local bytes = {}
+        for byte in sig:gmatch("%x%x") do bytes[#bytes + 1] = string.char(tonumber(byte, 16)) end
+        raw_sig = table.concat(bytes)
+      end
       if raw_sig and sodium.crypto_sign_verify_detached(raw_sig, target, pub) then
         return true
       end

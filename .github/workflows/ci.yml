@@ -55,6 +55,17 @@ jobs:
           ARWEAVE_VERIFY_TX: ${{ env.ARWEAVE_VERIFY_TX }}
         run: scripts/verify/verify_arweave_hash.sh "$ARWEAVE_VERIFY_FILE" "$ARWEAVE_VERIFY_TX"
 
+      - name: Arweave hash verify (enforced on main)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/main')
+        env:
+          ARWEAVE_VERIFY_FILE: ${{ env.ARWEAVE_VERIFY_FILE }}
+          ARWEAVE_VERIFY_TX: ${{ env.ARWEAVE_VERIFY_TX }}
+        run: |
+          if [ -z "${ARWEAVE_VERIFY_FILE:-}" ] || [ -z "${ARWEAVE_VERIFY_TX:-}" ]; then
+            echo "ARWEAVE_VERIFY_* not set; failing release hash check" && exit 1
+          fi
+          scripts/verify/verify_arweave_hash.sh "$ARWEAVE_VERIFY_FILE" "$ARWEAVE_VERIFY_TX"
+
       - name: Luacheck (if available)
         run: |
           luacheck ao scripts

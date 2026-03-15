@@ -1,5 +1,7 @@
 arweave/snapshots/*.json
 arweave/manifests/*.json
 arweave/manifests/*.log
+arweave/manifests/*
+arweave/snapshots/*
 metrics/
 dev/schema-bundles/

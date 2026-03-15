@@ -18,18 +18,26 @@ local allowed_actions = {
   "UpsertProduct",
   "UpsertCategory",
   "PublishCatalogVersion",
+  "SetInventoryReservation",
+  "SyncShipment",
+  "SyncReturn",
 }
 
 local role_policy = {
   UpsertProduct = { "catalog-admin", "editor", "admin" },
   UpsertCategory = { "catalog-admin", "editor", "admin" },
   PublishCatalogVersion = { "publisher", "admin", "catalog-admin" },
+  SetInventoryReservation = { "catalog-admin", "admin" },
+  SyncShipment = { "catalog-admin", "admin" },
+  SyncReturn = { "catalog-admin", "admin" },
 }
 
 local state = {
   products = {},      -- product:<site>:<sku> -> { payload }
   categories = {},    -- category:<site>:<id> -> { payload, products = {sku}} 
-  active_versions = {} -- site -> version
+  active_versions = {}, -- site -> version
+  inventory = {},       -- site -> sku -> { quantity }
+  reservations = {},    -- orderId -> { siteId, items = { { sku, qty } }, released=false }
 }
 
 local MAX_PAYLOAD_BYTES = tonumber(os.getenv("CATALOG_MAX_PAYLOAD_BYTES") or "") or (64 * 1024)
@@ -98,7 +106,7 @@ end
 function handlers.SearchCatalog(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Query", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Query", "MinPrice", "MaxPrice", "Locale", "Available", "Category-Id", "Sort", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
   if not ok_len_site then return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" }) end
@@ -106,24 +114,99 @@ function handlers.SearchCatalog(msg)
     local ok_len_query, err_query = validation.check_length(msg.Query, 1024, "Query")
     if not ok_len_query then return codec.error("INVALID_INPUT", err_query, { field = "Query" }) end
   end
+  local min_price = msg.MinPrice
+  local max_price = msg.MaxPrice
+  if min_price and type(min_price) ~= "number" then return codec.error("INVALID_INPUT", "MinPrice must be number") end
+  if max_price and type(max_price) ~= "number" then return codec.error("INVALID_INPUT", "MaxPrice must be number") end
   local q = msg.Query and msg.Query:lower() or ""
+  local sort = msg.Sort or "relevance"
   local results = {}
+  local facets = { categories = {}, availability = { available = 0, unavailable = 0 } }
   local prefix = "product:" .. msg["Site-Id"] .. ":"
   for key, product in pairs(state.products) do
     if key:sub(1, #prefix) == prefix then
       local sku = key:match("product:[^:]+:(.+)")
       local text = (product.payload.name or ""):lower() .. " " .. (product.payload.description or ""):lower()
       if q == "" or text:find(q, 1, true) then
-        table.insert(results, { sku = sku, payload = product.payload })
+        local payload = product.payload or {}
+        local price = payload.price
+        local locale = payload.locale or payload.Locale
+        local available = payload.is_available or payload.available
+        local ok_price = true
+        if min_price and price and price < min_price then ok_price = false end
+        if max_price and price and price > max_price then ok_price = false end
+        local ok_locale = (not msg.Locale) or (locale == msg.Locale)
+        local ok_available = (msg.Available == nil) or (available == msg.Available)
+        if available then facets.availability.available = facets.availability.available + 1 else facets.availability.unavailable = facets.availability.unavailable + 1 end
+        if payload.categoryId then
+          facets.categories[payload.categoryId] = (facets.categories[payload.categoryId] or 0) + 1
+        end
+        local ok_cat = (not msg["Category-Id"]) or (payload.categoryId == msg["Category-Id"]) or (payload.category and payload.category.id == msg["Category-Id"]) or false
+        if ok_price and ok_locale and ok_available and ok_cat then
+          table.insert(results, { sku = sku, payload = payload, price = price, name = payload.name or sku })
+        end
       end
     end
   end
+  table.sort(results, function(a, b)
+    if sort == "price" then return (a.price or 0) < (b.price or 0) end
+    if sort == "-price" then return (a.price or 0) > (b.price or 0) end
+    if sort == "name" then return tostring(a.name) < tostring(b.name) end
+    return (a.sku) < (b.sku)
+  end)
   return codec.ok({
     siteId = msg["Site-Id"],
     query = q,
     items = results,
     total = #results,
+    facets = facets,
   })
+end
+
+function handlers.SetInventoryReservation(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Order-Id", "Items" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Order-Id", "Items", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local ok_items, err_items = validation.assert_type(msg.Items, "table", "Items")
+  if not ok_items then return codec.error("INVALID_INPUT", err_items, { field = "Items" }) end
+  for _, item in ipairs(msg.Items) do
+    if not (item.sku and item.qty) then
+      return codec.error("INVALID_INPUT", "Item must have sku and qty")
+    end
+  end
+  state.reservations[msg["Order-Id"]] = { siteId = msg["Site-Id"], items = msg.Items, released = false }
+  return codec.ok({ orderId = msg["Order-Id"], reserved = #msg.Items })
+end
+
+local function adjust_inventory(siteId, items, sign)
+  state.inventory[siteId] = state.inventory[siteId] or {}
+  for _, item in ipairs(items or {}) do
+    local inv = state.inventory[siteId][item.sku] or { quantity = 0 }
+    inv.quantity = math.max(0, inv.quantity + sign * (item.qty or 0))
+    state.inventory[siteId][item.sku] = inv
+  end
+end
+
+function handlers.SyncShipment(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Order-Id", "Status" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local res = state.reservations[msg["Order-Id"]]
+  if res and not res.released and (msg.Status == "shipped" or msg.Status == "delivered") then
+    adjust_inventory(res.siteId, res.items, -1)
+    res.released = true
+  end
+  return codec.ok({ orderId = msg["Order-Id"], released = res and res.released or false })
+end
+
+function handlers.SyncReturn(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Order-Id", "Status" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local res = state.reservations[msg["Order-Id"]]
+  if res and (msg.Status == "approved" or msg.Status == "refunded") then
+    adjust_inventory(res.siteId, res.items, 1)
+  end
+  return codec.ok({ orderId = msg["Order-Id"], restocked = res ~= nil })
 end
 
 function handlers.UpsertProduct(msg)

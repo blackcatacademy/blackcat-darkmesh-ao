@@ -110,7 +110,7 @@ end
 -- Site tests
 do
   local site = require("ao.site.process")
-  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-1", ["Page-Id"] = "home", Content = { title = "Hello" }, ["Actor-Role"] = "editor" }))
+  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-1", ["Page-Id"] = "home", Content = { title = "Hello", blocks = { { type = "paragraph", text = "Hello" } } }, ["Actor-Role"] = "editor" }))
   site.route(with_req({ Action = "UpsertRoute", ["Site-Id"] = "site-1", Path = "/", ["Page-Id"] = "home", ["Layout-Id"] = "layout-1", ["Actor-Role"] = "editor" }))
   local publish = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-1", Version = "v2", ["Actor-Role"] = "publisher" }))
   assert_eq(publish.status, "OK", "publish status")
@@ -156,6 +156,36 @@ do
   }))
   assert_eq(list.status, "OK", "list orders status")
   assert_truthy(list.payload.items and list.payload.items[1], "list orders items present")
+
+  -- role enforcement for order actions
+  local denied_rec = site.route(with_req({
+    Action = "RecordOrder",
+    ["Site-Id"] = "site-1",
+    ["Order-Id"] = "order-2",
+    Status = "paid",
+    TotalAmount = 12.34,
+    Currency = "USD",
+    VatRate = 0.1,
+    ["Actor-Role"] = "viewer",
+  }))
+  assert_status(denied_rec, "ERROR", "record order forbidden status")
+  assert_code(denied_rec, "FORBIDDEN", "record order forbidden code")
+  local denied_get = site.route(with_req({
+    Action = "GetOrder",
+    ["Site-Id"] = "site-1",
+    ["Order-Id"] = "order-1",
+    ["Actor-Role"] = "viewer",
+  }))
+  assert_status(denied_get, "ERROR", "get order forbidden status")
+  assert_code(denied_get, "FORBIDDEN", "get order forbidden code")
+  local denied_list = site.route(with_req({
+    Action = "ListOrders",
+    ["Site-Id"] = "site-1",
+    Status = "paid",
+    ["Actor-Role"] = "viewer",
+  }))
+  assert_status(denied_list, "ERROR", "list orders forbidden status")
+  assert_code(denied_list, "FORBIDDEN", "list orders forbidden code")
 end
 
 -- Site edge cases
@@ -174,13 +204,13 @@ do
   assert_falsy(publish_empty.payload.manifestTx, "publish empty manifest")
 
   -- Oversize content guard
-  local big_content = { body = string.rep("x", 70 * 1024) }
+  local big_content = { title = "Big", blocks = { { type = "paragraph", text = string.rep("x", 70 * 1024) } } }
   local oversize = site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-oversize", ["Page-Id"] = "home", Content = big_content, ["Actor-Role"] = "editor" }))
   assert_status(oversize, "ERROR", "putdraft oversize status")
   assert_code(oversize, "INVALID_INPUT", "putdraft oversize code")
 
   -- Archive then fetch
-  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-2", ["Page-Id"] = "old", Content = { title = "Old" }, ["Actor-Role"] = "editor" }))
+  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-2", ["Page-Id"] = "old", Content = { title = "Old", blocks = { { type = "paragraph", text = "Old" } } }, ["Actor-Role"] = "editor" }))
   site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-2", Version = "v1", ["Actor-Role"] = "publisher" }))
   site.route(with_req({ Action = "ArchivePage", ["Site-Id"] = "site-2", ["Page-Id"] = "old", ["Actor-Role"] = "publisher" }))
   local archived = site.route(with_req({ Action = "GetPage", ["Site-Id"] = "site-2", ["Page-Id"] = "old" }))
@@ -188,7 +218,7 @@ do
   assert_code(archived, "NOT_FOUND", "archived page code")
 
   -- Unexpected field
-  local extra = site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-1", ["Page-Id"] = "x", Content = { title = "X" }, Foo = "bar", ["Actor-Role"] = "editor" }))
+  local extra = site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-1", ["Page-Id"] = "x", Content = { title = "X", blocks = { { type = "paragraph", text = "X" } } }, Foo = "bar", ["Actor-Role"] = "editor" }))
   assert_status(extra, "ERROR", "putdraft extra status")
   assert_code(extra, "UNSUPPORTED_FIELD", "putdraft extra code")
 
@@ -204,7 +234,7 @@ do
   assert_eq(first.payload.manifestTx, second.payload.manifestTx, "idempotent publish manifest")
 
   -- Conflicting publish payload (different drafts) same Request-Id keeps original
-  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-4", ["Page-Id"] = "extra", Content = { title = "Extra" }, ["Actor-Role"] = "editor", ["Request-Id"] = "rid-extra1" }))
+  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-4", ["Page-Id"] = "extra", Content = { title = "Extra", blocks = { { type = "paragraph", text = "Extra" } } }, ["Actor-Role"] = "editor", ["Request-Id"] = "rid-extra1" }))
   local third = site.route(req)
   assert_eq(third.payload.manifestTx, first.payload.manifestTx, "idempotent publish ignores new drafts")
 
@@ -214,7 +244,7 @@ do
   assert_code(conflict, "VERSION_CONFLICT", "publish conflict code")
 
   -- concurrent-like publish attempts (simulate sequence)
-  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-conc", ["Page-Id"] = "p1", Content = { title = "A" }, ["Actor-Role"] = "editor" }))
+  site.route(with_req({ Action = "PutDraft", ["Site-Id"] = "site-conc", ["Page-Id"] = "p1", Content = { title = "A", blocks = { { type = "paragraph", text = "A" } } }, ["Actor-Role"] = "editor" }))
   local p1 = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-conc", Version = "v1", ["Actor-Role"] = "publisher" }))
   assert_status(p1, "OK", "publish v1 status")
   local p2 = site.route(with_req({ Action = "PublishVersion", ["Site-Id"] = "site-conc", Version = "v2", ExpectedVersion = "v0", ["Actor-Role"] = "publisher" }))
