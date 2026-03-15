@@ -39,6 +39,7 @@ local FEED_EXPORT_PATH = os.getenv "CATALOG_FEED_EXPORT_PATH"
 local MERCHANT_CENTER_PATH = os.getenv "CATALOG_MERCHANT_CENTER_PATH"
 local MERCHANT_CENTER_COUNTRY = os.getenv "CATALOG_MERCHANT_CENTER_COUNTRY" or "US"
 local MERCHANT_CENTER_CURRENCY = os.getenv "CATALOG_MERCHANT_CENTER_CURRENCY" or "USD"
+local STOCK_ALERT_WEBHOOK = os.getenv "CATALOG_STOCK_ALERT_WEBHOOK"
 local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" -- optional, e.g. "curl -X POST https://api.fastly.com/service/... -H 'Fastly-Key: ...' -H 'Surrogate-Key: %s'"
 
 local handlers = {}
@@ -119,6 +120,7 @@ local allowed_actions = {
   "ListLowStock",
   "GetCategory",
   "ListCategories",
+  "DeliverLowStockAlerts",
 }
 
 local role_policy = {
@@ -193,6 +195,7 @@ local role_policy = {
   ListLowStock = { "catalog-admin", "admin", "support" },
   GetCategory = { "catalog-admin", "support", "admin", "viewer" },
   ListCategories = { "catalog-admin", "support", "admin", "viewer" },
+  DeliverLowStockAlerts = { "catalog-admin", "admin", "support" },
 }
 
 local state = {
@@ -1696,6 +1699,7 @@ function handlers.ExportMerchantFeed(msg)
   if not site then
     return codec.error("INVALID_INPUT", "Site-Id required")
   end
+  local updated_after = tonumber(msg.UpdatedAfter) or 0
   local limit = tonumber(msg.Limit) or 1000
   if limit < 1 then
     limit = 1
@@ -1706,16 +1710,24 @@ function handlers.ExportMerchantFeed(msg)
   local cursor = msg.Cursor or ""
   local prefix = "product:" .. site .. ":"
   local keys = {}
-  for key, _ in pairs(state.products) do
+  for key, product in pairs(state.products) do
     if key:sub(1, #prefix) == prefix then
-      table.insert(keys, key)
+      local updated = product.payload.updatedAt or product.payload.updated_at or 0
+      if updated >= updated_after then
+        table.insert(keys, { key = key, updated = updated })
+      end
     end
   end
-  table.sort(keys)
+  table.sort(keys, function(a, b)
+    if a.updated == b.updated then
+      return a.key < b.key
+    end
+    return (a.updated or 0) > (b.updated or 0)
+  end)
   local start_index = 1
   if cursor ~= "" then
-    for i, k in ipairs(keys) do
-      if k == cursor then
+    for i, row in ipairs(keys) do
+      if row.key == cursor then
         start_index = i + 1
         break
       end
@@ -1723,10 +1735,10 @@ function handlers.ExportMerchantFeed(msg)
   end
   local rows = {}
   for i = start_index, math.min(#keys, start_index + limit - 1) do
-    local key = keys[i]
-    local p = state.products[key].payload
+    local row = keys[i]
+    local p = state.products[row.key].payload
     table.insert(rows, {
-      id = p.sku or key,
+      id = p.sku or row.key,
       title = p.name,
       description = p.description,
       link = p.url or p.Link,
@@ -1746,9 +1758,17 @@ function handlers.ExportMerchantFeed(msg)
           p.currency or MERCHANT_CENTER_CURRENCY
         ),
       },
+      updatedAt = row.updated,
     })
   end
-  local next_cursor = (#keys > start_index + limit - 1) and keys[start_index + limit - 1] or nil
+  if msg.IncludeDeleted and state.deletions[site] then
+    for _, d in ipairs(state.deletions[site]) do
+      if (d.deletedAt or 0) >= updated_after then
+        table.insert(rows, { id = d.key, deleted = true, deletedAt = d.deletedAt })
+      end
+    end
+  end
+  local next_cursor = (#keys > start_index + limit - 1) and keys[start_index + limit - 1].key or nil
   if msg.Path or MERCHANT_CENTER_PATH then
     local path = msg.Path or MERCHANT_CENTER_PATH
     local f = io.open(path, "w")
@@ -1775,7 +1795,14 @@ function handlers.ExportMerchantFeed(msg)
       f:close()
     end
   end
-  return codec.ok { siteId = site, items = rows, nextCursor = next_cursor, total = #rows }
+  return codec.ok {
+    siteId = site,
+    items = rows,
+    nextCursor = next_cursor,
+    total = #rows,
+    updatedAfter = updated_after,
+    includeDeleted = msg.IncludeDeleted or false,
+  }
 end
 
 -- Cache purge stub -------------------------------------------------------
@@ -2482,18 +2509,15 @@ function handlers.GetCategory(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Category-Id",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Category-Id",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -3279,12 +3303,14 @@ end
 local function push_low_stock(site_id, sku, total, threshold)
   if threshold and threshold > 0 and total <= threshold then
     state.stock_alerts[site_id] = state.stock_alerts[site_id] or {}
-    table.insert(state.stock_alerts[site_id], {
+    local alert = {
       sku = sku,
       total = total,
       threshold = threshold,
       ts = os.time(),
-    })
+    }
+    table.insert(state.stock_alerts[site_id], alert)
+    deliver_stock_alert(site_id, alert)
   end
 end
 
@@ -3306,6 +3332,25 @@ function handlers.ListLowStock(msg)
     state.stock_alerts[msg["Site-Id"]] = {}
   end
   return codec.ok { siteId = msg["Site-Id"], alerts = alerts }
+end
+
+function handlers.DeliverLowStockAlerts(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    { "Action", "Request-Id", "Site-Id", "Actor-Role", "Schema-Version", "Signature" }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local alerts = state.stock_alerts[msg["Site-Id"]] or {}
+  for _, alert in ipairs(alerts) do
+    deliver_stock_alert(msg["Site-Id"], alert)
+  end
+  return codec.ok { siteId = msg["Site-Id"], delivered = #alerts }
 end
 
 -- Checkout skeleton -------------------------------------------------------
@@ -3356,6 +3401,31 @@ local function restore_inventory(site_id, changes)
     inv[c.warehouse] = inv[c.warehouse] or {}
     inv[c.warehouse][c.sku] = (inv[c.warehouse][c.sku] or 0) + c.qty
   end
+end
+
+local function deliver_stock_alert(site_id, alert)
+  if not STOCK_ALERT_WEBHOOK or STOCK_ALERT_WEBHOOK == "" or not json_ok then
+    return
+  end
+  local body = {
+    type = "low_stock",
+    siteId = site_id,
+    sku = alert.sku,
+    total = alert.total,
+    threshold = alert.threshold,
+    ts = alert.ts,
+  }
+  local ok, payload = pcall(cjson.encode, body)
+  if not ok then
+    return
+  end
+  local cmd = string.format(
+    "curl -sS -m %d -H 'Content-Type: application/json' -d '%s' %s >/dev/null 2>&1",
+    HTTP_TIMEOUT,
+    payload:gsub("'", "'\\''"),
+    STOCK_ALERT_WEBHOOK
+  )
+  os.execute(cmd)
 end
 
 function handlers.StartCheckout(msg)
