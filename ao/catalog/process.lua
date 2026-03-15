@@ -198,7 +198,7 @@ function handlers.SearchCatalog(msg)
   local q = msg.Query and msg.Query:lower() or ""
   local sort = msg.Sort or "relevance"
   local results = {}
-local facets = {
+  local facets = {
     categories = {},
     availability = { available = 0, unavailable = 0 },
     price = { lt25 = 0, lt100 = 0, gte100 = 0 },
