@@ -86,6 +86,7 @@ local state = {
   content_types = {}, -- siteId -> { name -> schema }
   perf_budgets = {}, -- siteId -> { lcp_ms, cls, tbt_ms }
   perf_vitals = {}, -- siteId -> { last = { metric, value, ts } }
+  publish_log = {}, -- list of publish/expire actions for observability
 }
 
 local MAX_CONTENT_BYTES = tonumber(os.getenv "SITE_MAX_CONTENT_BYTES" or "") or (64 * 1024)
@@ -386,7 +387,14 @@ function handlers.PutDraft(msg)
   if not ok_size then
     return codec.error("INVALID_INPUT", err_size, { field = "Content" })
   end
-  local ok_schema, schema_err = schema.validate("page", msg.Content)
+  local ok_schema, schema_err
+  if content_type == "page" then
+    ok_schema, schema_err = schema.validate("page", msg.Content)
+  else
+    local custom_schema = state.content_types[msg["Site-Id"]]
+      and state.content_types[msg["Site-Id"]][content_type]
+    ok_schema, schema_err = schema.validate_custom(custom_schema, msg.Content)
+  end
   if not ok_schema then
     return codec.error("INVALID_INPUT", "Content failed schema", { errors = schema_err })
   end
@@ -956,11 +964,32 @@ function handlers.RunPublishScheduler(msg)
           }
           draft.status = "published"
           state.active_versions[site_id] = entry.version
+          audit.record(
+            "site",
+            "RunPublishScheduler",
+            msg,
+            nil,
+            {
+              siteId = site_id,
+              pageId = entry.pageId,
+              version = entry.version,
+              locale = entry.locale,
+              action = "publish",
+            }
+          )
           table.insert(published, {
             siteId = site_id,
             pageId = entry.pageId,
             version = entry.version,
             locale = entry.locale,
+          })
+          table.insert(state.publish_log, {
+            ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
+            siteId = site_id,
+            pageId = entry.pageId,
+            version = entry.version,
+            locale = entry.locale,
+            action = "publish",
           })
         else
           table.insert(pending, entry) -- no draft yet; keep waiting
@@ -972,11 +1001,32 @@ function handlers.RunPublishScheduler(msg)
         local page = state.pages[page_key]
         if page then
           page.archived = true
+          audit.record(
+            "site",
+            "RunPublishScheduler",
+            msg,
+            nil,
+            {
+              siteId = site_id,
+              pageId = entry.pageId,
+              version = entry.version,
+              locale = entry.locale,
+              action = "expire",
+            }
+          )
           table.insert(expired, {
             siteId = site_id,
             pageId = entry.pageId,
             version = entry.version,
             locale = entry.locale,
+          })
+          table.insert(state.publish_log, {
+            ts = os.date "!%Y-%m-%dT%H:%M:%SZ",
+            siteId = site_id,
+            pageId = entry.pageId,
+            version = entry.version,
+            locale = entry.locale,
+            action = "expire",
           })
         end
       end
@@ -992,6 +1042,7 @@ function handlers.RunPublishScheduler(msg)
     published = published,
     expired = expired,
     remaining = state.publish_schedules,
+    logSize = #state.publish_log,
   }
 end
 

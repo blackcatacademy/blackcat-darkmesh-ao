@@ -304,6 +304,19 @@ function Schema.validate(schema_name, value)
   return true
 end
 
+-- Validate against a schema table passed at runtime (same rules as embedded validator)
+function Schema.validate_custom(schema_table, value)
+  if not schema_table then
+    return true
+  end
+  local errors = {}
+  validate_against(schema_table, value, "", errors)
+  if #errors > 0 then
+    return false, errors
+  end
+  return true
+end
+
 -- Python/jsonschema validator (optional). Returns nil if not usable.
 function Schema.validate_python(schema_name, value)
   local has_py = os.execute 'python3 -c "import jsonschema" >/dev/null 2>&1'
