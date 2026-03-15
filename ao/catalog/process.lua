@@ -798,6 +798,7 @@ function handlers.SearchCatalog(msg)
     end
   end
   local results = {}
+  local suggestions = {}
   local facets = {
     categories = {},
     availability = { available = 0, unavailable = 0 },
@@ -934,6 +935,12 @@ function handlers.SearchCatalog(msg)
             available = available,
             category = payload.categoryId or (payload.category and payload.category.id),
           })
+        elseif q ~= "" and not matched then
+          local name = (product.payload.name or ""):lower()
+          local d = levenshtein(name, q)
+          if d <= 2 then
+            table.insert(suggestions, product.payload.name or sku)
+          end
         end
       end
     end
@@ -979,6 +986,7 @@ function handlers.SearchCatalog(msg)
     items = results,
     total = #results,
     facets = facets,
+    suggestions = suggestions,
   }
 end
 
