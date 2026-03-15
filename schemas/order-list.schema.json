@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OrderList",
+  "type": "object",
+  "required": ["siteId", "total", "page", "pageSize", "items"],
+  "properties": {
+    "siteId": {"type": "string"},
+    "total": {"type": "integer", "minimum": 0},
+    "page": {"type": "integer", "minimum": 1},
+    "pageSize": {"type": "integer", "minimum": 1},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["orderId", "status"],
+        "properties": {
+          "orderId": {"type": "string"},
+          "status": {"type": "string", "enum": ["created", "paid", "shipped", "delivered", "cancelled", "refunded"]},
+          "totalAmount": {"type": "number", "minimum": 0},
+          "currency": {"type": "string", "enum": ["USD", "EUR", "GBP", "CZK", "CHF", "JPY", "AUD", "CAD"]},
+          "vatRate": {"type": "number", "minimum": 0, "maximum": 1},
+          "updatedAt": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
