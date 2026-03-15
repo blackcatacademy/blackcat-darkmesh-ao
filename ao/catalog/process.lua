@@ -8,6 +8,7 @@ local idem = require("ao.shared.idempotency")
 local audit = require("ao.shared.audit")
 local schema = require("ao.shared.schema")
 local metrics = require("ao.shared.metrics")
+local json_ok, cjson = pcall(require, "cjson.safe")
 
 local handlers = {}
 local allowed_actions = {
@@ -23,6 +24,10 @@ local allowed_actions = {
   "SetInventoryReservation",
   "SyncShipment",
   "SyncReturn",
+  "GetShippingRates",
+  "GetTaxRates",
+  "ValidateAddress",
+  "GetShipment",
 }
 
 local role_policy = {
@@ -33,6 +38,10 @@ local role_policy = {
   SyncShipment = { "catalog-admin", "admin" },
   SyncReturn = { "catalog-admin", "admin" },
   ApplyOrderEvent = { "admin", "catalog-admin" },
+  GetShippingRates = { "support", "admin", "catalog-admin" },
+  GetTaxRates = { "support", "admin", "catalog-admin" },
+  ValidateAddress = { "support", "admin" },
+  GetShipment = { "support", "admin" },
 }
 
 local state = {
@@ -44,9 +53,47 @@ local state = {
   orders = {},          -- orderId -> { siteId, status, totals, currency, customerId, coupons, address, shipping, paymentStatus, updatedAt }
   shipments = {},       -- shipmentId -> { status, tracking, carrier, eta, orderId }
   returns = {},         -- returnId -> { status, reason, orderId }
+  shipping_rates = {},  -- siteId -> list of rate rows
+  tax_rates = {},       -- siteId -> list of tax rows
 }
 
 local MAX_PAYLOAD_BYTES = tonumber(os.getenv("CATALOG_MAX_PAYLOAD_BYTES") or "") or (64 * 1024)
+local SHIPPING_RATES_PATH = os.getenv("AO_SHIPPING_RATES_PATH")
+local TAX_RATES_PATH = os.getenv("AO_TAX_RATES_PATH")
+
+local function load_ndjson(path)
+  if not path or path == "" or not json_ok then return {} end
+  local f = io.open(path, "r")
+  if not f then return {} end
+  local out = {}
+  for line in f:lines() do
+    local ok, obj = pcall(cjson.decode, line)
+    if ok and obj then
+      table.insert(out, obj)
+    end
+  end
+  f:close()
+  return out
+end
+
+local function load_rates()
+  local ship = load_ndjson(SHIPPING_RATES_PATH)
+  for _, r in ipairs(ship) do
+    if r.siteId then
+      state.shipping_rates[r.siteId] = state.shipping_rates[r.siteId] or {}
+      table.insert(state.shipping_rates[r.siteId], r)
+    end
+  end
+  local tax = load_ndjson(TAX_RATES_PATH)
+  for _, t in ipairs(tax) do
+    if t.siteId then
+      state.tax_rates[t.siteId] = state.tax_rates[t.siteId] or {}
+      table.insert(state.tax_rates[t.siteId], t)
+    end
+  end
+end
+
+load_rates()
 
 -- tiny Levenshtein for typo tolerance on short queries
 local function levenshtein(a, b)
@@ -366,6 +413,57 @@ function handlers.SyncReturn(msg)
     adjust_inventory(res.siteId, res.items, 1)
   end
   return codec.ok({ orderId = msg["Order-Id"], restocked = res ~= nil })
+end
+
+function handlers.GetShippingRates(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local rates = state.shipping_rates[msg["Site-Id"]] or {}
+  return codec.ok({ siteId = msg["Site-Id"], rates = rates })
+end
+
+function handlers.GetTaxRates(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Site-Id", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local rates = state.tax_rates[msg["Site-Id"]] or {}
+  return codec.ok({ siteId = msg["Site-Id"], rates = rates })
+end
+
+function handlers.ValidateAddress(msg)
+  local ok, missing = validation.require_fields(msg, { "Country" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Country", "Region", "City", "Postal", "Line1", "Line2", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  if #msg.Country ~= 2 then return codec.error("INVALID_INPUT", "Country must be ISO2") end
+  local cmd = os.getenv("ADDRESS_VALIDATE_CMD")
+  if cmd and cmd ~= "" then
+    os.execute(cmd .. " >/dev/null 2>&1")
+  end
+  return codec.ok({
+    valid = true,
+    normalized = {
+      country = msg.Country:upper(),
+      region = msg.Region,
+      city = msg.City,
+      postal = msg.Postal,
+      line1 = msg.Line1,
+      line2 = msg.Line2,
+    },
+  })
+end
+
+function handlers.GetShipment(msg)
+  local ok, missing = validation.require_fields(msg, { "Shipment-Id" })
+  if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Shipment-Id", "Actor-Role", "Schema-Version" })
+  if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
+  local sh = state.shipments[msg["Shipment-Id"]]
+  if not sh then return codec.error("NOT_FOUND", "Shipment not found") end
+  return codec.ok(sh)
 end
 
 function handlers.UpsertProduct(msg)
