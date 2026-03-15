@@ -59,7 +59,7 @@ WantedBy=multi-user.target
 ## Outbox Integrity
 - Write emits HMAC on outbox events when `OUTBOX_HMAC_SECRET` is set; queue forwarder verifies HMAC before delivery.
 - Queue/WAL size alerts: set `WRITE_WAL_MAX_BYTES` (default 5 MiB) and `AO_QUEUE_MAX_BYTES` (default 2 MiB); health warns when exceeded.
-- Disputes/chargebacks: Stripe `charge.dispute.*` a PayPal `CUSTOMER.DISPUTE.*` jsou mapovány ve write na `paymentStatus=disputed`; AO je přebírá přes `PaymentStatusChanged` a order zobrazí `status=disputed`.
+- Disputes/chargebacks: Stripe `charge.dispute.*` and PayPal `CUSTOMER.DISPUTE.*` map in write to `paymentStatus=disputed`; AO consumes `PaymentStatusChanged` and surfaces `status=disputed` on the order.
 
 ## Replay/Idempotency
 - Nonce TTL and requestId idempotency enabled; conflict tests cover cross-action replay. Keep `WRITE_REQUIRE_NONCE=1` and `WRITE_REQUIRE_SIGNATURE=1` in prod.

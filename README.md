@@ -84,6 +84,8 @@ tests/             # integration, message-contracts, snapshots, security
 - Metrics: set `METRICS_ENABLED=1` and `METRICS_LOG` path to emit NDJSON counters; see `ao/shared/metrics.lua`.
 - Prometheus export: set `METRICS_PROM_PATH` to write text exposition on flush.
 - Flush cadence: `METRICS_FLUSH_INTERVAL_SEC` (tick-based timer) or `METRICS_FLUSH_EVERY` (per-N increments); no shell/background dependency.
+- Catalog search: filters Query/Category-Id/MinPrice/MaxPrice/Locale/Currency/Available/Carrier; facets categories/availability/shippingStatus/price bands/currency/locales/carriers; sorts relevance/name/price asc|desc/available/newest.
+- SEO helper: `lua scripts/seo/product_jsonld.lua <sku> <payload.json>` prints schema.org Product JSON-LD (price/currency/availability included).
 - Trust manifest verify (resolvers list): set `TRUST_MANIFEST_HMAC` and run `lua scripts/verify/trust_manifest_verify.lua manifest.signed.json` before publishing txId to Arweave.
 - Trust manifest loader: set `TRUST_MANIFEST_HMAC` and `TRUST_MANIFEST_TX` (or pass file path) and run `lua scripts/verify/trust_manifest_loader.lua` to fetch+verify and list active resolvers.
 - Registry stores trusted resolvers: actions `UpdateTrustResolvers` / `GetTrustedResolvers` let ops pin the active list + manifestTx inside AO state (role: admin/registry-admin).
