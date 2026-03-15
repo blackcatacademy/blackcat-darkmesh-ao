@@ -49,6 +49,7 @@ local PAYPAL_WEBHOOK_SECRET = os.getenv "CATALOG_PAYPAL_WEBHOOK_SECRET"
 local ADYEN_HMAC_KEY = os.getenv "CATALOG_ADYEN_HMAC_KEY"
 local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" -- optional, e.g. "curl -X POST https://api.fastly.com/service/... -H 'Fastly-Key: ...' -H 'Surrogate-Key: %s'"
 local RETENTION_DAYS = tonumber(os.getenv "CATALOG_RETENTION_DAYS" or "") or 30
+local SEARCH_SYNONYMS_PATH = os.getenv "CATALOG_SEARCH_SYNONYMS_PATH"
 
 local handlers = {}
 local allowed_actions = {
@@ -250,6 +251,7 @@ local state = {
   stock_alerts = {}, -- siteId -> list of { sku, total, threshold, ts }
   backorders = {}, -- siteId -> list of { sku, qty, preorder_at, eta_days, createdAt, source, ref }
   shipment_events = {}, -- shipmentId -> list of { ts, status, meta }
+  search_synonyms = {}, -- siteId -> map term -> {synonyms}
 }
 
 local function gen_id(prefix)
@@ -296,7 +298,37 @@ local function load_rates()
   end
 end
 
+local function load_synonyms()
+  if not SEARCH_SYNONYMS_PATH or SEARCH_SYNONYMS_PATH == "" or not json_ok then
+    return
+  end
+  local f = io.open(SEARCH_SYNONYMS_PATH, "r")
+  if not f then
+    return
+  end
+  local ok, data = pcall(cjson.decode, f:read "*a")
+  f:close()
+  if not ok or type(data) ~= "table" then
+    return
+  end
+  -- expected format: { siteId = "...", synonyms = { { term = "tv", words = {"television","oled"} }, ... } }
+  for _, entry in ipairs(data) do
+    if entry.siteId and entry.synonyms and type(entry.synonyms) == "table" then
+      state.search_synonyms[entry.siteId] = {}
+      for _, row in ipairs(entry.synonyms) do
+        if row.term and row.words then
+          state.search_synonyms[entry.siteId][row.term:lower()] = {}
+          for _, w in ipairs(row.words) do
+            table.insert(state.search_synonyms[entry.siteId][row.term:lower()], w:lower())
+          end
+        end
+      end
+    end
+  end
+end
+
 load_rates()
+load_synonyms()
 
 local function track_event(site_id, subject, sku, event)
   state.events[site_id] = state.events[site_id] or {}
@@ -721,6 +753,16 @@ function handlers.SearchCatalog(msg)
   for t in q:gmatch "%S+" do
     table.insert(tokens, t)
   end
+  local syn = state.search_synonyms[msg["Site-Id"]] or {}
+  local expanded_tokens = {}
+  for _, t in ipairs(tokens) do
+    table.insert(expanded_tokens, t)
+    if syn[t] then
+      for _, s in ipairs(syn[t]) do
+        table.insert(expanded_tokens, s)
+      end
+    end
+  end
   local results = {}
   local facets = {
     categories = {},
@@ -825,7 +867,7 @@ function handlers.SearchCatalog(msg)
             if fuzzy_hit then
               score = score + 1
             end
-            for _, tok in ipairs(tokens) do
+            for _, tok in ipairs(expanded_tokens) do
               if (payload.brand or ""):lower():find(tok, 1, true) then
                 score = score + 2
               end
