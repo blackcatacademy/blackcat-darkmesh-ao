@@ -20,18 +20,22 @@ end
 
 -- core deps
 for _, d in ipairs(deps) do
-  if not require_any(d.name, d.mods) then os.exit(1) end
+  if not require_any(d.name, d.mods) then
+    os.exit(1)
+  end
 end
 
 -- Ed25519 signer: allow either ed25519 rock or sodium providing crypto_sign_* API
 local ed25519_ok = require_any("ed25519", { "ed25519", "sodium", "luasodium" })
-if not ed25519_ok then os.exit(1) end
+if not ed25519_ok then
+  os.exit(1)
+end
 
 -- Fail-closed if signatures required and no sodium available (used for ed25519)
-if os.getenv("AUTH_REQUIRE_SIGNATURE") == "1" then
+if os.getenv "AUTH_REQUIRE_SIGNATURE" == "1" then
   local ok_sodium = pcall(require, "sodium")
   if not ok_sodium then
-    io.stderr:write("sodium module missing but AUTH_REQUIRE_SIGNATURE=1\n")
+    io.stderr:write "sodium module missing but AUTH_REQUIRE_SIGNATURE=1\n"
     os.exit(1)
   end
 end

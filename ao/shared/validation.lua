@@ -65,7 +65,9 @@ end
 
 -- Validate that no unexpected fields are present (shallow).
 function Validation.require_no_extras(tbl, allowed_fields)
-  if not allowed_fields then return true end
+  if not allowed_fields then
+    return true
+  end
   local allowed = {}
   for _, f in ipairs(allowed_fields) do
     allowed[f] = true
@@ -84,7 +86,9 @@ end
 
 -- Optional payload size guard (bytes when serialized length provided).
 function Validation.check_size(len, max_bytes, field)
-  if not max_bytes or max_bytes <= 0 or not len then return true end
+  if not max_bytes or max_bytes <= 0 or not len then
+    return true
+  end
   if len > max_bytes then
     return false, ("too_large:%s"):format(field or "?")
   end
@@ -100,7 +104,9 @@ end
 
 -- Check maximum string length.
 function Validation.check_length(value, max_len, field)
-  if not value or not max_len or max_len <= 0 then return true end
+  if not value or not max_len or max_len <= 0 then
+    return true
+  end
   if #tostring(value) > max_len then
     return false, ("too_long:%s"):format(field or "?")
   end
@@ -111,23 +117,35 @@ local function is_array(tbl)
   local i = 0
   for _ in pairs(tbl) do
     i = i + 1
-    if tbl[i] == nil then return false end
+    if tbl[i] == nil then
+      return false
+    end
   end
   return true
 end
 
 local function json_encoded_length(value)
   local t = type(value)
-  if t == "nil" then return 4 end -- null
-  if t == "boolean" then return value and 4 or 5 end -- true/false
-  if t == "number" then return #tostring(value) end
-  if t == "string" then return #string.format("%q", value) end
+  if t == "nil" then
+    return 4
+  end -- null
+  if t == "boolean" then
+    return value and 4 or 5
+  end -- true/false
+  if t == "number" then
+    return #tostring(value)
+  end
+  if t == "string" then
+    return #string.format("%q", value)
+  end
   if t == "table" then
     if is_array(value) then
       local sum = 2 -- []
       local first = true
       for _, v in ipairs(value) do
-        if not first then sum = sum + 1 end -- comma
+        if not first then
+          sum = sum + 1
+        end -- comma
         sum = sum + json_encoded_length(v)
         first = false
       end
@@ -136,7 +154,9 @@ local function json_encoded_length(value)
       local sum = 2 -- {}
       local first = true
       for k, v in pairs(value) do
-        if not first then sum = sum + 1 end -- comma
+        if not first then
+          sum = sum + 1
+        end -- comma
         sum = sum + #string.format("%q", tostring(k)) + 1 + json_encoded_length(v) -- colon
         first = false
       end

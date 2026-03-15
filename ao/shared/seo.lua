@@ -5,7 +5,9 @@ local cjson_ok, cjson = pcall(require, "cjson.safe")
 local SEO = {}
 
 function SEO.product_ld(product)
-  if not cjson_ok then return nil end
+  if not cjson_ok then
+    return nil
+  end
   local ld = {
     ["@context"] = "https://schema.org",
     ["@type"] = "Product",
@@ -17,14 +19,17 @@ function SEO.product_ld(product)
       ["@type"] = "Offer",
       price = product.price,
       priceCurrency = product.currency,
-      availability = product.available and "https://schema.org/InStock" or "https://schema.org/OutOfStock",
+      availability = product.available and "https://schema.org/InStock"
+        or "https://schema.org/OutOfStock",
     },
   }
   return cjson.encode(ld)
 end
 
 function SEO.page_ld(page)
-  if not cjson_ok then return nil end
+  if not cjson_ok then
+    return nil
+  end
   local ld = {
     ["@context"] = "https://schema.org",
     ["@type"] = "WebPage",

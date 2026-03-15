@@ -3,8 +3,8 @@
 
 local Idem = {}
 local seen = {}
-local ttl = tonumber(os.getenv("IDEM_TTL_SECONDS") or "300") -- 5 minutes default
-local max_entries = tonumber(os.getenv("IDEM_MAX_ENTRIES") or "1024")
+local ttl = tonumber(os.getenv "IDEM_TTL_SECONDS" or "300") -- 5 minutes default
+local max_entries = tonumber(os.getenv "IDEM_MAX_ENTRIES" or "1024")
 
 local function now()
   return os.time()
@@ -38,7 +38,9 @@ end
 function Idem.check(request_id)
   prune()
   local entry = seen[request_id]
-  if not entry then return nil end
+  if not entry then
+    return nil
+  end
   if entry.expire_at and entry.expire_at < now() then
     seen[request_id] = nil
     return nil
@@ -47,7 +49,9 @@ function Idem.check(request_id)
 end
 
 function Idem.record(request_id, response)
-  if not request_id then return end
+  if not request_id then
+    return
+  end
   seen[request_id] = {
     response = response,
     recorded_at = now(),
@@ -63,7 +67,9 @@ end
 
 function Idem._size()
   local c = 0
-  for _ in pairs(seen) do c = c + 1 end
+  for _ in pairs(seen) do
+    c = c + 1
+  end
   return c
 end
 

@@ -3,14 +3,14 @@
 -- Usage: AUDIT_LOG_DIR=... scripts/export/audit_export.lua [process|all] [format] [outfile]
 -- format: ndjson (default) or raw (keeps original lines)
 
-local audit = require("ao.shared.audit")
-local lfs = require("lfs")
+local audit = require "ao.shared.audit"
+local lfs = require "lfs"
 
 local process = arg[1] or ""
 local format = arg[2] or "ndjson"
 local outfile = arg[3]
 
-local log_dir = os.getenv("AUDIT_LOG_DIR") or "arweave/manifests"
+local log_dir = os.getenv "AUDIT_LOG_DIR" or "arweave/manifests"
 local files = {}
 
 local function add_file(path)
@@ -23,7 +23,7 @@ end
 
 if process == "all" then
   for file in lfs.dir(log_dir) do
-    if file:match("^audit.*%.log$") then
+    if file:match "^audit.*%.log$" then
       add_file(log_dir .. "/" .. file)
     end
   end
@@ -44,7 +44,7 @@ for _, path in ipairs(files) do
   local f = io.open(path, "r")
   if f then
     for line in f:lines() do
-      if format == "ndjson" and not line:match("^%s*{") then
+      if format == "ndjson" and not line:match "^%s*{" then
         -- best effort: wrap raw line as JSON string
         out:write(string.format("%q\n", line))
       else
@@ -55,4 +55,6 @@ for _, path in ipairs(files) do
   end
 end
 
-if outfile then out:close() end
+if outfile then
+  out:close()
+end

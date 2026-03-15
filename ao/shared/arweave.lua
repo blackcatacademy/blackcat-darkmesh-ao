@@ -7,25 +7,25 @@ local Ar = {}
 local counter = 0
 local manifests = {}
 
-local MODE = os.getenv("ARWEAVE_MODE") or "mock"
-local SNAPSHOT_DIR = os.getenv("ARWEAVE_STORAGE_DIR") or "arweave/snapshots"
-local REQUEST_LOG = os.getenv("ARWEAVE_REQUEST_LOG") or "arweave/manifests"
-local ENDPOINT = os.getenv("ARWEAVE_HTTP_ENDPOINT")
-local API_KEY = os.getenv("ARWEAVE_HTTP_API_KEY")
-local SIGNER = os.getenv("ARWEAVE_HTTP_SIGNER") -- path to key or wallet JSON
-local HTTP_TIMEOUT = tonumber(os.getenv("ARWEAVE_HTTP_TIMEOUT") or "10")
-local HTTP_REAL = os.getenv("ARWEAVE_HTTP_REAL") == "1"
-local HTTP_SIGNER_HEADER = os.getenv("ARWEAVE_HTTP_SIGNER_HEADER") or "X-Arweave-Signer"
-local HTTP_RETRIES = tonumber(os.getenv("ARWEAVE_HTTP_RETRIES") or "3")
-local HTTP_BACKOFF_MS = tonumber(os.getenv("ARWEAVE_HTTP_BACKOFF_MS") or "200")
-local MAX_MANIFEST_BYTES = tonumber(os.getenv("ARWEAVE_MAX_MANIFEST_BYTES") or "262144") -- 256 KiB
-local HTTP_MAX_BODY = tonumber(os.getenv("ARWEAVE_HTTP_MAX_BODY") or "1048576") -- 1 MiB
-local EXPECT_RESPONSE_HASH = os.getenv("ARWEAVE_EXPECT_RESPONSE_HASH")
-local FORCE_ERROR = os.getenv("ARWEAVE_FORCE_ERROR") == "1"
-local RESPONSE_PATTERN = os.getenv("ARWEAVE_RESPONSE_PATTERN") or "^%s*%{\""
+local MODE = os.getenv "ARWEAVE_MODE" or "mock"
+local SNAPSHOT_DIR = os.getenv "ARWEAVE_STORAGE_DIR" or "arweave/snapshots"
+local REQUEST_LOG = os.getenv "ARWEAVE_REQUEST_LOG" or "arweave/manifests"
+local ENDPOINT = os.getenv "ARWEAVE_HTTP_ENDPOINT"
+local API_KEY = os.getenv "ARWEAVE_HTTP_API_KEY"
+local SIGNER = os.getenv "ARWEAVE_HTTP_SIGNER" -- path to key or wallet JSON
+local HTTP_TIMEOUT = tonumber(os.getenv "ARWEAVE_HTTP_TIMEOUT" or "10")
+local HTTP_REAL = os.getenv "ARWEAVE_HTTP_REAL" == "1"
+local HTTP_SIGNER_HEADER = os.getenv "ARWEAVE_HTTP_SIGNER_HEADER" or "X-Arweave-Signer"
+local HTTP_RETRIES = tonumber(os.getenv "ARWEAVE_HTTP_RETRIES" or "3")
+local HTTP_BACKOFF_MS = tonumber(os.getenv "ARWEAVE_HTTP_BACKOFF_MS" or "200")
+local MAX_MANIFEST_BYTES = tonumber(os.getenv "ARWEAVE_MAX_MANIFEST_BYTES" or "262144") -- 256 KiB
+local HTTP_MAX_BODY = tonumber(os.getenv "ARWEAVE_HTTP_MAX_BODY" or "1048576") -- 1 MiB
+local EXPECT_RESPONSE_HASH = os.getenv "ARWEAVE_EXPECT_RESPONSE_HASH"
+local FORCE_ERROR = os.getenv "ARWEAVE_FORCE_ERROR" == "1"
+local RESPONSE_PATTERN = os.getenv "ARWEAVE_RESPONSE_PATTERN" or '^%s*%{"'
 local ok_cjson_safe, cjson_safe = pcall(require, "cjson.safe")
-local cjson = cjson_safe or require("cjson") -- required dependency
-local schema = require("ao.shared.schema")
+local cjson = cjson_safe or require "cjson" -- required dependency
+local schema = require "ao.shared.schema"
 local openssl_ok, openssl = pcall(require, "openssl")
 local sodium_ok, sodium = pcall(require, "sodium")
 if not sodium_ok then
@@ -42,23 +42,32 @@ local function ensure_dir(path)
 end
 
 local function bin_to_hex(bytes)
-  return (bytes:gsub(".", function(c) return string.format("%02x", string.byte(c)) end))
+  return (bytes:gsub(".", function(c)
+    return string.format("%02x", string.byte(c))
+  end))
 end
 
 local function sha256(str)
   if openssl_ok and openssl.digest then
-    local d = openssl.digest.new("sha256")
+    local d = openssl.digest.new "sha256"
     d:update(str)
     return bin_to_hex(d:final())
   elseif sodium_ok and sodium.crypto_hash_sha256 then
     return bin_to_hex(sodium.crypto_hash_sha256(str))
   else
-    local r = io.popen("printf %s \"" .. str:gsub("\"", "\\\"") .. "\" | openssl dgst -sha256 -binary 2>/dev/null | xxd -p", "r")
+    local r = io.popen(
+      'printf %s "'
+        .. str:gsub('"', '\\"')
+        .. '" | openssl dgst -sha256 -binary 2>/dev/null | xxd -p',
+      "r"
+    )
     if r then
-      local out = r:read("*a") or ""
+      local out = r:read "*a" or ""
       r:close()
       out = out:gsub("%s+", "")
-      if #out > 0 then return out end
+      if #out > 0 then
+        return out
+      end
     end
   end
   return nil
@@ -66,37 +75,43 @@ end
 
 local function file_sha256(path)
   local f = io.open(path, "rb")
-  if not f then return nil end
-  local content = f:read("*a")
+  if not f then
+    return nil
+  end
+  local content = f:read "*a"
   f:close()
   return sha256(content)
 end
 
 local function has_curl()
-  local ok = os.execute("command -v curl >/dev/null 2>&1")
+  local ok = os.execute "command -v curl >/dev/null 2>&1"
   return ok == true or ok == 0
 end
 
 local function http_post(serialized, tx)
   ensure_dir(REQUEST_LOG)
   local response_path = string.format("%s/%s-response.json", REQUEST_LOG, tx)
-  local auth_header = API_KEY and (" -H \"Authorization: Bearer " .. API_KEY .. "\"") or ""
-  local signer_header = SIGNER and (" -H \"" .. HTTP_SIGNER_HEADER .. ": " .. SIGNER .. "\"") or ""
+  local auth_header = API_KEY and (' -H "Authorization: Bearer ' .. API_KEY .. '"') or ""
+  local signer_header = SIGNER and (' -H "' .. HTTP_SIGNER_HEADER .. ": " .. SIGNER .. '"') or ""
   local status
   for attempt = 1, HTTP_RETRIES do
-    local cmd = string.format("echo %q | curl -s -o \"%s\" -w \"%%{http_code}\" -H \"Content-Type: application/json\"%s%s --max-time %d -X POST \"%s\" --data-binary @-",
+    local cmd = string.format(
+      'echo %q | curl -s -o "%s" -w "%%{http_code}" -H "Content-Type: application/json"%s%s --max-time %d -X POST "%s" --data-binary @-',
       serialized,
       response_path,
       auth_header,
       signer_header,
       HTTP_TIMEOUT,
-      ENDPOINT or "")
+      ENDPOINT or ""
+    )
     local pipe = io.popen(cmd, "r")
     if pipe then
-      status = pipe:read("*a")
+      status = pipe:read "*a"
       pipe:close()
-      status = status and status:match("(%d+)")
-      if status then status = tonumber(status) end
+      status = status and status:match "(%d+)"
+      if status then
+        status = tonumber(status)
+      end
       if status and status < 500 then
         break
       end
@@ -110,9 +125,14 @@ local function http_post(serialized, tx)
 end
 
 local function signer_exists()
-  if not SIGNER or SIGNER == "" then return true end
+  if not SIGNER or SIGNER == "" then
+    return true
+  end
   local f = io.open(SIGNER, "r")
-  if f then f:close(); return true end
+  if f then
+    f:close()
+    return true
+  end
   return false
 end
 
@@ -128,7 +148,9 @@ local function is_array(tbl)
   local i = 0
   for _ in pairs(tbl) do
     i = i + 1
-    if tbl[i] == nil then return false end
+    if tbl[i] == nil then
+      return false
+    end
   end
   return true
 end
@@ -146,9 +168,15 @@ end
 
 local function json_encode(value)
   local t = type(value)
-  if t == "nil" then return "null" end
-  if t == "boolean" then return value and "true" or "false" end
-  if t == "number" then return tostring(value) end
+  if t == "nil" then
+    return "null"
+  end
+  if t == "boolean" then
+    return value and "true" or "false"
+  end
+  if t == "number" then
+    return tostring(value)
+  end
   if t == "string" then
     return string.format("%q", value)
   end
@@ -168,7 +196,7 @@ local function json_encode(value)
       return "{" .. table.concat(parts, ",") .. "}"
     end
   end
-  return "\"<unsupported>\""
+  return '"<unsupported>"'
 end
 
 local function persist_manifest(tx, content)
@@ -193,7 +221,7 @@ function Ar.put_snapshot(payload)
   manifests[tx] = {
     payload = payload,
     hash = hash,
-    storedAt = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+    storedAt = os.date "!%Y-%m-%dT%H:%M:%SZ",
   }
 
   if MODE == "mock" then
@@ -209,8 +237,12 @@ end
 
 function Ar.verify_snapshot(tx, expected_hash)
   local m = manifests[tx]
-  if not m then return false, "not_found" end
-  if expected_hash and m.hash ~= expected_hash then return false, "hash_mismatch" end
+  if not m then
+    return false, "not_found"
+  end
+  if expected_hash and m.hash ~= expected_hash then
+    return false, "hash_mismatch"
+  end
   return true
 end
 
@@ -220,7 +252,7 @@ local function log_request(tx, payload, hash)
   local path = string.format("%s/%s-request.json", REQUEST_LOG, tx)
   local f = io.open(path, "w")
   if f then
-    f:write(json_encode({ tx = tx, hash = hash, payload = payload, mode = MODE }))
+    f:write(json_encode { tx = tx, hash = hash, payload = payload, mode = MODE })
     f:close()
   end
 end
@@ -238,7 +270,12 @@ if MODE == "http" then
     local httpStatus, response_path
     if FORCE_ERROR then
       httpStatus = 500
-    elseif HTTP_REAL and ENDPOINT and has_curl() and not (os.getenv("ARWEAVE_HTTP_DRYRUN") == "1") then
+    elseif
+      HTTP_REAL
+      and ENDPOINT
+      and has_curl()
+      and not (os.getenv "ARWEAVE_HTTP_DRYRUN" == "1")
+    then
       if not signer_exists() then
         log_request(tx, {
           endpoint = ENDPOINT or "<missing-endpoint>",
@@ -247,7 +284,7 @@ if MODE == "http" then
           timeout = HTTP_TIMEOUT,
           body = payload,
           simulated = true,
-          error = "signer_missing"
+          error = "signer_missing",
         }, hash)
         return tx, hash
       end
@@ -256,9 +293,14 @@ if MODE == "http" then
       -- offline simulated response body so schema validation/path logic still runs
       ensure_dir(REQUEST_LOG)
       response_path = string.format("%s/%s-response.json", REQUEST_LOG, tx)
-      local body = os.getenv("ARWEAVE_HTTP_SIM_BODY") or string.format('{"status":"ok","tx":"%s"}', tx)
-      local f = io.open(response_path, "w"); if f then f:write(body); f:close() end
-      httpStatus = tonumber(os.getenv("ARWEAVE_HTTP_SIM_STATUS") or "200")
+      local body = os.getenv "ARWEAVE_HTTP_SIM_BODY"
+        or string.format('{"status":"ok","tx":"%s"}', tx)
+      local f = io.open(response_path, "w")
+      if f then
+        f:write(body)
+        f:close()
+      end
+      httpStatus = tonumber(os.getenv "ARWEAVE_HTTP_SIM_STATUS" or "200")
     end
     local signerHash = SIGNER and file_sha256(SIGNER) or nil
     if httpStatus and httpStatus >= 400 then
@@ -268,7 +310,7 @@ if MODE == "http" then
     if response_path then
       local f = io.open(response_path, "r")
       if f then
-        local body = f:read("*a") or ""
+        local body = f:read "*a" or ""
         f:close()
         if #body == 0 then
           log_request(tx, { warning = "empty_response" })

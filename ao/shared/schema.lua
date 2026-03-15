@@ -3,7 +3,7 @@
 -- uses that; otherwise falls back to the embedded validator below.
 
 local Schema = {}
-local SCHEMA_MODE = os.getenv("SCHEMA_VALIDATOR") or "auto" -- auto|python|embedded
+local SCHEMA_MODE = os.getenv "SCHEMA_VALIDATOR" or "auto" -- auto|python|embedded
 
 -- Schemas embedded as Lua tables (converted from schemas/*.json)
 local SCHEMAS = {
@@ -66,7 +66,7 @@ local SCHEMAS = {
     properties = {
       asset = { type = "string", minLength = 1, maxLength = 256, pattern = "^[%w%-%._:/]+$" },
       ref = { type = "string", minLength = 1, maxLength = 2048, pattern = "^ar://[%w%-]+$" },
-      visibility = { type = "string", enum = { "protected", "public", "private" } }
+      visibility = { type = "string", enum = { "protected", "public", "private" } },
     },
   },
   registryConfig = {
@@ -79,14 +79,18 @@ local SCHEMAS = {
         type = "object",
         properties = {
           cors = { type = "boolean" },
-          corsAllowlist = { type = "array", minItems = 1, items = { type = "string", pattern = "^https?://[%w%.-]+(:%d+)?/?$" } },
+          corsAllowlist = {
+            type = "array",
+            minItems = 1,
+            items = { type = "string", pattern = "^https?://[%w%.-]+(:%d+)?/?$" },
+          },
           immutable = { type = "boolean" },
           allowUploads = { type = "boolean" },
           ttlSeconds = { type = "number", minimum = 0, maximum = 31536000 },
           rateLimitPerMinute = { type = "number", minimum = 0, maximum = 10000 },
           maxUploadBytes = { type = "number", minimum = 0, maximum = 104857600 },
           allowAnonRead = { type = "boolean" },
-          requireMfa = { type = "boolean" }
+          requireMfa = { type = "boolean" },
         },
       },
       region = { type = "string", enum = { "eu", "us", "apac" } },
@@ -94,7 +98,16 @@ local SCHEMAS = {
       codeHash = { type = "string", pattern = "^[a-fA-F0-9]{64}$" },
       buildId = { type = "string", minLength = 1, maxLength = 128 },
       signerPubKey = { type = "string", pattern = "^[a-fA-F0-9]{64}$" },
-      tableProfile = { type = "string", enum = { "minimal", "core-observability", "auth-rbac", "commerce-lite", "monitoring-outbox" } },
+      tableProfile = {
+        type = "string",
+        enum = {
+          "minimal",
+          "core-observability",
+          "auth-rbac",
+          "commerce-lite",
+          "monitoring-outbox",
+        },
+      },
       schemaManifestTx = { type = "string", pattern = "^[A-Za-z0-9_-]{10,128}$" },
       schemaHash = { type = "string", pattern = "^[a-fA-F0-9]{64}$" },
       policies = {
@@ -105,9 +118,24 @@ local SCHEMAS = {
           auditLevel = { type = "string", enum = { "none", "basic", "full" } },
           dataResidency = { type = "string", enum = { "eu", "us", "apac", "global" } },
           piiHandling = { type = "string", enum = { "deny", "mask", "allow" } },
-          allowedOrigins = { type = "array", items = { type = "string", pattern = "^https?://[%w%.-]+(:%d+)?/?$" }, minItems = 1 },
-          ipAllowlist = { type = "array", items = { type = "string", pattern = "^%d+%.%d+%.%d+%.%d+/%d%d?$" }, minItems = 0 },
-          allowedMethods = { type = "array", items = { type = "string", enum = { "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS" } }, minItems = 1 }
+          allowedOrigins = {
+            type = "array",
+            items = { type = "string", pattern = "^https?://[%w%.-]+(:%d+)?/?$" },
+            minItems = 1,
+          },
+          ipAllowlist = {
+            type = "array",
+            items = { type = "string", pattern = "^%d+%.%d+%.%d+%.%d+/%d%d?$" },
+            minItems = 0,
+          },
+          allowedMethods = {
+            type = "array",
+            items = {
+              type = "string",
+              enum = { "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS" },
+            },
+            minItems = 1,
+          },
         },
       },
     },
@@ -155,7 +183,11 @@ local function validate_properties(value, schema, path, errors)
         end
         if prop.enum then
           local ok_enum = false
-          for _, ev in ipairs(prop.enum) do if ev == value[name] then ok_enum = true end end
+          for _, ev in ipairs(prop.enum) do
+            if ev == value[name] then
+              ok_enum = true
+            end
+          end
           if not ok_enum then
             table.insert(errors, path .. name .. " not in enum")
           end
@@ -165,24 +197,50 @@ local function validate_properties(value, schema, path, errors)
             table.insert(errors, path .. name .. " does not match pattern")
           end
         end
-        if prop.minLength and actual_type == "string" and #tostring(value[name]) < prop.minLength then
+        if
+          prop.minLength
+          and actual_type == "string"
+          and #tostring(value[name]) < prop.minLength
+        then
           table.insert(errors, path .. name .. " shorter than minLength")
         end
-        if prop.maxLength and actual_type == "string" and #tostring(value[name]) > prop.maxLength then
+        if
+          prop.maxLength
+          and actual_type == "string"
+          and #tostring(value[name]) > prop.maxLength
+        then
           table.insert(errors, path .. name .. " longer than maxLength")
         end
         if prop.type == "array" and prop.items and value[name] ~= nil then
           for idx, item in ipairs(value[name]) do
             local item_type = type_of(item)
             if prop.items.type and item_type ~= prop.items.type then
-              table.insert(errors, path .. name .. "[" .. idx .. "] expected " .. prop.items.type .. ", got " .. item_type)
+              table.insert(
+                errors,
+                path
+                  .. name
+                  .. "["
+                  .. idx
+                  .. "] expected "
+                  .. prop.items.type
+                  .. ", got "
+                  .. item_type
+              )
             end
-            if prop.items.pattern and type(item) == "string" and not tostring(item):match(prop.items.pattern) then
+            if
+              prop.items.pattern
+              and type(item) == "string"
+              and not tostring(item):match(prop.items.pattern)
+            then
               table.insert(errors, path .. name .. "[" .. idx .. "] does not match pattern")
             end
             if prop.items.enum then
               local ok_enum = false
-              for _, ev in ipairs(prop.items.enum) do if ev == item then ok_enum = true end end
+              for _, ev in ipairs(prop.items.enum) do
+                if ev == item then
+                  ok_enum = true
+                end
+              end
               if not ok_enum then
                 table.insert(errors, path .. name .. "[" .. idx .. "] not in enum")
               end
@@ -195,7 +253,7 @@ local function validate_properties(value, schema, path, errors)
           validate_properties(value[name], prop, path .. name .. ".", errors)
         end
         if prop.format == "date-time" and actual_type == "string" then
-          if not tostring(value[name]):match("^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$") then
+          if not tostring(value[name]):match "^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ$" then
             table.insert(errors, path .. name .. " invalid date-time")
           end
         end
@@ -230,7 +288,9 @@ end
 function Schema.validate(schema_name, value)
   if SCHEMA_MODE ~= "embedded" then
     local ok, err = Schema.validate_python(schema_name, value)
-    if ok ~= nil then return ok, err end -- nil means fallback to embedded
+    if ok ~= nil then
+      return ok, err
+    end -- nil means fallback to embedded
   end
   local schema = SCHEMAS[schema_name]
   if not schema then
@@ -246,33 +306,49 @@ end
 
 -- Python/jsonschema validator (optional). Returns nil if not usable.
 function Schema.validate_python(schema_name, value)
-  local has_py = os.execute("python3 -c \"import jsonschema\" >/dev/null 2>&1")
+  local has_py = os.execute 'python3 -c "import jsonschema" >/dev/null 2>&1'
   if has_py ~= true and has_py ~= 0 then
     return nil, "python_jsonschema_missing"
   end
   local schema_path = "schemas/" .. schema_name .. ".schema.json"
   local f = io.open(schema_path, "r")
-  if not f then return nil, "schema_not_found" end
+  if not f then
+    return nil, "schema_not_found"
+  end
   f:close()
   local tmp = os.tmpname() .. ".json"
   local jf = io.open(tmp, "w")
-  if not jf then return nil, "tmp_write_failed" end
+  if not jf then
+    return nil, "tmp_write_failed"
+  end
   local function json_encode(v)
     local t = type(v)
-    if t == "nil" then return "null" end
-    if t == "boolean" then return v and "true" or "false" end
-    if t == "number" then return tostring(v) end
-    if t == "string" then return string.format("%q", v) end
+    if t == "nil" then
+      return "null"
+    end
+    if t == "boolean" then
+      return v and "true" or "false"
+    end
+    if t == "number" then
+      return tostring(v)
+    end
+    if t == "string" then
+      return string.format("%q", v)
+    end
     if t == "table" then
       local is_array = true
       local i = 0
       for k, _ in pairs(v) do
         i = i + 1
-        if v[i] == nil then is_array = false end
+        if v[i] == nil then
+          is_array = false
+        end
       end
       local parts = {}
       if is_array then
-        for _, item in ipairs(v) do table.insert(parts, json_encode(item)) end
+        for _, item in ipairs(v) do
+          table.insert(parts, json_encode(item))
+        end
         return "[" .. table.concat(parts, ",") .. "]"
       else
         for k, item in pairs(v) do
@@ -281,14 +357,20 @@ function Schema.validate_python(schema_name, value)
         return "{" .. table.concat(parts, ",") .. "}"
       end
     end
-    return "\"<unsupported>\""
+    return '"<unsupported>"'
   end
   jf:write(json_encode(value))
   jf:close()
-  local cmd = string.format("python3 - <<'PY'\nimport json,sys,jsonschema\nwith open(%q) as f: schema=json.load(f)\nwith open(%q) as f: inst=json.load(f)\ntry:\n jsonschema.validate(inst, schema)\n sys.exit(0)\nexcept jsonschema.ValidationError:\n sys.exit(1)\nPY", schema_path, tmp)
+  local cmd = string.format(
+    "python3 - <<'PY'\nimport json,sys,jsonschema\nwith open(%q) as f: schema=json.load(f)\nwith open(%q) as f: inst=json.load(f)\ntry:\n jsonschema.validate(inst, schema)\n sys.exit(0)\nexcept jsonschema.ValidationError:\n sys.exit(1)\nPY",
+    schema_path,
+    tmp
+  )
   local ok = os.execute(cmd)
   os.remove(tmp)
-  if ok == 0 or ok == true then return true end
+  if ok == 0 or ok == true then
+    return true
+  end
   -- If validation fails, treat as schema error; otherwise fallback
   if ok == 256 or ok == false then
     return false, { "python_validator_failed" }

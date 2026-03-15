@@ -2,11 +2,11 @@
 
 local Audit = {}
 local records = {}
-local LOG_DIR = os.getenv("AUDIT_LOG_DIR") or "arweave/manifests"
-local MAX_IN_MEMORY = tonumber(os.getenv("AUDIT_MAX_RECORDS") or "1000")
-local FORMAT = os.getenv("AUDIT_FORMAT") or "line" -- line | ndjson
-local ROTATE_MAX = tonumber(os.getenv("AUDIT_ROTATE_MAX") or "1048576") -- bytes
-local RETAIN_FILES = tonumber(os.getenv("AUDIT_RETAIN_FILES") or "10") -- number of rotated files per stream
+local LOG_DIR = os.getenv "AUDIT_LOG_DIR" or "arweave/manifests"
+local MAX_IN_MEMORY = tonumber(os.getenv "AUDIT_MAX_RECORDS" or "1000")
+local FORMAT = os.getenv "AUDIT_FORMAT" or "line" -- line | ndjson
+local ROTATE_MAX = tonumber(os.getenv "AUDIT_ROTATE_MAX" or "1048576") -- bytes
+local RETAIN_FILES = tonumber(os.getenv "AUDIT_RETAIN_FILES" or "10") -- number of rotated files per stream
 
 local function ensure_dir(path)
   os.execute(string.format('mkdir -p "%s"', path))
@@ -16,21 +16,33 @@ local function is_array(tbl)
   local i = 0
   for _ in pairs(tbl) do
     i = i + 1
-    if tbl[i] == nil then return false end
+    if tbl[i] == nil then
+      return false
+    end
   end
   return true
 end
 
 local function json_encode(value)
   local t = type(value)
-  if t == "nil" then return "null" end
-  if t == "boolean" then return value and "true" or "false" end
-  if t == "number" then return tostring(value) end
-  if t == "string" then return string.format("%q", value) end
+  if t == "nil" then
+    return "null"
+  end
+  if t == "boolean" then
+    return value and "true" or "false"
+  end
+  if t == "number" then
+    return tostring(value)
+  end
+  if t == "string" then
+    return string.format("%q", value)
+  end
   if t == "table" then
     if is_array(value) then
       local parts = {}
-      for _, v in ipairs(value) do table.insert(parts, json_encode(v)) end
+      for _, v in ipairs(value) do
+        table.insert(parts, json_encode(v))
+      end
       return "[" .. table.concat(parts, ",") .. "]"
     else
       local parts = {}
@@ -40,22 +52,24 @@ local function json_encode(value)
       return "{" .. table.concat(parts, ",") .. "}"
     end
   end
-  return "\"<unsupported>\""
+  return '"<unsupported>"'
 end
 
 local lfs_ok, lfs = pcall(require, "lfs")
 
 local function rotate_if_needed(path)
   local f = io.open(path, "r")
-  if not f then return end
-  local content = f:read("*a")
+  if not f then
+    return
+  end
+  local content = f:read "*a"
   f:close()
   if #content >= ROTATE_MAX then
-    local rotated = path .. "." .. os.date("!%Y%m%d%H%M%S")
+    local rotated = path .. "." .. os.date "!%Y%m%d%H%M%S"
     os.rename(path, rotated)
     if lfs_ok then
       -- retention
-      local dir, file = path:match("(.+)/([^/]+)$")
+      local dir, file = path:match "(.+)/([^/]+)$"
       local prefix = file .. "."
       local rotated_files = {}
       for rfile in lfs.dir(dir) do
@@ -63,7 +77,9 @@ local function rotate_if_needed(path)
           table.insert(rotated_files, dir .. "/" .. rfile)
         end
       end
-      table.sort(rotated_files, function(a, b) return a > b end) -- newest first (lexicographic on timestamp suffix)
+      table.sort(rotated_files, function(a, b)
+        return a > b
+      end) -- newest first (lexicographic on timestamp suffix)
       for i = RETAIN_FILES + 1, #rotated_files do
         os.remove(rotated_files[i])
       end
@@ -73,7 +89,7 @@ end
 
 function Audit.append(entry)
   if not entry.ts then
-    entry.ts = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    entry.ts = os.date "!%Y-%m-%dT%H:%M:%SZ"
   end
   table.insert(records, entry)
   if #records > MAX_IN_MEMORY then
@@ -138,7 +154,9 @@ function Audit.log_path()
 end
 
 function Audit.process_log_path(process)
-  if not LOG_DIR or not process then return nil end
+  if not LOG_DIR or not process then
+    return nil
+  end
   return string.format("%s/audit-%s.log", LOG_DIR, process)
 end
 
