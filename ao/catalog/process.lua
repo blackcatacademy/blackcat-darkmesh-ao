@@ -34,6 +34,9 @@ local allowed_actions = {
   "SetPriceList",
   "AddPromo",
   "QuotePrice",
+  "SetTaxRules",
+  "SetShippingRules",
+  "QuoteOrder",
 }
 
 local role_policy = {
@@ -54,6 +57,9 @@ local role_policy = {
   SetPriceList = { "catalog-admin", "admin" },
   AddPromo = { "catalog-admin", "admin" },
   QuotePrice = { "catalog-admin", "support", "admin" },
+  SetTaxRules = { "catalog-admin", "admin" },
+  SetShippingRules = { "catalog-admin", "admin" },
+  QuoteOrder = { "catalog-admin", "support", "admin" },
 }
 
 local state = {
@@ -70,6 +76,8 @@ local state = {
   price_lists = {}, -- siteId -> currency -> { sku -> price }
   promos = {}, -- code -> { type = "percent"|"amount", value, skus }
   variants = {}, -- siteId -> parentSku -> { variants = { { sku, attrs, price } } }
+  tax_rules = {}, -- siteId -> list { country, region?, rate }
+  shipping_rules = {}, -- siteId -> list { country, min_total, max_total, rate, carrier, service }
 }
 
 local MAX_PAYLOAD_BYTES = tonumber(os.getenv "CATALOG_MAX_PAYLOAD_BYTES" or "") or (64 * 1024)
@@ -1049,19 +1057,16 @@ function handlers.SetPriceList(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Currency",
-      "Prices",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Currency",
+    "Prices",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -1162,20 +1167,17 @@ function handlers.QuotePrice(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Sku",
-      "Currency",
-      "Promo",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Sku",
+    "Currency",
+    "Promo",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -1185,6 +1187,172 @@ function handlers.QuotePrice(msg)
     return codec.error("NOT_FOUND", "Product not found", { sku = msg.Sku })
   end
   return codec.ok { sku = msg.Sku, price = quote.price, currency = quote.currency, promo = msg.Promo }
+end
+
+-- Tax & shipping rules ----------------------------------------------------
+function handlers.SetTaxRules(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Rules" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    { "Action", "Request-Id", "Site-Id", "Rules", "Actor-Role", "Schema-Version", "Signature" }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_type, err_type = validation.assert_type(msg.Rules, "table", "Rules")
+  if not ok_type then
+    return codec.error("INVALID_INPUT", err_type, { field = "Rules" })
+  end
+  state.tax_rules[msg["Site-Id"]] = msg.Rules
+  audit.record("catalog", "SetTaxRules", msg, nil, { siteId = msg["Site-Id"], count = #msg.Rules })
+  return codec.ok { siteId = msg["Site-Id"], count = #msg.Rules }
+end
+
+function handlers.SetShippingRules(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Rules" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    { "Action", "Request-Id", "Site-Id", "Rules", "Actor-Role", "Schema-Version", "Signature" }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_type, err_type = validation.assert_type(msg.Rules, "table", "Rules")
+  if not ok_type then
+    return codec.error("INVALID_INPUT", err_type, { field = "Rules" })
+  end
+  state.shipping_rules[msg["Site-Id"]] = msg.Rules
+  audit.record(
+    "catalog",
+    "SetShippingRules",
+    msg,
+    nil,
+    { siteId = msg["Site-Id"], count = #msg.Rules }
+  )
+  return codec.ok { siteId = msg["Site-Id"], count = #msg.Rules }
+end
+
+local function pick_tax_rate(site_id, address)
+  local rules = state.tax_rules[site_id] or state.tax_rates[site_id] or {}
+  for _, r in ipairs(rules) do
+    if
+      (not r.country or r.country == address.Country)
+      and (not r.region or r.region == address.Region)
+    then
+      return tonumber(r.rate or r.Rate) or 0
+    end
+  end
+  return 0
+end
+
+local function pick_shipping(site_id, address, total)
+  local rules = state.shipping_rules[site_id] or state.shipping_rates[site_id] or {}
+  local best = nil
+  for _, r in ipairs(rules) do
+    if
+      (not r.country or r.country == address.Country)
+      and (not r.region or r.region == address.Region)
+      and (not r.min_total or total >= r.min_total)
+      and (not r.max_total or total <= r.max_total)
+    then
+      if not best or (r.rate or 0) < (best.rate or 0) then
+        best = r
+      end
+    end
+  end
+  return best or { rate = 0, carrier = "standard", service = "ground" }
+end
+
+function handlers.QuoteOrder(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Items", "Address" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Items",
+    "Address",
+    "Currency",
+    "Promo",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_type_items, err_items = validation.assert_type(msg.Items, "table", "Items")
+  if not ok_type_items or #msg.Items == 0 then
+    return codec.error(
+      "INVALID_INPUT",
+      err_items or "Items must be non-empty array",
+      { field = "Items" }
+    )
+  end
+  local address = msg.Address
+  if type(address) ~= "table" or not address.Country then
+    return codec.error("INVALID_INPUT", "Address.Country required", { field = "Address" })
+  end
+  local currency = msg.Currency or "USD"
+  local line_items = {}
+  local subtotal = 0
+  for _, item in ipairs(msg.Items) do
+    if not item.Sku or not item.Qty then
+      return codec.error("INVALID_INPUT", "Item requires Sku and Qty", { item = item })
+    end
+    local qty = tonumber(item.Qty) or 0
+    if qty <= 0 then
+      return codec.error("INVALID_INPUT", "Qty must be > 0", { item = item })
+    end
+    -- inventory check
+    local inv = state.inventory[msg["Site-Id"]] and state.inventory[msg["Site-Id"]][item.Sku]
+    if inv and inv.quantity and inv.quantity < qty then
+      return codec.error(
+        "OUT_OF_STOCK",
+        "Insufficient inventory",
+        { sku = item.Sku, available = inv.quantity }
+      )
+    end
+    local quote = apply_pricing(msg["Site-Id"], item.Sku, currency, msg.Promo)
+    if not quote then
+      return codec.error("NOT_FOUND", "Product not found", { sku = item.Sku })
+    end
+    local line_sub = quote.price * qty
+    subtotal = subtotal + line_sub
+    table.insert(
+      line_items,
+      {
+        sku = item.Sku,
+        qty = qty,
+        unit = quote.price,
+        currency = quote.currency,
+        subtotal = line_sub,
+      }
+    )
+  end
+  local ship = pick_shipping(msg["Site-Id"], address, subtotal)
+  local tax_rate = pick_tax_rate(msg["Site-Id"], address)
+  local tax = subtotal * tax_rate / 100
+  local total = subtotal + ship.rate + tax
+  return codec.ok {
+    siteId = msg["Site-Id"],
+    currency = currency,
+    items = line_items,
+    subtotal = subtotal,
+    shipping = ship,
+    tax = tax,
+    taxRate = tax_rate,
+    total = total,
+    promo = msg.Promo,
+  }
 end
 
 local function route(msg)
