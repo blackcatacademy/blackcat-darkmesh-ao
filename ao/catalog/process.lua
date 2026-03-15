@@ -6696,6 +6696,15 @@ function handlers.CheckoutPurchaseOrder(msg)
   if po.status ~= "approved" then
     return codec.error("INVALID_STATE", "PO not approved", { status = po.status })
   end
+  local terms = state.company_terms[po.companyId]
+  if terms and terms.credit_limit and terms.balance then
+    if (terms.balance + po.total) > terms.credit_limit then
+      return codec.error("CREDIT_LIMIT_EXCEEDED", "PO exceeds credit limit", {
+        creditLimit = terms.credit_limit,
+        balance = terms.balance,
+      })
+    end
+  end
   -- create checkout-like record without re-quoting
   local items = {}
   for _, line in ipairs(po.items) do
@@ -6737,9 +6746,13 @@ function handlers.CheckoutPurchaseOrder(msg)
     currency = po.currency,
     method = msg["Payment-Method"],
     require3ds = msg.Require3DS,
+    provider = msg.Provider,
   }
   po.status = "in_checkout"
   po.checkoutId = checkout_id
+  if terms then
+    terms.balance = (terms.balance or 0) + po.total
+  end
   audit.record(
     "catalog",
     "CheckoutPurchaseOrder",
