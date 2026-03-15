@@ -69,6 +69,10 @@ function Metrics.flush_prom()
   f:close()
 end
 
+function Metrics.last_flush_ts()
+  return last_flush
+end
+
 function Metrics.get(name)
   return counters[name] or 0
 end

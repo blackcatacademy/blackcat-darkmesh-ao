@@ -121,6 +121,7 @@ Handy CLI helpers:
   - `AUTH_ALLOW_SHELL_FALLBACK=0` (fail-closed if openssl/shell is missing)  
   - `AUTH_RATE_LIMIT_SQLITE=/var/lib/ao/rate.db` (persistent per-actor rate limit)  
   - `METRICS_PROM_PATH=/var/lib/ao/metrics.prom` and optionally `METRICS_FLUSH_INTERVAL_SEC=10`
+- Key management: store public keys under `/etc/ao/keys`, record their `sha256sum` in your ops vault, and rotate on a schedule; never check private keys into the repo or CI artifacts.
 - Export only the collections you need: `python scripts/setup/schema_helper.py export --presets core,commerce,content --out dev/schema-bundles/prod.tar.gz`.
 - Deploy that prod bundle with arkb from a secured environment.
 

@@ -7,6 +7,7 @@ local access = require("ao.access.process")
 local idem = require("ao.shared.idempotency")
 local metrics = require("ao.shared.metrics")
 local lfs_ok, lfs = pcall(require, "lfs")
+local sqlite_ok, sqlite = pcall(require, "lsqlite3")
 
 local function count(tbl)
   local c = 0
@@ -60,6 +61,7 @@ print_line("access.protected", count(states.access.protected))
 
 print_line("idempotency.entries", idem._size and idem._size() or "n/a")
 print_line("metrics.flush_mode", os.getenv("METRICS_FLUSH_EVERY") or "immediate")
+print_line("metrics.last_flush_ts", metrics.last_flush_ts and metrics.last_flush_ts() or "n/a")
 local audit_dir = os.getenv("AUDIT_LOG_DIR") or "arweave/manifests"
 print_line("audit.dir.size", dir_size(audit_dir))
 print_line("audit.dir.path", audit_dir)
@@ -70,4 +72,36 @@ print_line("deps.lsqlite3", pcall(require, "lsqlite3") and "yes" or "no")
 print_line("deps.cjson", pcall(require, "cjson.safe") and "yes" or "no")
 print_line("deps.luaossl", pcall(require, "openssl") and "yes" or "no")
 
+local function check_rate_db()
+  local path = os.getenv("AUTH_RATE_LIMIT_SQLITE")
+  if not path or path == "" then
+    print_line("rate_db", "unset")
+    return
+  end
+  if not sqlite_ok then
+    print_line("rate_db", "missing lsqlite3")
+    return
+  end
+  local db = sqlite.open(path)
+  if not db then
+    print_line("rate_db", "open_failed")
+    return
+  end
+  local ok = db:exec("CREATE TABLE IF NOT EXISTS ratelimit_dummy(k TEXT PRIMARY KEY, v INTEGER);")
+  if ok ~= sqlite.OK then
+    print_line("rate_db", "create_failed")
+  else
+    local stmt = db:prepare("INSERT OR REPLACE INTO ratelimit_dummy(k,v) VALUES('ping', strftime('%s','now'));")
+    local res = stmt and stmt:step()
+    if res == sqlite.DONE then
+      print_line("rate_db", "rw_ok")
+    else
+      print_line("rate_db", "write_failed")
+    end
+    if stmt then stmt:finalize() end
+  end
+  db:close()
+end
+
+check_rate_db()
 print_line("health", "ok")
