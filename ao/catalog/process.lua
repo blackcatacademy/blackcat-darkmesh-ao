@@ -57,6 +57,7 @@ local CUSTOMER_WEBHOOK = os.getenv "CATALOG_CUSTOMER_WEBHOOK"
 local NOTIFY_RETRIES = tonumber(os.getenv "CATALOG_NOTIFY_RETRIES" or "") or 2
 local NOTIFY_BACKOFF_MS = tonumber(os.getenv "CATALOG_NOTIFY_BACKOFF_MS" or "") or 200
 local IMPORT_MAX_ROWS = tonumber(os.getenv "CATALOG_IMPORT_MAX_ROWS" or "") or 5000
+local THREE_DS_URL = os.getenv "CATALOG_3DS_URL" or "https://3ds.example.com/challenge/"
 
 local handlers = {}
 local allowed_actions = {
@@ -269,6 +270,7 @@ local state = {
   search_synonyms = {}, -- siteId -> map term -> {synonyms}
   search_stopwords = {}, -- siteId -> set of stopwords
   notification_failures = {}, -- siteId -> list of { type, target, payload, attempts, ts }
+  payment_attempts = {}, -- paymentId -> list of events
 }
 
 local function gen_id(prefix)
@@ -461,9 +463,19 @@ local function create_payment_intent_internal(args)
     status = status,
     requiresAction = requires_action,
     clientSecret = "sec_" .. payment_id,
+    nextActionUrl = requires_action and (THREE_DS_URL .. payment_id) or nil,
     createdAt = os.time(),
   }
   state.payments[payment_id] = record
+  state.payment_attempts[payment_id] = {
+    {
+      ts = os.time(),
+      event = "created",
+      status = status,
+      amount = args.amount,
+      provider = record.provider,
+    },
+  }
   if args.checkoutId and state.checkouts[args.checkoutId] then
     local chk = state.checkouts[args.checkoutId]
     chk.paymentIntent = payment_id
@@ -4375,6 +4387,12 @@ function handlers.CapturePayment(msg)
   end
   pay.status = "captured"
   pay.capturedAt = os.time()
+  table.insert(state.payment_attempts[pay.paymentId] or {}, {
+    ts = os.time(),
+    event = "captured",
+    status = pay.status,
+    provider = pay.provider,
+  })
   if pay.orderId and state.orders[pay.orderId] then
     state.orders[pay.orderId].paymentStatus = "paid"
   end
@@ -4420,6 +4438,12 @@ function handlers.RefundPayment(msg)
   if pay.provider ~= "internal" then
     pay.providerRefundId = "rf_" .. pay.paymentId
   end
+  table.insert(state.payment_attempts[pay.paymentId] or {}, {
+    ts = os.time(),
+    event = "refunded",
+    status = pay.status,
+    amount = amount,
+  })
   if pay.orderId and state.orders[pay.orderId] then
     state.orders[pay.orderId].refundAmount = amount
     state.orders[pay.orderId].paymentStatus = "refunded"
