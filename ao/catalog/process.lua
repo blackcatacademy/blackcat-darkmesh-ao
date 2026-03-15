@@ -40,6 +40,7 @@ local MERCHANT_CENTER_PATH = os.getenv "CATALOG_MERCHANT_CENTER_PATH"
 local MERCHANT_CENTER_COUNTRY = os.getenv "CATALOG_MERCHANT_CENTER_COUNTRY" or "US"
 local MERCHANT_CENTER_CURRENCY = os.getenv "CATALOG_MERCHANT_CENTER_CURRENCY" or "USD"
 local STOCK_ALERT_WEBHOOK = os.getenv "CATALOG_STOCK_ALERT_WEBHOOK"
+local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" or os.getenv "CDN_PURGE_CMD"
 local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" -- optional, e.g. "curl -X POST https://api.fastly.com/service/... -H 'Fastly-Key: ...' -H 'Surrogate-Key: %s'"
 
 local handlers = {}
@@ -121,6 +122,7 @@ local allowed_actions = {
   "GetCategory",
   "ListCategories",
   "DeliverLowStockAlerts",
+  "ForgetSubject",
 }
 
 local role_policy = {
@@ -196,6 +198,7 @@ local role_policy = {
   GetCategory = { "catalog-admin", "support", "admin", "viewer" },
   ListCategories = { "catalog-admin", "support", "admin", "viewer" },
   DeliverLowStockAlerts = { "catalog-admin", "admin", "support" },
+  ForgetSubject = { "admin", "catalog-admin", "support" },
 }
 
 local state = {
@@ -2334,6 +2337,10 @@ function handlers.UpsertProduct(msg)
   local key = ids.product_key(msg["Site-Id"], msg.Sku)
   state.products[key] = { payload = msg.Payload, version = msg.Version }
   audit.record("catalog", "UpsertProduct", msg, nil, { sku = msg.Sku })
+  purge_paths {
+    "/p/" .. msg.Sku,
+    "/api/catalog/" .. msg.Sku,
+  }
   return codec.ok { sku = msg.Sku }
 end
 
@@ -2354,6 +2361,10 @@ function handlers.DeleteProduct(msg)
   state.deletions[msg["Site-Id"]] = state.deletions[msg["Site-Id"]] or {}
   table.insert(state.deletions[msg["Site-Id"]], { key = key, deletedAt = os.time() })
   audit.record("catalog", "DeleteProduct", msg, nil, { sku = msg.Sku })
+  purge_paths {
+    "/p/" .. msg.Sku,
+    "/api/catalog/" .. msg.Sku,
+  }
   return codec.ok { deleted = msg.Sku }
 end
 
@@ -2468,6 +2479,10 @@ function handlers.UpsertCategory(msg)
     products = msg.Products or state.categories[key] and state.categories[key].products or {},
     updatedAt = os.time(),
   }
+  purge_paths {
+    "/c/" .. msg["Category-Id"],
+    "/api/catalog/category/" .. msg["Category-Id"],
+  }
   return codec.ok { categoryId = msg["Category-Id"] }
 end
 
@@ -2501,6 +2516,10 @@ function handlers.DeleteCategory(msg)
   state.category_deletions[msg["Site-Id"]] = state.category_deletions[msg["Site-Id"]] or {}
   table.insert(state.category_deletions[msg["Site-Id"]], { key = key, deletedAt = os.time() })
   audit.record("catalog", "DeleteCategory", msg, nil, { categoryId = msg["Category-Id"] })
+  purge_paths {
+    "/c/" .. msg["Category-Id"],
+    "/api/catalog/category/" .. msg["Category-Id"],
+  }
   return codec.ok { deleted = msg["Category-Id"] }
 end
 
@@ -3353,6 +3372,29 @@ function handlers.DeliverLowStockAlerts(msg)
   return codec.ok { siteId = msg["Site-Id"], delivered = #alerts }
 end
 
+function handlers.ForgetSubject(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Subject" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    { "Action", "Request-Id", "Site-Id", "Subject", "Actor-Role", "Schema-Version", "Signature" }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local count = forget_subject(msg["Site-Id"], msg.Subject)
+  audit.record(
+    "catalog",
+    "ForgetSubject",
+    msg,
+    nil,
+    { siteId = msg["Site-Id"], subject = msg.Subject }
+  )
+  return codec.ok { siteId = msg["Site-Id"], subject = msg.Subject, scrubbed = count }
+end
+
 -- Checkout skeleton -------------------------------------------------------
 local function reserve_inventory(site_id, items)
   local inv = state.inventory[site_id] or {}
@@ -3401,6 +3443,57 @@ local function restore_inventory(site_id, changes)
     inv[c.warehouse] = inv[c.warehouse] or {}
     inv[c.warehouse][c.sku] = (inv[c.warehouse][c.sku] or 0) + c.qty
   end
+end
+
+local function purge_paths(paths)
+  if not CDN_PURGE_CMD or CDN_PURGE_CMD == "" then
+    return
+  end
+  for _, p in ipairs(paths or {}) do
+    local cmd = string.format(CDN_PURGE_CMD, p)
+    os.execute(cmd .. " >/dev/null 2>&1")
+  end
+end
+
+local function forget_subject(site_id, subject)
+  if not subject or subject == "" then
+    return 0
+  end
+  local scrubbed = 0
+  -- remove from recent list
+  for sub, items in pairs(state.recent) do
+    if sub == subject then
+      state.recent[sub] = nil
+      scrubbed = scrubbed + 1
+    end
+  end
+  -- scrub checkouts
+  for id, chk in pairs(state.checkouts) do
+    if chk.siteId == site_id and chk.email == subject then
+      chk.email = nil
+      chk.address = nil
+      scrubbed = scrubbed + 1
+    end
+  end
+  -- scrub orders
+  for _, ord in pairs(state.orders) do
+    if ord.siteId == site_id and ord.email == subject then
+      ord.email = nil
+      ord.address = nil
+      scrubbed = scrubbed + 1
+    end
+  end
+  -- scrub telemetry buffered events
+  if state.telemetry[site_id] then
+    local filtered = {}
+    for _, ev in ipairs(state.telemetry[site_id]) do
+      if ev.subject ~= subject then
+        table.insert(filtered, ev)
+      end
+    end
+    state.telemetry[site_id] = filtered
+  end
+  return scrubbed
 end
 
 local function deliver_stock_alert(site_id, alert)
