@@ -1779,7 +1779,13 @@ function handlers.RelatedProducts(msg)
       body = table.concat(lines, "\n"),
     }
   end
-  return codec.ok { siteId = msg["Site-Id"], sku = msg.Sku, items = ranked, total = #ranked }
+  return codec.ok {
+    siteId = msg["Site-Id"],
+    sku = msg.Sku,
+    items = ranked,
+    total = #ranked,
+    facets = { events = state.events[msg["Site-Id"]] and state.events[msg["Site-Id"]][msg.Sku] },
+  }
 end
 
 function handlers.RecentlyViewed(msg)

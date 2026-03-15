@@ -1125,6 +1125,7 @@ function handlers.RunPublishScheduler(msg)
             version = entry.version,
             locale = entry.locale,
             action = "publish",
+            status = entry.status,
           })
           entry.status = "published"
           entry.lastError = nil
@@ -1137,6 +1138,7 @@ function handlers.RunPublishScheduler(msg)
             version = entry.version,
             locale = entry.locale,
             action = "missing_draft",
+            status = entry.status,
           })
           entry.retryCount = (entry.retryCount or 0) + 1
           entry.lastError = "draft_missing"
@@ -1148,6 +1150,8 @@ function handlers.RunPublishScheduler(msg)
               version = entry.version,
               locale = entry.locale,
               action = "failed_retry",
+              retryCount = entry.retryCount,
+              lastError = entry.lastError,
             })
             publish_alert(entry, "publish_failed_max_retry")
             table.insert(state.publish_log, {
@@ -1158,6 +1162,7 @@ function handlers.RunPublishScheduler(msg)
               locale = entry.locale,
               action = "failed_retry",
               retryCount = entry.retryCount,
+              lastError = entry.lastError,
             })
           end
         end
