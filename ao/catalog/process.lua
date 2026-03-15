@@ -25,6 +25,7 @@ local INVOICE_S3_BUCKET = os.getenv "CATALOG_INVOICE_S3_BUCKET"
 local HTTP_TIMEOUT = tonumber(os.getenv "CATALOG_HTTP_TIMEOUT" or "") or 5
 local S3_TIMEOUT = tonumber(os.getenv "CATALOG_S3_TIMEOUT" or "") or 10
 local S3_RETRIES = tonumber(os.getenv "CATALOG_S3_RETRIES" or "") or 2
+local EVENT_LOG_LIMIT = tonumber(os.getenv "CATALOG_EVENT_LOG_LIMIT" or "") or 5000
 
 local handlers = {}
 local allowed_actions = {
@@ -79,6 +80,8 @@ local allowed_actions = {
   "CreateInvoice",
   "GetInvoice",
   "ListInvoices",
+  "Bestsellers",
+  "TrendingProducts",
 }
 
 local role_policy = {
@@ -128,6 +131,8 @@ local role_policy = {
   CreateInvoice = { "catalog-admin", "admin", "support" },
   GetInvoice = { "support", "admin", "catalog-admin" },
   ListInvoices = { "support", "admin", "catalog-admin" },
+  Bestsellers = { "catalog-admin", "support", "admin", "viewer" },
+  TrendingProducts = { "catalog-admin", "support", "admin", "viewer" },
 }
 
 local state = {
@@ -156,6 +161,7 @@ local state = {
   invoices = {}, -- invoiceId -> { orderId, siteId, total, currency, lines, issuedAt, status }
   invoice_seq = {}, -- siteId -> last number
   invoice_seq_year = {}, -- siteId -> year -> last number
+  event_log = {}, -- siteId -> list of { ts, sku, event }
 }
 
 local function gen_id(prefix)
@@ -228,6 +234,13 @@ local function track_event(site_id, subject, sku, event)
     while #list > RECENT_LIMIT do
       table.remove(list)
     end
+  end
+
+  state.event_log[site_id] = state.event_log[site_id] or {}
+  local log = state.event_log[site_id]
+  table.insert(log, 1, { ts = os.time(), sku = sku, event = event })
+  while #log > EVENT_LOG_LIMIT do
+    table.remove(log)
   end
 
   return stats
@@ -884,6 +897,112 @@ function handlers.RecentlyViewed(msg)
     end
   end
   return codec.ok { subject = msg.Subject, items = items, total = #items }
+end
+
+function handlers.Bestsellers(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Limit",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local limit = tonumber(msg.Limit) or 10
+  if limit < 1 then
+    limit = 1
+  end
+  if limit > 50 then
+    limit = 50
+  end
+  local scores = state.events[msg["Site-Id"]] or {}
+  local ranked = {}
+  for sku, s in pairs(scores) do
+    local score = (s.purchases or 0)
+    if score > 0 then
+      local pkey = ids.product_key(msg["Site-Id"], sku)
+      if state.products[pkey] then
+        table.insert(ranked, { sku = sku, score = score, payload = state.products[pkey].payload })
+      end
+    end
+  end
+  table.sort(ranked, function(a, b)
+    if a.score == b.score then
+      return tostring(a.sku) < tostring(b.sku)
+    end
+    return a.score > b.score
+  end)
+  while #ranked > limit do
+    table.remove(ranked)
+  end
+  return codec.ok { siteId = msg["Site-Id"], items = ranked, total = #ranked }
+end
+
+function handlers.TrendingProducts(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Limit",
+    "WindowSec",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local limit = tonumber(msg.Limit) or 10
+  if limit < 1 then
+    limit = 1
+  end
+  if limit > 50 then
+    limit = 50
+  end
+  local window = tonumber(msg.WindowSec) or (7 * 24 * 3600)
+  local cutoff = os.time() - window
+  local log = state.event_log[msg["Site-Id"]] or {}
+  local scores = {}
+  for _, ev in ipairs(log) do
+    if ev.ts >= cutoff then
+      local w = (ev.event == "view" and 1)
+        or (ev.event == "add_to_cart" and 3)
+        or (ev.event == "purchase" and 5)
+        or 0
+      scores[ev.sku] = (scores[ev.sku] or 0) + w
+    else
+      break
+    end
+  end
+  local ranked = {}
+  for sku, score in pairs(scores) do
+    local pkey = ids.product_key(msg["Site-Id"], sku)
+    if state.products[pkey] then
+      table.insert(ranked, { sku = sku, score = score, payload = state.products[pkey].payload })
+    end
+  end
+  table.sort(ranked, function(a, b)
+    if a.score == b.score then
+      return tostring(a.sku) < tostring(b.sku)
+    end
+    return a.score > b.score
+  end)
+  while #ranked > limit do
+    table.remove(ranked)
+  end
+  return codec.ok { siteId = msg["Site-Id"], items = ranked, total = #ranked, window = window }
 end
 
 function handlers.ApplyOrderEvent(msg)
