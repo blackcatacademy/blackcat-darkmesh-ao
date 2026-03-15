@@ -201,6 +201,7 @@ function handlers.SearchCatalog(msg)
   local facets = {
     categories = {},
     availability = { available = 0, unavailable = 0 },
+    shippingStatus = {},
     price = { lt25 = 0, lt100 = 0, gte100 = 0 },
     currency = {},
     locales = {},
@@ -239,6 +240,9 @@ function handlers.SearchCatalog(msg)
         end
         if payload.carrier then
           facets.carriers[payload.carrier] = (facets.carriers[payload.carrier] or 0) + 1
+        end
+        if payload.shippingStatus then
+          facets.shippingStatus[payload.shippingStatus] = (facets.shippingStatus[payload.shippingStatus] or 0) + 1
         end
         local price_num = tonumber(price or 0) or 0
         if price_num < 25 then facets.price.lt25 = facets.price.lt25 + 1
@@ -516,7 +520,7 @@ end
 function handlers.ApplyShipmentEvent(msg)
   local ok, missing = validation.require_fields(msg, { "Shipment-Id", "Order-Id" })
   if not ok then return codec.error("INVALID_INPUT", "Missing field", { missing = missing }) end
-  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Shipment-Id", "Order-Id", "Carrier", "Service", "Label-Url", "Status", "Actor-Role", "Schema-Version" })
+  local ok_extra, extras = validation.require_no_extras(msg, { "Action", "Request-Id", "Shipment-Id", "Order-Id", "Carrier", "Service", "Label-Url", "Tracking", "Tracking-Url", "Eta", "Status", "Actor-Role", "Schema-Version" })
   if not ok_extra then return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras }) end
   state.shipments[msg["Shipment-Id"]] = state.shipments[msg["Shipment-Id"]] or {}
   local sh = state.shipments[msg["Shipment-Id"]]
@@ -524,9 +528,12 @@ function handlers.ApplyShipmentEvent(msg)
   sh.carrier = msg.Carrier or sh.carrier
   sh.service = msg.Service or sh.service
   sh.labelUrl = msg["Label-Url"] or sh.labelUrl
+  sh.tracking = msg.Tracking or sh.tracking
+  sh.trackingUrl = msg["Tracking-Url"] or sh.trackingUrl
+  sh.eta = msg.Eta or sh.eta
   sh.status = msg.Status or sh.status or "pending"
   audit.record("catalog", "ApplyShipmentEvent", msg, nil, { shipment = msg["Shipment-Id"] })
-  return codec.ok({ shipmentId = msg["Shipment-Id"], status = sh.status, carrier = sh.carrier, service = sh.service, labelUrl = sh.labelUrl })
+  return codec.ok({ shipmentId = msg["Shipment-Id"], status = sh.status, carrier = sh.carrier, service = sh.service, labelUrl = sh.labelUrl, tracking = sh.tracking, trackingUrl = sh.trackingUrl, eta = sh.eta })
 end
 
 function handlers.ApplyTrackingEvent(msg)
