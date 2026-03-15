@@ -29,6 +29,8 @@ local EVENT_LOG_LIMIT = tonumber(os.getenv "CATALOG_EVENT_LOG_LIMIT" or "") or 5
 local GA4_ENDPOINT = os.getenv "CATALOG_GA4_ENDPOINT"
 local GA4_API_SECRET = os.getenv "CATALOG_GA4_API_SECRET"
 local GA4_MEASUREMENT_ID = os.getenv "CATALOG_GA4_MEASUREMENT_ID"
+local PAYMENT_WEBHOOK_SECRET = os.getenv "CATALOG_PAYMENT_WEBHOOK_SECRET"
+local CARRIER_WEBHOOK_SECRET = os.getenv "CATALOG_CARRIER_WEBHOOK_SECRET"
 
 local handlers = {}
 local allowed_actions = {
@@ -87,6 +89,8 @@ local allowed_actions = {
   "TrendingProducts",
   "ExportEventLog",
   "StreamTelemetry",
+  "HandlePaymentWebhook",
+  "HandleCarrierWebhook",
 }
 
 local role_policy = {
@@ -140,6 +144,8 @@ local role_policy = {
   TrendingProducts = { "catalog-admin", "support", "admin", "viewer" },
   ExportEventLog = { "admin", "catalog-admin" },
   StreamTelemetry = { "admin", "catalog-admin" },
+  HandlePaymentWebhook = { "admin", "catalog-admin" },
+  HandleCarrierWebhook = { "admin", "catalog-admin", "support" },
 }
 
 local state = {
@@ -1081,6 +1087,99 @@ function handlers.StreamTelemetry(msg)
   end
   state.telemetry = {}
   return codec.ok { streamed = #payload.events, response = out }
+end
+
+local function verify_shared_secret(msg, secret)
+  if not secret or secret == "" then
+    return true
+  end
+  local sig = msg.Signature or msg.signature or msg.auth
+  if not sig then
+    return false
+  end
+  return sig == secret
+end
+
+function handlers.HandlePaymentWebhook(msg)
+  -- Accepts payload: Payment-Id, Status (authorized|captured|failed|disputed|refunded), Amount?
+  local ok, missing = validation.require_fields(msg, { "Payment-Id", "Status" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  if not verify_shared_secret(msg, PAYMENT_WEBHOOK_SECRET) then
+    return codec.error("FORBIDDEN", "Invalid webhook signature")
+  end
+  local pay = state.payments[msg["Payment-Id"]]
+  if not pay then
+    return codec.error("NOT_FOUND", "Payment not found")
+  end
+  local status = msg.Status
+  local allowed = {
+    authorized = true,
+    requires_action = true,
+    captured = true,
+    failed = true,
+    disputed = true,
+    refunded = true,
+  }
+  if not allowed[status] then
+    return codec.error("INVALID_INPUT", "Unsupported status")
+  end
+  pay.status = status
+  pay.updatedAt = os.time()
+  pay.gatewayPayload = msg.Payload or msg.payload
+  if status == "captured" then
+    pay.capturedAt = os.time()
+  end
+  if status == "refunded" then
+    pay.refundedAt = os.time()
+    pay.refundAmount = msg.Amount or pay.amount
+  end
+  if pay.orderId and state.orders[pay.orderId] then
+    state.orders[pay.orderId].paymentStatus = status
+    if status == "refunded" then
+      state.orders[pay.orderId].refundAmount = msg.Amount or pay.amount
+    end
+    if status == "disputed" then
+      state.orders[pay.orderId].status = "disputed"
+    end
+  end
+  if pay.checkoutId and state.checkouts[pay.checkoutId] then
+    state.checkouts[pay.checkoutId].paymentStatus = status
+    state.checkouts[pay.checkoutId].status = status == "captured" and "paid" or status
+  end
+  audit.record(
+    "catalog",
+    "HandlePaymentWebhook",
+    msg,
+    nil,
+    { paymentId = pay.paymentId, status = status }
+  )
+  return codec.ok { paymentId = pay.paymentId, status = status }
+end
+
+function handlers.HandleCarrierWebhook(msg)
+  local ok, missing = validation.require_fields(msg, { "Shipment-Id", "Status" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  if not verify_shared_secret(msg, CARRIER_WEBHOOK_SECRET) then
+    return codec.error("FORBIDDEN", "Invalid webhook signature")
+  end
+  state.shipments[msg["Shipment-Id"]] = state.shipments[msg["Shipment-Id"]] or {}
+  local sh = state.shipments[msg["Shipment-Id"]]
+  sh.status = msg.Status or sh.status
+  sh.tracking = msg.Tracking or sh.tracking
+  sh.eta = msg.Eta or sh.eta
+  sh.updatedAt = os.time()
+  audit.record(
+    "catalog",
+    "HandleCarrierWebhook",
+    msg,
+    nil,
+    { shipmentId = msg["Shipment-Id"], status = sh.status }
+  )
+  return codec.ok(sh)
 end
 
 function handlers.ApplyOrderEvent(msg)
