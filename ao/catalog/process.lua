@@ -370,6 +370,41 @@ load_rates()
 load_synonyms()
 load_stopwords()
 
+-- PII redaction for audit logs ------------------------------------------
+local pii_keys = {
+  email = true,
+  Email = true,
+  phone = true,
+  Phone = true,
+  Address = true,
+  address = true,
+  subject = true,
+  Subject = true,
+}
+
+local function scrub_pii(obj, depth)
+  if depth > 3 then
+    return obj
+  end
+  if type(obj) ~= "table" then
+    return obj
+  end
+  local copy = {}
+  for k, v in pairs(obj) do
+    if pii_keys[k] then
+      copy[k] = "[redacted]"
+    else
+      copy[k] = scrub_pii(v, depth + 1)
+    end
+  end
+  return copy
+end
+
+local _audit_record = audit.record
+audit.record = function(actor, action, msg, resp, meta)
+  return _audit_record(actor, action, scrub_pii(msg, 0), scrub_pii(resp, 0), scrub_pii(meta, 0))
+end
+
 local function track_event(site_id, subject, sku, event)
   state.events[site_id] = state.events[site_id] or {}
   local stats = state.events[site_id][sku] or { views = 0, add_to_cart = 0, purchases = 0 }
@@ -3954,6 +3989,16 @@ local function cleanup_retention()
       end
     end
     state.notification_failures[site] = filtered
+  end
+  -- delete old shipment event logs
+  for ship, events in pairs(state.shipment_events) do
+    local filtered = {}
+    for _, e in ipairs(events) do
+      if (e.ts or 0) >= cutoff then
+        table.insert(filtered, e)
+      end
+    end
+    state.shipment_events[ship] = filtered
   end
 end
 
