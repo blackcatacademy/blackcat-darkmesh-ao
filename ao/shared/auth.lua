@@ -19,6 +19,8 @@ local SIG_PUBLIC = os.getenv("AUTH_SIGNATURE_PUBLIC")
 local SIG_TYPE = os.getenv("AUTH_SIGNATURE_TYPE") or "hmac" -- hmac | ed25519
 local JWT_SECRET = os.getenv("AUTH_JWT_HS_SECRET")
 local REQUIRE_JWT = os.getenv("AUTH_REQUIRE_JWT") == "1"
+local DEVICE_TOKEN = os.getenv("AUTH_DEVICE_TOKEN")
+local REQUIRE_DEVICE = os.getenv("AUTH_REQUIRE_DEVICE_TOKEN") == "1"
 local openssl_ok, openssl = pcall(require, "openssl")
 local sodium_ok, sodium = pcall(require, "sodium")
 local ed25519_ok, ed25519 = pcall(require, "ed25519") -- pure-lua (MIT) if installed
@@ -346,6 +348,20 @@ local function check_resolver_flag(msg)
   return true
 end
 
+local function require_device_token(msg)
+  local token = msg["Device-Token"] or msg.deviceToken or msg.device_token or msg.device
+  if not token or token == "" then
+    if REQUIRE_DEVICE then return false, "missing_device_token" end
+    return true
+  end
+  if DEVICE_TOKEN and DEVICE_TOKEN ~= "" then
+    if token ~= DEVICE_TOKEN then
+      return false, "device_token_mismatch"
+    end
+  end
+  return true
+end
+
 -- Combined security gate used by routes
 function Auth.enforce(msg)
   local ok_jwt, err_jwt = Auth.consume_jwt(msg)
@@ -356,6 +372,8 @@ function Auth.enforce(msg)
   if not ok_sig then return false, err_sig end
   local ok_flag, err_flag = check_resolver_flag(msg)
   if not ok_flag then return false, err_flag end
+  local ok_dev, err_dev = require_device_token(msg)
+  if not ok_dev then return false, err_dev end
   local ok_rl, err_rl = Auth.check_rate_limit(msg)
   if not ok_rl then return false, err_rl end
   return true
