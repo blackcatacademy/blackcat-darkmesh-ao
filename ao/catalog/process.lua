@@ -14,6 +14,9 @@ local SCA_FORCE = os.getenv "CATALOG_SCA_FORCE" == "1"
 local MAX_RATE_OPTIONS = tonumber(os.getenv "CATALOG_MAX_RATE_OPTIONS" or "") or 5
 local RISK_THRESHOLD = tonumber(os.getenv "CATALOG_MANUAL_REVIEW_THRESHOLD" or "") or 90
 local TELEMETRY_EXPORT_PATH = os.getenv "CATALOG_TELEMETRY_PATH"
+local INVOICE_EXPORT_PATH = os.getenv "CATALOG_INVOICE_PATH"
+local CARRIER_LABEL_BASE = os.getenv "CATALOG_CARRIER_LABEL_BASE" or "https://labels.example/"
+local CARRIER_TRACK_BASE = os.getenv "CATALOG_CARRIER_TRACK_BASE" or "https://track.example/"
 
 local handlers = {}
 local allowed_actions = {
@@ -64,6 +67,10 @@ local allowed_actions = {
   "ApprovePurchaseOrder",
   "RejectPurchaseOrder",
   "CheckoutPurchaseOrder",
+  "CreateShippingLabel",
+  "CreateInvoice",
+  "GetInvoice",
+  "ListInvoices",
 }
 
 local role_policy = {
@@ -109,6 +116,10 @@ local role_policy = {
   ApprovePurchaseOrder = { "approver", "catalog-admin", "admin" },
   RejectPurchaseOrder = { "approver", "catalog-admin", "admin" },
   CheckoutPurchaseOrder = { "catalog-admin", "admin", "approver" },
+  CreateShippingLabel = { "catalog-admin", "admin", "support" },
+  CreateInvoice = { "catalog-admin", "admin", "support" },
+  GetInvoice = { "support", "admin", "catalog-admin" },
+  ListInvoices = { "support", "admin", "catalog-admin" },
 }
 
 local state = {
@@ -134,6 +145,7 @@ local state = {
   telemetry = {}, -- buffered events for export
   companies = {}, -- companyId -> { name, users = { [userId] = role } }
   purchase_orders = {}, -- poId -> { siteId, companyId, items, address, currency, subtotal, tax, shipping, total, status, approvals = {} }
+  invoices = {}, -- invoiceId -> { orderId, siteId, total, currency, lines, issuedAt, status }
 }
 
 local function gen_id(prefix)
@@ -267,6 +279,23 @@ local function risk_score(checkout)
     score = score + 5
   end
   return math.min(100, score)
+end
+
+local function build_label(carrier, service, weight)
+  local shipment_id = gen_id "ship"
+  local tracking = string.format("trk-%s-%04d", carrier or "std", math.random(0, 9999))
+  local label_url = string.format("%s%s.pdf", CARRIER_LABEL_BASE, shipment_id)
+  local track_url = string.format("%s%s", CARRIER_TRACK_BASE, tracking)
+  return {
+    shipmentId = shipment_id,
+    tracking = tracking,
+    trackingUrl = track_url,
+    labelUrl = label_url,
+    carrier = carrier,
+    service = service,
+    weight = weight,
+    status = "label_created",
+  }
 end
 
 -- B2B helpers -------------------------------------------------------------
@@ -1162,6 +1191,58 @@ function handlers.ApplyTrackingEvent(msg)
     eta = sh.eta,
     status = sh.status,
   }
+end
+
+function handlers.CreateShippingLabel(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Order-Id", "Carrier" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Order-Id",
+    "Carrier",
+    "Service",
+    "Address",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local carrier = msg.Carrier
+  local service = msg.Service or "standard"
+  local order = state.orders[msg["Order-Id"]] or {}
+  local ship_to = msg.Address or order.address
+  if type(ship_to) ~= "table" or not ship_to.Country then
+    return codec.error("INVALID_INPUT", "Address.Country required for label")
+  end
+  local weight = 0
+  if order.items then
+    for _, it in ipairs(order.items) do
+      local pkey = ids.product_key(msg["Site-Id"], it.sku or it.Sku or "")
+      local payload = state.products[pkey] and state.products[pkey].payload or {}
+      weight = weight + (payload.weight or payload.Weight or 0) * (it.qty or it.Qty or 1)
+    end
+  end
+  local label = build_label(carrier, service, weight)
+  label.orderId = msg["Order-Id"]
+  label.siteId = msg["Site-Id"]
+  label.address = ship_to
+  label.eta = order.eta
+  label.createdAt = os.time()
+  state.shipments[label.shipmentId] = label
+  audit.record(
+    "catalog",
+    "CreateShippingLabel",
+    msg,
+    nil,
+    { shipmentId = label.shipmentId, orderId = msg["Order-Id"], carrier = carrier }
+  )
+  return codec.ok(label)
 end
 
 function handlers.UpsertProduct(msg)
@@ -2649,6 +2730,128 @@ function handlers.CheckoutPurchaseOrder(msg)
     total = po.total,
     currency = po.currency,
   }
+end
+
+-- Invoicing ---------------------------------------------------------------
+local function persist_invoice(inv)
+  if INVOICE_EXPORT_PATH and INVOICE_EXPORT_PATH ~= "" and json_ok then
+    local f = io.open(INVOICE_EXPORT_PATH, "a")
+    if f then
+      local ok, line = pcall(cjson.encode, inv)
+      if ok and line then
+        f:write(line)
+        f:write "\n"
+      end
+      f:close()
+    end
+  end
+end
+
+function handlers.CreateInvoice(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Order-Id", "Lines" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Order-Id",
+    "Lines",
+    "Currency",
+    "Total",
+    "Tax",
+    "Shipping",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_lines, err_lines = validation.assert_type(msg.Lines, "table", "Lines")
+  if not ok_lines or #msg.Lines == 0 then
+    return codec.error("INVALID_INPUT", err_lines or "Lines must be non-empty", { field = "Lines" })
+  end
+  local currency = msg.Currency or "USD"
+  local total = msg.Total
+  local lines_total = 0
+  for _, line in ipairs(msg.Lines) do
+    local qty = tonumber(line.qty or line.Qty or line.quantity or 0) or 0
+    local unit = tonumber(line.unit_price or line.Unit or line.price or 0) or 0
+    if qty <= 0 or unit < 0 then
+      return codec.error("INVALID_INPUT", "Line qty/unit_price invalid", { line = line })
+    end
+    lines_total = lines_total + qty * unit
+  end
+  if total == nil then
+    total = lines_total + (msg.Tax or 0) + (msg.Shipping or 0)
+  elseif type(total) ~= "number" or total < 0 then
+    return codec.error("INVALID_INPUT", "Total must be non-negative number")
+  end
+  local inv_id = gen_id "inv"
+  local inv = {
+    invoiceId = inv_id,
+    siteId = msg["Site-Id"],
+    orderId = msg["Order-Id"],
+    currency = currency,
+    lines = msg.Lines,
+    tax = msg.Tax or 0,
+    shipping = msg.Shipping or 0,
+    total = total,
+    issuedAt = os.date "!%Y-%m-%dT%H:%M:%SZ",
+    status = "issued",
+    pdfUrl = string.format("%s%s.pdf", CARRIER_LABEL_BASE, inv_id),
+  }
+  state.invoices[inv_id] = inv
+  persist_invoice(inv)
+  audit.record("catalog", "CreateInvoice", msg, nil, { invoiceId = inv_id, orderId = inv.orderId })
+  return codec.ok(inv)
+end
+
+function handlers.GetInvoice(msg)
+  local ok, missing = validation.require_fields(msg, { "Invoice-Id" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    { "Action", "Request-Id", "Invoice-Id", "Actor-Role", "Schema-Version" }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local inv = state.invoices[msg["Invoice-Id"]]
+  if not inv then
+    return codec.error("NOT_FOUND", "Invoice not found")
+  end
+  return codec.ok(inv)
+end
+
+function handlers.ListInvoices(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Order-Id",
+    "Actor-Role",
+    "Schema-Version",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local items = {}
+  for id, inv in pairs(state.invoices) do
+    if not msg["Site-Id"] or inv.siteId == msg["Site-Id"] then
+      if not msg["Order-Id"] or inv.orderId == msg["Order-Id"] then
+        table.insert(items, inv)
+      end
+    end
+  end
+  table.sort(items, function(a, b)
+    return (a.issuedAt or "") > (b.issuedAt or "")
+  end)
+  return codec.ok { total = #items, items = items }
 end
 
 local function route(msg)
