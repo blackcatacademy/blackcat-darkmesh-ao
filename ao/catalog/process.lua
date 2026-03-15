@@ -106,6 +106,8 @@ local allowed_actions = {
   "VerifySignature",
   "ExportCatalogFeed",
   "ExportSearchFeed",
+  "DeleteProduct",
+  "PurgeCache",
 }
 
 local role_policy = {
@@ -171,6 +173,8 @@ local role_policy = {
   VerifySignature = { "admin", "catalog-admin" },
   ExportCatalogFeed = { "catalog-admin", "support", "admin", "viewer" },
   ExportSearchFeed = { "catalog-admin", "support", "admin", "viewer" },
+  DeleteProduct = { "catalog-admin", "editor", "admin" },
+  PurgeCache = { "catalog-admin", "admin", "support" },
 }
 
 local state = {
@@ -201,6 +205,7 @@ local state = {
   invoice_seq_year = {}, -- siteId -> year -> last number
   event_log = {}, -- siteId -> list of { ts, sku, event }
   webhooks = {}, -- siteId -> id -> { url, secret, events }
+  deletions = {}, -- siteId -> list of { key, deletedAt }
 }
 
 local function gen_id(prefix)
@@ -1527,6 +1532,14 @@ function handlers.ExportSearchFeed(msg)
       { key = row.key, updatedAt = row.updated, payload = state.products[row.key].payload }
     )
   end
+  -- include deletions as tombstones if requested
+  if msg.IncludeDeleted and state.deletions[site] then
+    for _, d in ipairs(state.deletions[site]) do
+      if (d.deletedAt or 0) >= updated_after then
+        table.insert(items, { key = d.key, deletedAt = d.deletedAt, deleted = true })
+      end
+    end
+  end
   local next_cursor = (#keys > start_index + limit - 1) and keys[start_index + limit - 1].key or nil
   -- optional NDJSON export
   if msg.Path or FEED_EXPORT_PATH then
@@ -1549,7 +1562,28 @@ function handlers.ExportSearchFeed(msg)
     nextCursor = next_cursor,
     total = #items,
     updatedAfter = updated_after,
+    includeDeleted = msg.IncludeDeleted or false,
   }
+end
+
+-- Cache purge stub -------------------------------------------------------
+function handlers.PurgeCache(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Path",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local path = msg.Path or "/*"
+  -- stub: in real deployment call CDN API; here just audit
+  audit.record("catalog", "PurgeCache", msg, nil, { siteId = msg["Site-Id"], path = path })
+  return codec.ok { purged = path }
 end
 
 function handlers.ApplyOrderEvent(msg)
@@ -2056,6 +2090,26 @@ function handlers.UpsertProduct(msg)
   state.products[key] = { payload = msg.Payload, version = msg.Version }
   audit.record("catalog", "UpsertProduct", msg, nil, { sku = msg.Sku })
   return codec.ok { sku = msg.Sku }
+end
+
+function handlers.DeleteProduct(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Sku" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    { "Action", "Request-Id", "Site-Id", "Sku", "Actor-Role", "Schema-Version", "Signature" }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local key = ids.product_key(msg["Site-Id"], msg.Sku)
+  state.products[key] = nil
+  state.deletions[msg["Site-Id"]] = state.deletions[msg["Site-Id"]] or {}
+  table.insert(state.deletions[msg["Site-Id"]], { key = key, deletedAt = os.time() })
+  audit.record("catalog", "DeleteProduct", msg, nil, { sku = msg.Sku })
+  return codec.ok { deleted = msg.Sku }
 end
 
 function handlers.UpsertVariants(msg)
