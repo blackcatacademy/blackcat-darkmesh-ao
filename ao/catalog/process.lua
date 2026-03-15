@@ -19,6 +19,7 @@ local allowed_actions = {
   "ListOrders",
   "ApplyOrderEvent",
   "UpsertProduct",
+  "UpsertVariants",
   "UpsertCategory",
   "PublishCatalogVersion",
   "SetInventoryReservation",
@@ -30,10 +31,14 @@ local allowed_actions = {
   "GetTaxRates",
   "ValidateAddress",
   "GetShipment",
+  "SetPriceList",
+  "AddPromo",
+  "QuotePrice",
 }
 
 local role_policy = {
   UpsertProduct = { "catalog-admin", "editor", "admin" },
+  UpsertVariants = { "catalog-admin", "editor", "admin" },
   UpsertCategory = { "catalog-admin", "editor", "admin" },
   PublishCatalogVersion = { "publisher", "admin", "catalog-admin" },
   SetInventoryReservation = { "catalog-admin", "admin" },
@@ -46,6 +51,9 @@ local role_policy = {
   GetTaxRates = { "support", "admin", "catalog-admin" },
   ValidateAddress = { "support", "admin" },
   GetShipment = { "support", "admin" },
+  SetPriceList = { "catalog-admin", "admin" },
+  AddPromo = { "catalog-admin", "admin" },
+  QuotePrice = { "catalog-admin", "support", "admin" },
 }
 
 local state = {
@@ -59,6 +67,9 @@ local state = {
   returns = {}, -- returnId -> { status, reason, orderId }
   shipping_rates = {}, -- siteId -> list of rate rows
   tax_rates = {}, -- siteId -> list of tax rows
+  price_lists = {}, -- siteId -> currency -> { sku -> price }
+  promos = {}, -- code -> { type = "percent"|"amount", value, skus }
+  variants = {}, -- siteId -> parentSku -> { variants = { { sku, attrs, price } } }
 }
 
 local MAX_PAYLOAD_BYTES = tonumber(os.getenv "CATALOG_MAX_PAYLOAD_BYTES" or "") or (64 * 1024)
@@ -161,6 +172,7 @@ function handlers.GetProduct(msg)
     sku = msg.Sku,
     payload = product.payload,
     version = product.version or state.active_versions[msg["Site-Id"]] or "active",
+    variants = state.variants[msg["Site-Id"]] and state.variants[msg["Site-Id"]][msg.Sku],
   }
 end
 
@@ -872,6 +884,65 @@ function handlers.UpsertProduct(msg)
   return codec.ok { sku = msg.Sku }
 end
 
+function handlers.UpsertVariants(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Parent-Sku", "Variants" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Parent-Sku",
+    "Variants",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
+  if not ok_len_site then
+    return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" })
+  end
+  local ok_len_parent, err_parent = validation.check_length(msg["Parent-Sku"], 128, "Parent-Sku")
+  if not ok_len_parent then
+    return codec.error("INVALID_INPUT", err_parent, { field = "Parent-Sku" })
+  end
+  local ok_type, err_type = validation.assert_type(msg.Variants, "table", "Variants")
+  if not ok_type then
+    return codec.error("INVALID_INPUT", err_type, { field = "Variants" })
+  end
+  if #msg.Variants == 0 then
+    return codec.error("INVALID_INPUT", "Variants must be non-empty", { field = "Variants" })
+  end
+  state.variants[msg["Site-Id"]] = state.variants[msg["Site-Id"]] or {}
+  state.variants[msg["Site-Id"]][msg["Parent-Sku"]] = { variants = {} }
+  for _, v in ipairs(msg.Variants) do
+    if not v.sku or not v.attrs then
+      return codec.error("INVALID_INPUT", "Variant requires sku and attrs", { variant = v })
+    end
+    local payload_len = validation.estimate_json_length(v)
+    local ok_size, err_size = validation.check_size(payload_len, MAX_PAYLOAD_BYTES, "Variant")
+    if not ok_size then
+      return codec.error("INVALID_INPUT", err_size, { field = "Variants" })
+    end
+    table.insert(state.variants[msg["Site-Id"]][msg["Parent-Sku"]].variants, v)
+  end
+  audit.record(
+    "catalog",
+    "UpsertVariants",
+    msg,
+    nil,
+    { parent = msg["Parent-Sku"], count = #msg.Variants }
+  )
+  return codec.ok {
+    parentSku = msg["Parent-Sku"],
+    variants = state.variants[msg["Site-Id"]][msg["Parent-Sku"]],
+  }
+end
+
 function handlers.UpsertCategory(msg)
   local ok, missing = validation.require_fields(msg, { "Site-Id", "Category-Id" })
   if not ok then
@@ -970,6 +1041,150 @@ function handlers.PublishCatalogVersion(msg)
   local resp = codec.ok { siteId = msg["Site-Id"], activeVersion = msg.Version }
   audit.record("catalog", "PublishCatalogVersion", msg, resp)
   return resp
+end
+
+-- Price lists per currency ------------------------------------------------
+function handlers.SetPriceList(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Currency", "Prices" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    {
+      "Action",
+      "Request-Id",
+      "Site-Id",
+      "Currency",
+      "Prices",
+      "Actor-Role",
+      "Schema-Version",
+      "Signature",
+    }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local currency = msg.Currency:upper()
+  if not currency:match "^[A-Z][A-Z][A-Z]$" then
+    return codec.error("INVALID_INPUT", "Currency must be ISO 4217 code", { field = "Currency" })
+  end
+  local ok_type, err_type = validation.assert_type(msg.Prices, "table", "Prices")
+  if not ok_type then
+    return codec.error("INVALID_INPUT", err_type, { field = "Prices" })
+  end
+  state.price_lists[msg["Site-Id"]] = state.price_lists[msg["Site-Id"]] or {}
+  state.price_lists[msg["Site-Id"]][currency] = msg.Prices
+  audit.record(
+    "catalog",
+    "SetPriceList",
+    msg,
+    nil,
+    { siteId = msg["Site-Id"], currency = currency }
+  )
+  return codec.ok { siteId = msg["Site-Id"], currency = currency, count = #msg.Prices }
+end
+
+-- Promos ------------------------------------------------------------------
+function handlers.AddPromo(msg)
+  local ok, missing = validation.require_fields(msg, { "Code", "Type", "Value" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Code",
+    "Type",
+    "Value",
+    "Skus",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local typ = msg.Type
+  if typ ~= "percent" and typ ~= "amount" then
+    return codec.error("INVALID_INPUT", "Type must be percent|amount", { field = "Type" })
+  end
+  local value = tonumber(msg.Value)
+  if not value or value <= 0 then
+    return codec.error("INVALID_INPUT", "Value must be positive number", { field = "Value" })
+  end
+  local skus = msg.Skus or {}
+  state.promos[msg.Code] = { type = typ, value = value, skus = skus }
+  audit.record("catalog", "AddPromo", msg, nil, { code = msg.Code, type = typ })
+  return codec.ok { code = msg.Code, type = typ, value = value }
+end
+
+local function apply_pricing(site_id, sku, currency, promo_code)
+  local product_key = ids.product_key(site_id, sku)
+  local product = state.products[product_key]
+  if not product then
+    return nil, "NOT_FOUND"
+  end
+  local price = product.payload.price
+  local base_currency = product.payload.currency or currency
+  local price_lists = state.price_lists[site_id]
+  if price_lists and price_lists[currency] and price_lists[currency][sku] then
+    price = price_lists[currency][sku]
+    base_currency = currency
+  end
+  if promo_code and state.promos[promo_code] then
+    local promo = state.promos[promo_code]
+    if #promo.skus == 0 then
+      -- applies to all
+    else
+      local applies = false
+      for _, s in ipairs(promo.skus) do
+        if s == sku then
+          applies = true
+          break
+        end
+      end
+      if not applies then
+        return { price = price, currency = base_currency }, nil
+      end
+    end
+    if promo.type == "percent" then
+      price = price * (1 - promo.value / 100)
+    elseif promo.type == "amount" then
+      price = math.max(0, price - promo.value)
+    end
+  end
+  return { price = price, currency = base_currency }, nil
+end
+
+function handlers.QuotePrice(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Sku" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(
+    msg,
+    {
+      "Action",
+      "Request-Id",
+      "Site-Id",
+      "Sku",
+      "Currency",
+      "Promo",
+      "Actor-Role",
+      "Schema-Version",
+      "Signature",
+    }
+  )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local currency = msg.Currency or "USD"
+  local quote, err = apply_pricing(msg["Site-Id"], msg.Sku, currency, msg.Promo)
+  if not quote then
+    return codec.error("NOT_FOUND", "Product not found", { sku = msg.Sku })
+  end
+  return codec.ok { sku = msg.Sku, price = quote.price, currency = quote.currency, promo = msg.Promo }
 end
 
 local function route(msg)
