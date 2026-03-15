@@ -3531,16 +3531,16 @@ end
 
 local function push_low_stock(site_id, sku, total, threshold)
   if threshold and threshold > 0 and total <= threshold then
-  state.stock_alerts[site_id] = state.stock_alerts[site_id] or {}
-  local alert = {
-    sku = sku,
-    total = total,
-    threshold = threshold,
-    ts = os.time(),
-  }
-  table.insert(state.stock_alerts[site_id], alert)
-  deliver_stock_alert(site_id, alert)
-end
+    state.stock_alerts[site_id] = state.stock_alerts[site_id] or {}
+    local alert = {
+      sku = sku,
+      total = total,
+      threshold = threshold,
+      ts = os.time(),
+    }
+    table.insert(state.stock_alerts[site_id], alert)
+    deliver_stock_alert(site_id, alert)
+  end
 end
 
 local function record_backorder(site_id, sku, qty, source, ref, preorder_at, eta_days)
@@ -3862,7 +3862,12 @@ local function send_with_retry(site_id, target, body, kind)
 end
 
 local function notify_customer(event, payload)
-  return send_with_retry(payload.siteId, CUSTOMER_WEBHOOK, { type = event, payload = payload }, event)
+  return send_with_retry(
+    payload.siteId,
+    CUSTOMER_WEBHOOK,
+    { type = event, payload = payload },
+    event
+  )
 end
 
 local function record_shipment_event(shipment_id, status, meta)
@@ -3920,6 +3925,15 @@ local function cleanup_retention()
       end
     end
     state.shipment_events[ship] = filtered
+  end
+  for site, fails in pairs(state.notification_failures) do
+    local filtered = {}
+    for _, f in ipairs(fails) do
+      if (f.ts or 0) >= cutoff then
+        table.insert(filtered, f)
+      end
+    end
+    state.notification_failures[site] = filtered
   end
 end
 
@@ -4385,6 +4399,27 @@ function handlers.CleanupRetention(msg)
   cleanup_retention()
   audit.record("catalog", "CleanupRetention", msg, nil, { retentionDays = RETENTION_DAYS })
   return codec.ok { retentionDays = RETENTION_DAYS }
+end
+
+function handlers.ListNotificationFailures(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Clear",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local site = msg["Site-Id"] or "global"
+  local items = state.notification_failures[site] or {}
+  if msg.Clear == true or msg.Clear == "true" then
+    state.notification_failures[site] = {}
+  end
+  return codec.ok { siteId = site, failures = items, total = #items }
 end
 
 function handlers.ExportRecommendations(msg)
