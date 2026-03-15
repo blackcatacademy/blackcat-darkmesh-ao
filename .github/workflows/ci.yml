@@ -36,19 +36,27 @@ jobs:
             echo "LUA_CPATH=$LUA_CPATH"
           } >> "$GITHUB_ENV"
 
-      - name: Install luacheck/stylua (Lua 5.4)
+      - name: Install luacheck (Lua 5.4)
         run: |
           if command -v luarocks >/dev/null 2>&1; then
             luarocks --lua-version=5.4 install --local luacheck || true
-            luarocks --lua-version=5.4 install --local stylua || true
             echo "$HOME/.luarocks/bin" >> $GITHUB_PATH
           else
-            echo "luarocks not installed; failing luacheck/stylua install" && exit 1
+            echo "luarocks not installed; failing luacheck install" && exit 1
           fi
+
+      - name: Install stylua binary
+        run: |
+          STYLUA_VERSION=2.4.0
+          curl -sSfL https://github.com/JohnnyMorganz/StyLua/releases/download/v${STYLUA_VERSION}/stylua-linux-x86_64.zip -o /tmp/stylua.zip
+          unzip -o /tmp/stylua.zip -d /tmp
+          sudo mv /tmp/stylua /usr/local/bin/stylua
+          stylua --version
 
       - name: Install gitleaks
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks-linux-amd64.tar.gz -o /tmp/gitleaks.tar.gz
+          GITLEAKS_VERSION=8.30.0
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp
           sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
 
