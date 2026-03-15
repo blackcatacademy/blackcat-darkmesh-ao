@@ -279,12 +279,22 @@ function handlers.GetPage(msg)
       { pageId = msg["Page-Id"], version = version }
     )
   end
+  -- enforce lazy/blur defaults on returned blocks (non-destructive)
+  local content = page.content
+  if content and content.blocks then
+    for _, block in ipairs(content.blocks) do
+      if type(block) == "table" and block.image and type(block.image) == "table" then
+        block.image.loading = block.image.loading or "lazy"
+        block.image.placeholder = block.image.placeholder or "blur"
+      end
+    end
+  end
   return codec.ok {
     siteId = msg["Site-Id"],
     pageId = msg["Page-Id"],
     version = version,
     locale = locale,
-    content = page.content,
+    content = content,
   }
 end
 
@@ -473,6 +483,7 @@ function handlers.PutDraft(msg)
   local locale = pick_locale(msg["Site-Id"], msg.Locale)
   local key = ids.page_key(msg["Site-Id"], msg["Page-Id"], "draft", locale)
   local previous = state.drafts[key]
+  local conflicts = {}
   if previous and previous.content then
     local changed_fields = {}
     for k, v in pairs(msg.Content) do
@@ -480,7 +491,6 @@ function handlers.PutDraft(msg)
         table.insert(changed_fields, k)
       end
     end
-    local conflicts = {}
     if msg.Merge == true and type(previous.content) == "table" then
       for k, v in pairs(msg.Content) do
         if type(v) == "table" and type(previous.content[k]) == "table" then
@@ -515,6 +525,7 @@ function handlers.PutDraft(msg)
     warnings = a11y_warnings,
     locale = locale,
     contentType = content_type,
+    conflicts = conflicts,
   }
 end
 
