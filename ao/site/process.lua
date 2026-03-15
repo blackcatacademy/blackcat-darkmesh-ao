@@ -9,6 +9,7 @@ local idem = require "ao.shared.idempotency"
 local audit = require "ao.shared.audit"
 local metrics = require "ao.shared.metrics"
 local schema = require "ao.shared.schema"
+local assets = require "ao.shared.assets"
 local i18n = require "ao.shared.i18n"
 
 local handlers = {}
@@ -19,6 +20,8 @@ local allowed_actions = {
   "GetNavigation",
   "PutDraft",
   "UpsertRoute",
+  "RegisterAsset",
+  "GetAsset",
   "SetLocales",
   "PublishVersion",
   "ArchivePage",
@@ -30,6 +33,8 @@ local allowed_actions = {
 local role_policy = {
   PutDraft = { "editor", "publisher", "admin" },
   UpsertRoute = { "editor", "publisher", "admin" },
+  RegisterAsset = { "editor", "publisher", "admin" },
+  GetAsset = { "editor", "publisher", "admin", "support" },
   SetLocales = { "admin", "publisher" },
   PublishVersion = { "publisher", "admin" },
   ArchivePage = { "publisher", "admin" },
@@ -47,6 +52,7 @@ local state = {
   drafts = {}, -- page:<site>:<page>:draft -> { content }
   active_versions = {}, -- siteId -> versionId
   orders = {}, -- siteId -> orderId -> { status, totalAmount, currency, vatRate, updatedAt }
+  assets = {}, -- siteId -> assetId -> metadata
   locales = {}, -- siteId -> { default = "en", supported = { "en" } }
 }
 
@@ -369,24 +375,104 @@ function handlers.UpsertRoute(msg)
   return codec.ok { path = msg.Path, pageId = msg["Page-Id"], locale = locale }
 end
 
-function handlers.SetLocales(msg)
-  local ok, missing = validation.require_fields(msg, { "Site-Id", "Locales" })
+function handlers.RegisterAsset(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Asset-Id", "Url" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Asset-Id",
+    "Url",
+    "Type",
+    "Formats",
+    "Sizes",
+    "Base-Url",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_len_site, err_site = validation.check_length(msg["Site-Id"], 128, "Site-Id")
+  if not ok_len_site then
+    return codec.error("INVALID_INPUT", err_site, { field = "Site-Id" })
+  end
+  local ok_len_id, err_id = validation.check_length(msg["Asset-Id"], 256, "Asset-Id")
+  if not ok_len_id then
+    return codec.error("INVALID_INPUT", err_id, { field = "Asset-Id" })
+  end
+  local ok_len_url, err_url = validation.check_length(msg.Url, 2048, "Url")
+  if not ok_len_url then
+    return codec.error("INVALID_INPUT", err_url, { field = "Url" })
+  end
+  local typ = msg.Type or "image"
+  if typ ~= "image" and typ ~= "video" then
+    return codec.error("INVALID_INPUT", "Type must be image|video", { field = "Type" })
+  end
+  state.assets[msg["Site-Id"]] = state.assets[msg["Site-Id"]] or {}
+  local meta = { type = typ, url = msg.Url }
+  if typ == "image" then
+    local manifest = assets.build_image_variants(msg.Url, {
+      sizes = msg.Sizes,
+      formats = msg.Formats,
+      base_url = msg["Base-Url"],
+    })
+    meta.variants = manifest.variants
+    meta.srcset = manifest.srcset
+    meta.formats = manifest.formats
+    meta.sizes = manifest.sizes
+    meta.src = manifest.src
+  end
+  state.assets[msg["Site-Id"]][msg["Asset-Id"]] = meta
+  audit.record(
+    "site",
+    "RegisterAsset",
+    msg,
+    nil,
+    { siteId = msg["Site-Id"], assetId = msg["Asset-Id"], type = typ }
+  )
+  return codec.ok { siteId = msg["Site-Id"], assetId = msg["Asset-Id"], asset = meta }
+end
+
+function handlers.GetAsset(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Asset-Id" })
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
   local ok_extra, extras = validation.require_no_extras(
     msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Locales",
-      "Default-Locale",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
+    { "Action", "Request-Id", "Site-Id", "Asset-Id", "Actor-Role", "Schema-Version", "Signature" }
   )
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local assets_for_site = state.assets[msg["Site-Id"]] or {}
+  local asset = assets_for_site[msg["Asset-Id"]]
+  if not asset then
+    return codec.error("NOT_FOUND", "Asset not found", { assetId = msg["Asset-Id"] })
+  end
+  return codec.ok { siteId = msg["Site-Id"], assetId = msg["Asset-Id"], asset = asset }
+end
+
+function handlers.SetLocales(msg)
+  local ok, missing = validation.require_fields(msg, { "Site-Id", "Locales" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Locales",
+    "Default-Locale",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
