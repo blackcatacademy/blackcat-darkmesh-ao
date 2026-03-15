@@ -17,6 +17,8 @@ local SCA_FORCE = os.getenv "CATALOG_SCA_FORCE" == "1"
 local MAX_RATE_OPTIONS = tonumber(os.getenv "CATALOG_MAX_RATE_OPTIONS" or "") or 5
 local RISK_THRESHOLD = tonumber(os.getenv "CATALOG_MANUAL_REVIEW_THRESHOLD" or "") or 90
 local TELEMETRY_EXPORT_PATH = os.getenv "CATALOG_TELEMETRY_PATH"
+local TELEMETRY_KAFKA_PATH = os.getenv "CATALOG_TELEMETRY_KAFKA" -- mock sink file
+local TELEMETRY_S3_PATH = os.getenv "CATALOG_TELEMETRY_S3" -- mock sink file
 local INVOICE_EXPORT_PATH = os.getenv "CATALOG_INVOICE_PATH"
 local CARRIER_LABEL_BASE = os.getenv "CATALOG_CARRIER_LABEL_BASE" or "https://labels.example/"
 local CARRIER_TRACK_BASE = os.getenv "CATALOG_CARRIER_TRACK_BASE" or "https://track.example/"
@@ -171,6 +173,7 @@ local allowed_actions = {
   "ApprovePurchaseOrder",
   "RejectPurchaseOrder",
   "CheckoutPurchaseOrder",
+  "SetCompanyTerms",
   "CreateShippingLabel",
   "CreateInvoice",
   "GetInvoice",
@@ -269,6 +272,7 @@ local role_policy = {
   ApprovePurchaseOrder = { "approver", "catalog-admin", "admin" },
   RejectPurchaseOrder = { "approver", "catalog-admin", "admin" },
   CheckoutPurchaseOrder = { "catalog-admin", "admin", "approver" },
+  SetCompanyTerms = { "b2b-admin", "admin" },
   CreateShippingLabel = { "catalog-admin", "admin", "support" },
   CreateInvoice = { "catalog-admin", "admin", "support" },
   GetInvoice = { "support", "admin", "catalog-admin" },
@@ -342,6 +346,7 @@ local state = {
   telemetry = {}, -- buffered events for export
   companies = {}, -- companyId -> { name, users = { [userId] = role } }
   purchase_orders = {}, -- poId -> { siteId, companyId, items, totals, status, approvals = {} }
+  company_terms = {}, -- companyId -> { credit_limit, net_terms, currency, balance }
   invoices = {}, -- invoiceId -> { orderId, siteId, total, currency, lines, issuedAt, status }
   invoice_seq = {}, -- siteId -> last number
   invoice_seq_year = {}, -- siteId -> year -> last number
@@ -770,6 +775,16 @@ local function track_event(site_id, subject, sku, event)
   end
 
   return stats
+end
+
+local function typo_match(text, tokens)
+  text = text:lower()
+  for _, t in ipairs(tokens) do
+    if text:find(t, 1, true) then
+      return true
+    end
+  end
+  return false
 end
 
 local function check_rate_limit(key)
@@ -1261,6 +1276,9 @@ function handlers.SearchCatalog(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
+  if not check_rate_limit("search:" .. (msg.Subject or msg["Site-Id"])) then
+    return codec.error("RATE_LIMITED", "Too many search requests")
+  end
   local ok_extra, extras = validation.require_no_extras(msg, {
     "Action",
     "Request-Id",
@@ -1340,7 +1358,7 @@ function handlers.SearchCatalog(msg)
       local text = (product.payload.name or ""):lower()
         .. " "
         .. (product.payload.description or ""):lower()
-      local matched = (q == "") or text:find(q, 1, true)
+      local matched = (q == "") or text:find(q, 1, true) or typo_match(text, expanded_tokens)
       local fuzzy_hit = false
       if (not matched) and q ~= "" and #q <= 16 then
         local d = levenshtein((product.payload.name or ""):lower(), q)
@@ -1701,7 +1719,7 @@ function handlers.Bestsellers(msg)
   local scores = state.events[msg["Site-Id"]] or {}
   local ranked = {}
   for sku, s in pairs(scores) do
-    local score = (s.purchases or 0)
+    local score = (s.purchases or 0) * 3 + (s.add_to_cart or 0)
     if score > 0 then
       local pkey = ids.product_key(msg["Site-Id"], sku)
       if state.products[pkey] then
@@ -1963,10 +1981,23 @@ function handlers.ExportEvents(msg)
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
-  if msg["Site-Id"] then
-    return codec.ok(state.event_log[msg["Site-Id"]] or {})
+  local data = msg["Site-Id"] and (state.event_log[msg["Site-Id"]] or {}) or state.event_log
+  -- mock sinks: append newline-delimited JSON to paths if configured
+  if TELEMETRY_KAFKA_PATH and json_ok then
+    local f = io.open(TELEMETRY_KAFKA_PATH, "a")
+    if f then
+      f:write(cjson.encode { ts = os.time(), events = data }, "\n")
+      f:close()
+    end
   end
-  return codec.ok(state.event_log)
+  if TELEMETRY_S3_PATH and json_ok then
+    local f = io.open(TELEMETRY_S3_PATH, "a")
+    if f then
+      f:write(cjson.encode { ts = os.time(), events = data }, "\n")
+      f:close()
+    end
+  end
+  return codec.ok(data)
 end
 
 function handlers.SetFeatureFlags(msg)
@@ -6428,8 +6459,34 @@ function handlers.CreateCompanyAccount(msg)
   end
   local cid = msg["Company-Id"] or gen_id "co"
   state.companies[cid] = state.companies[cid] or { name = msg.Name, users = {} }
+  state.company_terms[cid] = state.company_terms[cid]
+    or {
+      credit_limit = msg["Credit-Limit"],
+      currency = msg.Currency or "USD",
+      net_terms = msg["Net-Terms"] or "NET30",
+      balance = 0,
+    }
   audit.record("catalog", "CreateCompanyAccount", msg, nil, { companyId = cid })
   return codec.ok { companyId = cid, name = msg.Name }
+end
+
+function handlers.SetCompanyTerms(msg)
+  local ok, missing =
+    validation.require_fields(msg, { "Company-Id", "Credit-Limit", "Currency", "Net-Terms" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  state.company_terms[msg["Company-Id"]] = state.company_terms[msg["Company-Id"]] or { balance = 0 }
+  local t = state.company_terms[msg["Company-Id"]]
+  t.credit_limit = msg["Credit-Limit"]
+  t.currency = msg.Currency
+  t.net_terms = msg["Net-Terms"]
+  return codec.ok {
+    companyId = msg["Company-Id"],
+    creditLimit = t.credit_limit,
+    netTerms = t.net_terms,
+    balance = t.balance or 0,
+  }
 end
 
 function handlers.AddCompanyUser(msg)
