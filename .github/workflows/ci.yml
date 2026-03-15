@@ -20,7 +20,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y lua5.4 luarocks
 
-      - name: Install required rocks (Lua 5.4: cjson/luv/lsqlite3/luaossl)
+      - name: "Install required rocks (Lua 5.4: cjson/luv/lsqlite3/luaossl)"
         run: |
           rocks=(
             "cjson 2.1.0-1"
