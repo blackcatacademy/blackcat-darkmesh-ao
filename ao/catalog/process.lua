@@ -54,7 +54,7 @@ local state = {
   active_versions = {}, -- site -> version
   inventory = {}, -- site -> sku -> { quantity }
   reservations = {}, -- orderId -> { siteId, items = { { sku, qty } }, released=false }
-  orders = {}, -- orderId -> { siteId, status, totals, currency, customerId, coupons, address, shipping, paymentStatus, updatedAt }
+  orders = {}, -- orderId -> order record
   shipments = {}, -- shipmentId -> { status, tracking, carrier, eta, orderId }
   returns = {}, -- returnId -> { status, reason, orderId }
   shipping_rates = {}, -- siteId -> list of rate rows

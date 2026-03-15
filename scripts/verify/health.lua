@@ -38,13 +38,13 @@ local function rotated_count(path)
   if not lfs_ok then
     return "n/a"
   end
-  local count = 0
+  local cnt = 0
   for file in lfs.dir(path) do
     if file:match "^audit.*%.log%." then
-      count = count + 1
+      cnt = cnt + 1
     end
   end
-  return count
+  return cnt
 end
 
 local function print_line(label, value)

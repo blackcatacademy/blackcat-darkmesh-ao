@@ -10,7 +10,6 @@ local FLUSH_INTERVAL = tonumber(os.getenv "METRICS_FLUSH_INTERVAL_SEC" or "0")
 local counters = {}
 local since_flush = 0
 local last_flush = os.time()
-local last_tick = os.time()
 local timer = require "ao.shared.timer"
 local started = false
 

@@ -44,7 +44,7 @@ function Jwt.verify_hs256(token, secret)
   if not ok_json then
     return false, "json_missing"
   end
-  local ok_h, header = pcall(cjson.decode, b64url_decode(header_b64) or "")
+  local ok_h, _header = pcall(cjson.decode, b64url_decode(header_b64) or "")
   local ok_p, payload = pcall(cjson.decode, b64url_decode(payload_b64) or "")
   if not (ok_h and ok_p) then
     return false, "decode_failed"

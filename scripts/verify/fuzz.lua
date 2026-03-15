@@ -1,3 +1,4 @@
+-- luacheck: ignore
 -- Lightweight fuzz/property checks for pagination and Arweave HTTP failure handling.
 
 math.randomseed(os.time())

@@ -338,7 +338,7 @@ function Schema.validate_python(schema_name, value)
     if t == "table" then
       local is_array = true
       local i = 0
-      for k, _ in pairs(v) do
+      for _, _ in pairs(v) do
         i = i + 1
         if v[i] == nil then
           is_array = false
@@ -362,7 +362,16 @@ function Schema.validate_python(schema_name, value)
   jf:write(json_encode(value))
   jf:close()
   local cmd = string.format(
-    "python3 - <<'PY'\nimport json,sys,jsonschema\nwith open(%q) as f: schema=json.load(f)\nwith open(%q) as f: inst=json.load(f)\ntry:\n jsonschema.validate(inst, schema)\n sys.exit(0)\nexcept jsonschema.ValidationError:\n sys.exit(1)\nPY",
+    [[python3 - <<'PY'
+import json,sys,jsonschema
+with open(%q) as f: schema=json.load(f)
+with open(%q) as f: inst=json.load(f)
+try:
+ jsonschema.validate(inst, schema)
+ sys.exit(0)
+except jsonschema.ValidationError:
+ sys.exit(1)
+PY]],
     schema_path,
     tmp
   )

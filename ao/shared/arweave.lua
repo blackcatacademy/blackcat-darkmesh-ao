@@ -23,7 +23,7 @@ local HTTP_MAX_BODY = tonumber(os.getenv "ARWEAVE_HTTP_MAX_BODY" or "1048576") -
 local EXPECT_RESPONSE_HASH = os.getenv "ARWEAVE_EXPECT_RESPONSE_HASH"
 local FORCE_ERROR = os.getenv "ARWEAVE_FORCE_ERROR" == "1"
 local RESPONSE_PATTERN = os.getenv "ARWEAVE_RESPONSE_PATTERN" or '^%s*%{"'
-local ok_cjson_safe, cjson_safe = pcall(require, "cjson.safe")
+local _, cjson_safe = pcall(require, "cjson.safe")
 local cjson = cjson_safe or require "cjson" -- required dependency
 local schema = require "ao.shared.schema"
 local openssl_ok, openssl = pcall(require, "openssl")
@@ -93,10 +93,15 @@ local function http_post(serialized, tx)
   local response_path = string.format("%s/%s-response.json", REQUEST_LOG, tx)
   local auth_header = API_KEY and (' -H "Authorization: Bearer ' .. API_KEY .. '"') or ""
   local signer_header = SIGNER and (' -H "' .. HTTP_SIGNER_HEADER .. ": " .. SIGNER .. '"') or ""
+  local curl_fmt = table.concat({
+    'echo %q | curl -s -o "%s" -w "%%{http_code}"',
+    '-H "Content-Type: application/json"%s%s',
+    '--max-time %d -X POST "%s" --data-binary @-',
+  }, " ")
   local status
   for attempt = 1, HTTP_RETRIES do
     local cmd = string.format(
-      'echo %q | curl -s -o "%s" -w "%%{http_code}" -H "Content-Type: application/json"%s%s --max-time %d -X POST "%s" --data-binary @-',
+      curl_fmt,
       serialized,
       response_path,
       auth_header,
@@ -270,12 +275,7 @@ if MODE == "http" then
     local httpStatus, response_path
     if FORCE_ERROR then
       httpStatus = 500
-    elseif
-      HTTP_REAL
-      and ENDPOINT
-      and has_curl()
-      and not (os.getenv "ARWEAVE_HTTP_DRYRUN" == "1")
-    then
+    elseif HTTP_REAL and ENDPOINT and has_curl() and os.getenv "ARWEAVE_HTTP_DRYRUN" ~= "1" then
       if not signer_exists() then
         log_request(tx, {
           endpoint = ENDPOINT or "<missing-endpoint>",
@@ -328,7 +328,7 @@ if MODE == "http" then
           end
           local ok_schema, err_schema = schema.validate("arweaveResponse", parsed)
           if not ok_schema then
-            log_request(tx, { warning = "response_schema_invalid" })
+            log_request(tx, { warning = "response_schema_invalid", errors = err_schema })
             return nil, "http_response_schema_invalid"
           end
           local resp_hash = sha256(body)
