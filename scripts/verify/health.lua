@@ -71,6 +71,7 @@ print_line("deps.ed25519", pcall(require, "ed25519") and "yes" or "no")
 print_line("deps.lsqlite3", pcall(require, "lsqlite3") and "yes" or "no")
 print_line("deps.cjson", pcall(require, "cjson.safe") and "yes" or "no")
 print_line("deps.luaossl", pcall(require, "openssl") and "yes" or "no")
+print_line("deps.sodium", pcall(require, "sodium") and "yes" or "no")
 
 local function check_rate_db()
   local path = os.getenv("AUTH_RATE_LIMIT_SQLITE")
@@ -103,5 +104,32 @@ local function check_rate_db()
   db:close()
 end
 
+local function check_prom()
+  local prom = os.getenv("METRICS_PROM_PATH")
+  if not prom or prom == "" then
+    print_line("prom_path", "unset")
+    return
+  end
+  local f = io.open(prom, "a")
+  if f then
+    f:write("# health probe\n")
+    f:close()
+    print_line("prom_path", "rw_ok")
+  else
+    print_line("prom_path", "write_failed")
+  end
+end
+
+local function check_manifest()
+  local tx = os.getenv("SCHEMA_MANIFEST_TX") or ""
+  local hash = os.getenv("SCHEMA_HASH") or ""
+  local trust_tx = os.getenv("TRUST_MANIFEST_TX") or ""
+  if tx ~= "" then print_line("schema_manifest_tx", tx) end
+  if hash ~= "" then print_line("schema_hash", hash) end
+  if trust_tx ~= "" then print_line("trust_manifest_tx", trust_tx) end
+end
+
 check_rate_db()
+check_prom()
+check_manifest()
 print_line("health", "ok")
