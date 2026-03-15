@@ -216,6 +216,20 @@ do
   if conf2.status ~= "OK" then error("site config missing after schema fuzz") end
 end
 
+-- Product currency/VAT schema fuzz
+do
+  local schema = require("ao.shared.schema")
+  local payload = { sku = "sku-curr-1", name = "Prod", price = 9.99, currency = "EUR", vatRate = 0.21 }
+  local ok = schema.validate_payload and schema.validate_payload("Product", payload)
+  if ok == nil then
+    -- fallback: use product schema directly
+    local ok2, errs = schema.validate_object(payload, "schemas/product.schema.json")
+    if ok2 == false then error("product schema validation failed: " .. tostring(errs and errs[1])) end
+  elseif ok == false then
+    error("product currency/vat schema validation failed")
+  end
+end
+
 -- Rate limit sqlite smoke
 do
   os.setenv("AUTH_RATE_LIMIT_SQLITE", "/tmp/ao-rate-fuzz.db")
