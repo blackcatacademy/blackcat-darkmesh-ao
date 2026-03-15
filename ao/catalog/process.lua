@@ -410,7 +410,11 @@ end
 
 -- PSP adapter shim -------------------------------------------------------
 local function psp_call(provider, action, payload)
-  -- This is a lightweight shim; replace with real SDK/API calls in production.
+  -- TODO: replace shim with real REST/SDK calls once sandbox keys are provided.
+  -- Interface expectations:
+  --   create_intent -> { providerPaymentId, clientSecret, requiresAction?, nextActionUrl? }
+  --   capture       -> { status = "captured", providerCaptureId? }
+  --   refund        -> { status = "refunded", refundedAt?, amount? }
   if provider == "stripe" then
     if action == "create_intent" then
       return {
