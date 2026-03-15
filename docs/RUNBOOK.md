@@ -18,6 +18,27 @@
 ## Rate-Limit Store
 - AO uses `AUTH_RATE_LIMIT_SQLITE`; health check performs RW test on boot. Ensure path is on persistent storage and backed up/snapshotted if required.
 
+## Periodic checksum monitoring
+- AO: run `scripts/verify/checksum_daemon.sh` under your supervisor (set `CHECKSUM_INTERVAL_SEC`, optional `AO_QUEUE_PATH`, `AO_WAL_PATH`, `AUDIT_LOG_DIR`). Example systemd unit:
+```
+[Unit]
+Description=AO checksum monitor
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/blackcat-darkmesh-ao
+Environment=CHECKSUM_INTERVAL_SEC=300
+Environment=AO_QUEUE_PATH=/var/lib/ao/outbox-queue.ndjson
+Environment=AO_WAL_PATH=/var/lib/ao/registry-wal.ndjson
+Environment=AUDIT_LOG_DIR=/var/log/ao/audit
+ExecStart=/opt/blackcat-darkmesh-ao/scripts/verify/checksum_daemon.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+- Write: a similar `scripts/verify/checksum_daemon.sh` exists in the write repo (set `WRITE_WAL_PATH`, `AO_QUEUE_PATH`), run via supervisor if desired.
+
 ## Outbox Integrity
 - Write emits HMAC on outbox events when `OUTBOX_HMAC_SECRET` is set; queue forwarder verifies HMAC before delivery.
 - Queue/WAL size alerts: set `WRITE_WAL_MAX_BYTES` (default 5 MiB) and `AO_QUEUE_MAX_BYTES` (default 2 MiB); health warns when exceeded.
