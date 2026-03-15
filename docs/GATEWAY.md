@@ -12,7 +12,26 @@
 ## Trust & permissions
 - **Trusted list** (signed by an authority): which gateways may serve tenants and perform limited writes.
 - **Scoped writes:** only the operations needed for normal site/eshop operation (orders, telemetry, inventory). No access to user secrets.
-- **Auto‑flagging:** rate limits, replay window, checksum/manifest mismatch alerts; flagged gateway/tenant can be quarantined.
+- **Auto-flagging:** rate limits, replay window, checksum/manifest mismatch alerts; flagged gateway/tenant can be quarantined.
+- **Trusted list format (proposal):**
+  ```json
+  {
+    "version": 1,
+    "issuedAt": "2026-03-15T00:00:00Z",
+    "gateways": [
+      {
+        "id": "gw-eu-cz-1",
+        "domains": ["gateway.cz"],
+        "regions": ["CZ", "SK", "PL"],
+        "pubkey": "ed25519:...",
+        "scopes": ["serve", "write-limited"],
+        "expiresAt": "2026-09-15T00:00:00Z"
+      }
+    ],
+    "signature": "ed25519:..."  // signed by authority key
+  }
+  ```
+  - Hosted on AR; gateway refreshes on interval; expired entries dropped.
 
 ## Data flows
 1) DNS/CNAME → gateway (e.g., gateway.cz/tenant).
@@ -48,6 +67,18 @@
 - Resource limits (ulimit/conntrack), basic DoS protection.
 - Log shipping to S3/Kafka (optional), retention policy.
 - Key rotation and trusted list refresh; optional AR mirror for connectivity loss.
+- Tenant mapping config (example):
+  ```yaml
+  tenants:
+    - domain: "abc.cz"
+      id: "abc"
+      ar_manifest: "ar://txid"
+      cache_ttl: 300
+    - domain: "xyz.cn"
+      id: "xyz"
+      ar_manifest: "ar://txid2"
+      cache_ttl: 120
+  ```
 
 ## Reference implementation (todo)
 - Reverse proxy (e.g., nginx/openresty or lightweight Go/Rust service) with:  
