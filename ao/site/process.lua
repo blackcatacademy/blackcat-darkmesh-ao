@@ -21,6 +21,7 @@ local allowed_actions = {
   "GetNavigation",
   "PutDraft",
   "UpsertRoute",
+  "UpsertLayout",
   "RegisterAsset",
   "GetAsset",
   "SetLocales",
@@ -34,6 +35,7 @@ local allowed_actions = {
 local role_policy = {
   PutDraft = { "editor", "publisher", "admin" },
   UpsertRoute = { "editor", "publisher", "admin" },
+  UpsertLayout = { "editor", "publisher", "admin" },
   RegisterAsset = { "editor", "publisher", "admin" },
   GetAsset = { "editor", "publisher", "admin", "support" },
   SetLocales = { "admin", "publisher" },
@@ -382,6 +384,52 @@ function handlers.UpsertRoute(msg)
     type = msg.Type or "page",
   }
   return codec.ok { path = msg.Path, pageId = msg["Page-Id"], locale = locale }
+end
+
+function handlers.UpsertLayout(msg)
+  local ok, missing = validation.require_fields(msg, { "Layout-Id", "Version", "Components" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Layout-Id",
+    "Version",
+    "Components",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local ok_len_layout, err_layout = validation.check_length(msg["Layout-Id"], 128, "Layout-Id")
+  if not ok_len_layout then
+    return codec.error("INVALID_INPUT", err_layout, { field = "Layout-Id" })
+  end
+  local ok_len_ver, err_ver = validation.check_length(msg.Version, 128, "Version")
+  if not ok_len_ver then
+    return codec.error("INVALID_INPUT", err_ver, { field = "Version" })
+  end
+  local ok_type, err_type = validation.assert_type(msg.Components, "table", "Components")
+  if not ok_type then
+    return codec.error("INVALID_INPUT", err_type, { field = "Components" })
+  end
+  local ok_layout, layout_warnings = layout_components.validate(msg.Components)
+  if not ok_layout and os.getenv "LAYOUT_STRICT" == "1" then
+    return codec.error("INVALID_INPUT", "Layout components invalid", { warnings = layout_warnings })
+  end
+  local key = ids.layout_key(msg["Layout-Id"], msg.Version)
+  state.layouts[key] = { content = msg.Components }
+  audit.record(
+    "site",
+    "UpsertLayout",
+    msg,
+    nil,
+    { layoutId = msg["Layout-Id"], version = msg.Version }
+  )
+  return codec.ok { layoutId = msg["Layout-Id"], version = msg.Version, warnings = layout_warnings }
 end
 
 function handlers.RegisterAsset(msg)
