@@ -169,20 +169,17 @@ function handlers.ListCategoryProducts(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Category-Id",
-      "Page",
-      "PageSize",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Category-Id",
+    "Page",
+    "PageSize",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -235,26 +232,23 @@ function handlers.SearchCatalog(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Query",
-      "MinPrice",
-      "MaxPrice",
-      "Locale",
-      "Available",
-      "Category-Id",
-      "Sort",
-      "Currency",
-      "Carrier",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Query",
+    "MinPrice",
+    "MaxPrice",
+    "Locale",
+    "Available",
+    "Category-Id",
+    "Sort",
+    "Currency",
+    "Carrier",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -381,17 +375,14 @@ function handlers.SearchCatalog(msg)
           if msg.Locale and locale == msg.Locale then
             score = score + 1
           end
-          table.insert(
-            results,
-            {
-              sku = sku,
-              payload = payload,
-              price = price,
-              name = payload.name or sku,
-              score = score,
-              available = available,
-            }
-          )
+          table.insert(results, {
+            sku = sku,
+            payload = payload,
+            price = price,
+            name = payload.name or sku,
+            score = score,
+            available = available,
+          })
         end
       end
     end
@@ -523,20 +514,17 @@ function handlers.GetOrder(msg)
 end
 
 function handlers.ListOrders(msg)
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Customer-Id",
-      "Status",
-      "Limit",
-      "Offset",
-      "Actor-Role",
-      "Schema-Version",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Customer-Id",
+    "Status",
+    "Limit",
+    "Offset",
+    "Actor-Role",
+    "Schema-Version",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -659,21 +647,18 @@ function handlers.ValidateAddress(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Country",
-      "Region",
-      "City",
-      "Postal",
-      "Line1",
-      "Line2",
-      "Actor-Role",
-      "Schema-Version",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Country",
+    "Region",
+    "City",
+    "Postal",
+    "Line1",
+    "Line2",
+    "Actor-Role",
+    "Schema-Version",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -745,24 +730,21 @@ function handlers.ApplyShipmentEvent(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Shipment-Id",
-      "Order-Id",
-      "Carrier",
-      "Service",
-      "Label-Url",
-      "Tracking",
-      "Tracking-Url",
-      "Eta",
-      "Status",
-      "Actor-Role",
-      "Schema-Version",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Shipment-Id",
+    "Order-Id",
+    "Carrier",
+    "Service",
+    "Label-Url",
+    "Tracking",
+    "Tracking-Url",
+    "Eta",
+    "Status",
+    "Actor-Role",
+    "Schema-Version",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -794,21 +776,18 @@ function handlers.ApplyTrackingEvent(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Shipment-Id",
-      "Tracking",
-      "Carrier",
-      "Eta",
-      "Tracking-Url",
-      "Status",
-      "Actor-Role",
-      "Schema-Version",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Shipment-Id",
+    "Tracking",
+    "Carrier",
+    "Eta",
+    "Tracking-Url",
+    "Status",
+    "Actor-Role",
+    "Schema-Version",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -840,20 +819,17 @@ function handlers.UpsertProduct(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Sku",
-      "Payload",
-      "Version",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Sku",
+    "Payload",
+    "Version",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -901,20 +877,17 @@ function handlers.UpsertCategory(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Category-Id",
-      "Payload",
-      "Products",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Category-Id",
+    "Payload",
+    "Products",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end
@@ -958,19 +931,16 @@ function handlers.PublishCatalogVersion(msg)
   if not ok then
     return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
   end
-  local ok_extra, extras = validation.require_no_extras(
-    msg,
-    {
-      "Action",
-      "Request-Id",
-      "Site-Id",
-      "Version",
-      "ExpectedVersion",
-      "Actor-Role",
-      "Schema-Version",
-      "Signature",
-    }
-  )
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Version",
+    "ExpectedVersion",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
   if not ok_extra then
     return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
   end

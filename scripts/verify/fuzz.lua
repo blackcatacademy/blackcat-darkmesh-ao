@@ -32,34 +32,28 @@ do
   local reg = require "ao.registry.process"
   local site = require "ao.site.process"
   local rid = "rid-mixed-replay"
-  reg.route(
-    with_req {
-      Action = "RegisterSite",
-      ["Site-Id"] = "mix-replay",
-      ["Actor-Role"] = "admin",
-      ["Request-Id"] = rid,
-    }
-  )
-  local again = reg.route(
-    with_req {
-      Action = "RegisterSite",
-      ["Site-Id"] = "mix-replay",
-      ["Actor-Role"] = "admin",
-      ["Request-Id"] = rid,
-    }
-  )
+  reg.route(with_req {
+    Action = "RegisterSite",
+    ["Site-Id"] = "mix-replay",
+    ["Actor-Role"] = "admin",
+    ["Request-Id"] = rid,
+  })
+  local again = reg.route(with_req {
+    Action = "RegisterSite",
+    ["Site-Id"] = "mix-replay",
+    ["Actor-Role"] = "admin",
+    ["Request-Id"] = rid,
+  })
   if again.status ~= "OK" then
     error "mixed replay should return stored OK"
   end
-  local siteReplay = site.route(
-    with_req {
-      Action = "ResolveRoute",
-      ["Site-Id"] = "mix-replay",
-      Path = "/",
-      ["Actor-Role"] = "editor",
-      ["Request-Id"] = rid,
-    }
-  )
+  local siteReplay = site.route(with_req {
+    Action = "ResolveRoute",
+    ["Site-Id"] = "mix-replay",
+    Path = "/",
+    ["Actor-Role"] = "editor",
+    ["Request-Id"] = rid,
+  })
   -- resolve route will be missing, but should not be treated as a new requestId; earlier stored response reused if present
 end
 
@@ -69,47 +63,39 @@ do
   local cat = "cat-fuzz"
   local total = 40
   for i = 1, total do
-    catalog.route(
-      with_req {
-        Action = "UpsertProduct",
-        ["Site-Id"] = siteId,
-        Sku = "fuzz-" .. i,
-        Payload = { name = "P" .. i },
-        ["Actor-Role"] = "catalog-admin",
-      }
-    )
+    catalog.route(with_req {
+      Action = "UpsertProduct",
+      ["Site-Id"] = siteId,
+      Sku = "fuzz-" .. i,
+      Payload = { name = "P" .. i },
+      ["Actor-Role"] = "catalog-admin",
+    })
   end
-  catalog.route(
-    with_req {
+  catalog.route(with_req {
+    Action = "UpsertCategory",
+    ["Site-Id"] = siteId,
+    ["Category-Id"] = cat,
+    Products = {},
+    ["Actor-Role"] = "catalog-admin",
+  })
+  for i = 1, total do
+    catalog.route(with_req {
       Action = "UpsertCategory",
       ["Site-Id"] = siteId,
       ["Category-Id"] = cat,
-      Products = {},
+      Products = { "fuzz-" .. i },
       ["Actor-Role"] = "catalog-admin",
-    }
-  )
-  for i = 1, total do
-    catalog.route(
-      with_req {
-        Action = "UpsertCategory",
-        ["Site-Id"] = siteId,
-        ["Category-Id"] = cat,
-        Products = { "fuzz-" .. i },
-        ["Actor-Role"] = "catalog-admin",
-      }
-    )
+    })
   end
   local seen = {}
   for page = 1, 20 do
-    local resp = catalog.route(
-      with_req {
-        Action = "ListCategoryProducts",
-        ["Site-Id"] = siteId,
-        ["Category-Id"] = cat,
-        Page = page,
-        PageSize = 3,
-      }
-    )
+    local resp = catalog.route(with_req {
+      Action = "ListCategoryProducts",
+      ["Site-Id"] = siteId,
+      ["Category-Id"] = cat,
+      Page = page,
+      PageSize = 3,
+    })
     if resp.payload then
       for _, item in ipairs(resp.payload.items) do
         if seen[item.sku] then
@@ -220,32 +206,26 @@ end
 do
   local siteId = "conc-site"
   local site = require "ao.site.process"
-  site.route(
-    with_req {
-      Action = "PutDraft",
-      ["Site-Id"] = siteId,
-      ["Page-Id"] = "p1",
-      Content = { title = "T", blocks = { { type = "paragraph", text = "T" } } },
-      ["Actor-Role"] = "editor",
-    }
-  )
-  local ok1 = site.route(
-    with_req {
-      Action = "PublishVersion",
-      ["Site-Id"] = siteId,
-      Version = "v1",
-      ["Actor-Role"] = "publisher",
-    }
-  )
-  local conflict = site.route(
-    with_req {
-      Action = "PublishVersion",
-      ["Site-Id"] = siteId,
-      Version = "v2",
-      ExpectedVersion = "old",
-      ["Actor-Role"] = "publisher",
-    }
-  )
+  site.route(with_req {
+    Action = "PutDraft",
+    ["Site-Id"] = siteId,
+    ["Page-Id"] = "p1",
+    Content = { title = "T", blocks = { { type = "paragraph", text = "T" } } },
+    ["Actor-Role"] = "editor",
+  })
+  local ok1 = site.route(with_req {
+    Action = "PublishVersion",
+    ["Site-Id"] = siteId,
+    Version = "v1",
+    ["Actor-Role"] = "publisher",
+  })
+  local conflict = site.route(with_req {
+    Action = "PublishVersion",
+    ["Site-Id"] = siteId,
+    Version = "v2",
+    ExpectedVersion = "old",
+    ["Actor-Role"] = "publisher",
+  })
   if conflict.status ~= "ERROR" then
     error "Expected VERSION_CONFLICT on second publish"
   end
@@ -255,23 +235,19 @@ do
   registry.route(
     with_req { Action = "RegisterSite", ["Site-Id"] = "conc-reg", ["Actor-Role"] = "admin" }
   )
-  registry.route(
-    with_req {
-      Action = "SetActiveVersion",
-      ["Site-Id"] = "conc-reg",
-      Version = "v1",
-      ["Actor-Role"] = "registry-admin",
-    }
-  )
-  local conflict2 = registry.route(
-    with_req {
-      Action = "SetActiveVersion",
-      ["Site-Id"] = "conc-reg",
-      Version = "v2",
-      ExpectedVersion = "nope",
-      ["Actor-Role"] = "registry-admin",
-    }
-  )
+  registry.route(with_req {
+    Action = "SetActiveVersion",
+    ["Site-Id"] = "conc-reg",
+    Version = "v1",
+    ["Actor-Role"] = "registry-admin",
+  })
+  local conflict2 = registry.route(with_req {
+    Action = "SetActiveVersion",
+    ["Site-Id"] = "conc-reg",
+    Version = "v2",
+    ExpectedVersion = "nope",
+    ["Actor-Role"] = "registry-admin",
+  })
   if conflict2.status ~= "ERROR" then
     error "Expected VERSION_CONFLICT on SetActiveVersion"
   end
@@ -283,25 +259,21 @@ do
   )
   local actions = {
     function()
-      reg.route(
-        with_req {
-          Action = "SetActiveVersion",
-          ["Site-Id"] = "conc-reg2",
-          Version = "v1",
-          ["Actor-Role"] = "registry-admin",
-        }
-      )
+      reg.route(with_req {
+        Action = "SetActiveVersion",
+        ["Site-Id"] = "conc-reg2",
+        Version = "v1",
+        ["Actor-Role"] = "registry-admin",
+      })
     end,
     function()
-      reg.route(
-        with_req {
-          Action = "SetActiveVersion",
-          ["Site-Id"] = "conc-reg2",
-          Version = "v2",
-          ExpectedVersion = "v0",
-          ["Actor-Role"] = "registry-admin",
-        }
-      )
+      reg.route(with_req {
+        Action = "SetActiveVersion",
+        ["Site-Id"] = "conc-reg2",
+        Version = "v2",
+        ExpectedVersion = "v0",
+        ["Actor-Role"] = "registry-admin",
+      })
     end,
   }
   for i = 1, 20 do
@@ -314,14 +286,12 @@ do
 
   -- parallel publish/version with cjson decode of response bodies (simulated)
   for i = 1, 10 do
-    local resp = site.route(
-      with_req {
-        Action = "PublishVersion",
-        ["Site-Id"] = siteId,
-        Version = "v" .. (10 + i),
-        ["Actor-Role"] = "publisher",
-      }
-    )
+    local resp = site.route(with_req {
+      Action = "PublishVersion",
+      ["Site-Id"] = siteId,
+      Version = "v" .. (10 + i),
+      ["Actor-Role"] = "publisher",
+    })
     if resp.payload.manifestHash then
       local ok, decoded = pcall(require("cjson").decode, "{}")
       if not ok then
@@ -341,33 +311,27 @@ do
     if pick < 0.6 then
       local ver = "v" .. i
       table.insert(versions, ver)
-      site.route(
-        with_req {
-          Action = "PutDraft",
-          ["Site-Id"] = "conc-reg3",
-          ["Page-Id"] = "p" .. i,
-          Content = { title = "T" .. i, blocks = { { type = "paragraph", text = "T" .. i } } },
-          ["Actor-Role"] = "editor",
-        }
-      )
-      site.route(
-        with_req {
-          Action = "PublishVersion",
-          ["Site-Id"] = "conc-reg3",
-          Version = ver,
-          ["Actor-Role"] = "publisher",
-        }
-      )
+      site.route(with_req {
+        Action = "PutDraft",
+        ["Site-Id"] = "conc-reg3",
+        ["Page-Id"] = "p" .. i,
+        Content = { title = "T" .. i, blocks = { { type = "paragraph", text = "T" .. i } } },
+        ["Actor-Role"] = "editor",
+      })
+      site.route(with_req {
+        Action = "PublishVersion",
+        ["Site-Id"] = "conc-reg3",
+        Version = ver,
+        ["Actor-Role"] = "publisher",
+      })
     else
       local target = (#versions > 0) and versions[math.random(1, #versions)] or "v1"
-      local resp = reg3.route(
-        with_req {
-          Action = "SetActiveVersion",
-          ["Site-Id"] = "conc-reg3",
-          Version = target,
-          ["Actor-Role"] = "registry-admin",
-        }
-      )
+      local resp = reg3.route(with_req {
+        Action = "SetActiveVersion",
+        ["Site-Id"] = "conc-reg3",
+        Version = target,
+        ["Actor-Role"] = "registry-admin",
+      })
       if resp.status ~= "OK" and resp.code ~= "VERSION_CONFLICT" then
         error("unexpected status in interleaving: " .. tostring(resp.status))
       end
@@ -423,33 +387,27 @@ do
         error "envelope schema failed during fuzz"
       end
     end
-    siteProc.route(
-      with_req {
-        Action = "PutDraft",
-        ["Site-Id"] = "conc-schema",
-        ["Page-Id"] = "p",
-        Content = { title = ver, blocks = { { type = "paragraph", text = ver } } },
-        ["Actor-Role"] = "editor",
-      }
-    )
+    siteProc.route(with_req {
+      Action = "PutDraft",
+      ["Site-Id"] = "conc-schema",
+      ["Page-Id"] = "p",
+      Content = { title = ver, blocks = { { type = "paragraph", text = ver } } },
+      ["Actor-Role"] = "editor",
+    })
     if math.random() < 0.5 then
-      siteProc.route(
-        with_req {
-          Action = "PublishVersion",
-          ["Site-Id"] = "conc-schema",
-          Version = ver,
-          ["Actor-Role"] = "publisher",
-        }
-      )
+      siteProc.route(with_req {
+        Action = "PublishVersion",
+        ["Site-Id"] = "conc-schema",
+        Version = ver,
+        ["Actor-Role"] = "publisher",
+      })
     else
-      reg.route(
-        with_req {
-          Action = "SetActiveVersion",
-          ["Site-Id"] = "conc-schema",
-          Version = ver,
-          ["Actor-Role"] = "registry-admin",
-        }
-      )
+      reg.route(with_req {
+        Action = "SetActiveVersion",
+        ["Site-Id"] = "conc-schema",
+        Version = ver,
+        ["Actor-Role"] = "registry-admin",
+      })
     end
   end
   local conf2 = reg.route(with_req { Action = "GetSiteConfig", ["Site-Id"] = "conc-schema" })
