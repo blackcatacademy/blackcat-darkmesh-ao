@@ -48,6 +48,7 @@ jobs:
       - name: Preflight (schemas + Lua syntax + deps)
         env:
           RUN_DEPS_CHECK: 1
+          AUTH_REQUIRE_SIGNATURE: 1  # fail-closed: require libsodium/openssl present
         run: scripts/verify/preflight.sh
 
       - name: Checksum alert (audit/queue/wal)
