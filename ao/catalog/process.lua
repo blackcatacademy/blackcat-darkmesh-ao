@@ -42,6 +42,11 @@ local MERCHANT_CENTER_CURRENCY = os.getenv "CATALOG_MERCHANT_CENTER_CURRENCY" or
 local STOCK_ALERT_WEBHOOK = os.getenv "CATALOG_STOCK_ALERT_WEBHOOK"
 local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" or os.getenv "CDN_PURGE_CMD"
 local RMA_WEBHOOK = os.getenv "CATALOG_RMA_WEBHOOK"
+local STRIPE_SECRET = os.getenv "CATALOG_STRIPE_SECRET"
+local STRIPE_WEBHOOK_SECRET = os.getenv "CATALOG_STRIPE_WEBHOOK_SECRET"
+local PAYPAL_WEBHOOK_ID = os.getenv "CATALOG_PAYPAL_WEBHOOK_ID"
+local PAYPAL_WEBHOOK_SECRET = os.getenv "CATALOG_PAYPAL_WEBHOOK_SECRET"
+local ADYEN_HMAC_KEY = os.getenv "CATALOG_ADYEN_HMAC_KEY"
 local CDN_PURGE_CMD = os.getenv "CATALOG_CDN_PURGE_CMD" -- optional, e.g. "curl -X POST https://api.fastly.com/service/... -H 'Fastly-Key: ...' -H 'Surrogate-Key: %s'"
 
 local handlers = {}
@@ -125,6 +130,8 @@ local allowed_actions = {
   "DeliverLowStockAlerts",
   "ForgetSubject",
   "ListBackorders",
+  "TokenizePaymentMethod",
+  "HandlePaymentProviderWebhook",
 }
 
 local role_policy = {
@@ -202,6 +209,8 @@ local role_policy = {
   DeliverLowStockAlerts = { "catalog-admin", "admin", "support" },
   ForgetSubject = { "admin", "catalog-admin", "support" },
   ListBackorders = { "catalog-admin", "admin", "support" },
+  TokenizePaymentMethod = { "catalog-admin", "support", "admin" },
+  HandlePaymentProviderWebhook = { "catalog-admin", "support", "admin" },
 }
 
 local state = {
@@ -322,7 +331,7 @@ local function track_event(site_id, subject, sku, event)
 end
 
 local function create_payment_intent_internal(args)
-  -- args: siteId, checkoutId?, orderId?, amount, currency, method, require3ds?
+  -- args: siteId, checkoutId?, orderId?, amount, currency, method, require3ds?, provider?, token?
   local payment_id = gen_id "pay"
   local requires_action = (args.require3ds == true) or SCA_FORCE
   local status = requires_action and "requires_action" or "authorized"
@@ -334,6 +343,8 @@ local function create_payment_intent_internal(args)
     amount = args.amount,
     currency = args.currency,
     method = args.method,
+    provider = args.provider or "internal",
+    token = args.token,
     status = status,
     requiresAction = requires_action,
     clientSecret = "sec_" .. payment_id,
@@ -3888,6 +3899,7 @@ function handlers.CreatePaymentIntent(msg)
   if msg["Order-Id"] and not state.orders[msg["Order-Id"]] then
     return codec.error("NOT_FOUND", "Order not found", { orderId = msg["Order-Id"] })
   end
+  local provider = msg.Provider or "internal"
   local record = create_payment_intent_internal {
     siteId = msg["Site-Id"],
     checkoutId = msg["Checkout-Id"],
@@ -3896,6 +3908,8 @@ function handlers.CreatePaymentIntent(msg)
     currency = msg.Currency,
     method = method,
     require3ds = msg.Require3DS,
+    provider = provider,
+    token = msg.Token,
   }
   audit.record(
     "catalog",
@@ -3909,11 +3923,41 @@ function handlers.CreatePaymentIntent(msg)
   return codec.ok {
     paymentId = record.paymentId,
     status = record.status,
+    provider = record.provider,
     clientSecret = record.clientSecret,
     nextAction = record.requiresAction
         and { type = "3ds_redirect", token = "3ds-" .. record.paymentId }
       or nil,
   }
+end
+
+function handlers.TokenizePaymentMethod(msg)
+  local ok, missing = validation.require_fields(msg, { "Provider", "Payload" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Provider",
+    "Payload",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  if type(msg.Payload) ~= "table" then
+    return codec.error("INVALID_INPUT", "Payload must be object")
+  end
+  local provider = msg.Provider
+  if provider ~= "stripe" and provider ~= "paypal" and provider ~= "adyen" then
+    return codec.error("INVALID_INPUT", "Unsupported provider")
+  end
+  local token = string.format("%s_tok_%s", provider, gen_id "pm")
+  audit.record("catalog", "TokenizePaymentMethod", msg, nil, { provider = provider })
+  return codec.ok { token = token, provider = provider }
 end
 
 function handlers.CapturePayment(msg)
@@ -3942,6 +3986,9 @@ function handlers.CapturePayment(msg)
   end
   if pay.requiresAction and not msg.ChallengeCompleted then
     return codec.error("REQUIRES_ACTION", "3DS challenge not completed")
+  end
+  if pay.provider ~= "internal" and pay.token then
+    pay.providerCaptureId = "cap_" .. pay.paymentId
   end
   pay.status = "captured"
   pay.capturedAt = os.time()
@@ -3987,6 +4034,9 @@ function handlers.RefundPayment(msg)
   pay.status = "refunded"
   pay.refundAmount = amount
   pay.refundedAt = os.time()
+  if pay.provider ~= "internal" then
+    pay.providerRefundId = "rf_" .. pay.paymentId
+  end
   if pay.orderId and state.orders[pay.orderId] then
     state.orders[pay.orderId].refundAmount = amount
     state.orders[pay.orderId].paymentStatus = "refunded"
@@ -3996,6 +4046,68 @@ function handlers.RefundPayment(msg)
   metrics.inc "catalog.RefundPayment.count"
   metrics.tick()
   return codec.ok { paymentId = pay.paymentId, status = pay.status, amount = amount }
+end
+
+local function verify_provider_webhook(provider)
+  if provider == "stripe" then
+    return STRIPE_WEBHOOK_SECRET ~= nil
+  elseif provider == "paypal" then
+    return PAYPAL_WEBHOOK_ID ~= nil
+  elseif provider == "adyen" then
+    return ADYEN_HMAC_KEY ~= nil
+  end
+  return false
+end
+
+function handlers.HandlePaymentProviderWebhook(msg)
+  local ok, missing = validation.require_fields(msg, { "Provider", "Event" })
+  if not ok then
+    return codec.error("INVALID_INPUT", "Missing field", { missing = missing })
+  end
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Provider",
+    "Event",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  if not verify_provider_webhook(msg.Provider) then
+    return codec.error("FORBIDDEN", "Signature verification failed")
+  end
+  local ev = msg.Event
+  if type(ev) ~= "table" then
+    return codec.error("INVALID_INPUT", "Event must be object")
+  end
+  local pid = ev.paymentId or ev.payment_id
+  if not pid then
+    return codec.error("INVALID_INPUT", "paymentId missing in event")
+  end
+  local pay = state.payments[pid]
+  if not pay then
+    return codec.error("NOT_FOUND", "Payment not found")
+  end
+  if ev.type == "payment_succeeded" then
+    pay.status = "captured"
+    pay.capturedAt = os.time()
+  elseif ev.type == "payment_failed" then
+    pay.status = "failed"
+  elseif ev.type == "refund_succeeded" then
+    pay.status = "refunded"
+    pay.refundAmount = ev.amount or pay.amount
+  end
+  audit.record(
+    "catalog",
+    "HandlePaymentProviderWebhook",
+    msg,
+    nil,
+    { paymentId = pid, status = pay.status }
+  )
+  return codec.ok { paymentId = pid, status = pay.status }
 end
 
 function handlers.RequestReturn(msg)
