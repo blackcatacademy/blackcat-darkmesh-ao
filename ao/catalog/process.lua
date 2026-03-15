@@ -21,6 +21,7 @@ local CARRIER_API_URL = os.getenv "CATALOG_CARRIER_API_URL" -- optional external
 local CARRIER_API_TOKEN = os.getenv "CATALOG_CARRIER_API_TOKEN"
 local INVOICE_PDF_DIR = os.getenv "CATALOG_INVOICE_PDF_DIR"
 local INVOICE_NUMBER_WITH_YEAR = os.getenv "CATALOG_INVOICE_YEAR" ~= "0"
+local INVOICE_S3_BUCKET = os.getenv "CATALOG_INVOICE_S3_BUCKET"
 
 local handlers = {}
 local allowed_actions = {
@@ -1699,12 +1700,13 @@ function handlers.SetShippingRules(msg)
   return codec.ok { siteId = msg["Site-Id"], count = #msg.Rules }
 end
 
-local function pick_tax_rate(site_id, address)
+local function pick_tax_rate(site_id, address, tax_class)
   local rules = state.tax_rules[site_id] or state.tax_rates[site_id] or {}
   for _, r in ipairs(rules) do
     if
       (not r.country or r.country == address.Country)
       and (not r.region or r.region == address.Region)
+      and (not r.taxClass or r.taxClass == tax_class)
     then
       return tonumber(r.rate or r.Rate) or 0
     end
@@ -1816,6 +1818,7 @@ local function compute_cart(site_id, items, currency, promo)
       unit_price = quote.price,
       currency = quote.currency,
       line_total = line_total,
+      taxClass = payload.taxClass or payload.TaxClass,
     })
   end
   return { subtotal = subtotal, weight = weight, lines = lines }, nil
@@ -1874,8 +1877,14 @@ function handlers.QuoteOrder(msg)
     end
   end
   local ship = pick_shipping(msg["Site-Id"], address, cart.subtotal, cart.weight)
-  local tax_rate = pick_tax_rate(msg["Site-Id"], address)
-  local tax = cart.subtotal * tax_rate / 100
+  local tax = 0
+  local line_taxes = {}
+  for _, line in ipairs(cart.lines) do
+    local tr = pick_tax_rate(msg["Site-Id"], address, line.taxClass)
+    local lt = line.line_total * tr / 100
+    tax = tax + lt
+    table.insert(line_taxes, { sku = line.sku, tax = lt, taxRate = tr })
+  end
   local total = cart.subtotal + ship.rate + tax
   return codec.ok {
     siteId = msg["Site-Id"],
@@ -1885,7 +1894,7 @@ function handlers.QuoteOrder(msg)
     weight = cart.weight,
     shipping = ship,
     tax = tax,
-    taxRate = tax_rate,
+    lineTaxes = line_taxes,
     total = total,
     promo = msg.Promo,
   }
@@ -1920,13 +1929,19 @@ function handlers.CalculateTax(msg)
   if not cart then
     return codec.error("INVALID_INPUT", cart_err or "Pricing failed")
   end
-  local tax_rate = pick_tax_rate(msg["Site-Id"], address)
-  local tax = cart.subtotal * tax_rate / 100
+  local tax = 0
+  local line_taxes = {}
+  for _, line in ipairs(cart.lines) do
+    local tr = pick_tax_rate(msg["Site-Id"], address, line.taxClass)
+    local lt = line.line_total * tr / 100
+    tax = tax + lt
+    table.insert(line_taxes, { sku = line.sku, tax = lt, taxRate = tr })
+  end
   return codec.ok {
     siteId = msg["Site-Id"],
     subtotal = cart.subtotal,
-    taxRate = tax_rate,
     tax = tax,
+    lineTaxes = line_taxes,
     currency = currency,
   }
 end
@@ -2856,6 +2871,13 @@ local function persist_invoice(inv)
       )
       f:close()
       inv.pdfPath = path
+    end
+  end
+  if INVOICE_S3_BUCKET and INVOICE_S3_BUCKET ~= "" and inv.pdfPath then
+    local cmd = string.format("aws s3 cp %s s3://%s/", inv.pdfPath, INVOICE_S3_BUCKET)
+    local rc = os.execute(cmd)
+    if rc then
+      inv.s3Url = string.format("s3://%s/%s", INVOICE_S3_BUCKET, inv.invoiceId .. ".pdf")
     end
   end
 end
