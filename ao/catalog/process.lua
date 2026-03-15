@@ -36,6 +36,9 @@ local JWT_HMAC_SECRET = os.getenv "CATALOG_JWT_SECRET" or os.getenv "JWT_SECRET"
 local INVOICE_SIGN_SECRET = os.getenv "CATALOG_INVOICE_SIGN_SECRET"
 local PDF_RENDER_CMD = os.getenv "CATALOG_PDF_RENDER_CMD" or "cat" -- expects: CMD input.html output.pdf
 local FEED_EXPORT_PATH = os.getenv "CATALOG_FEED_EXPORT_PATH"
+local MERCHANT_CENTER_PATH = os.getenv "CATALOG_MERCHANT_CENTER_PATH"
+local MERCHANT_CENTER_COUNTRY = os.getenv "CATALOG_MERCHANT_CENTER_COUNTRY" or "US"
+local MERCHANT_CENTER_CURRENCY = os.getenv "CATALOG_MERCHANT_CENTER_CURRENCY" or "USD"
 
 local handlers = {}
 local allowed_actions = {
@@ -108,6 +111,7 @@ local allowed_actions = {
   "ExportSearchFeed",
   "DeleteProduct",
   "PurgeCache",
+  "ExportMerchantFeed",
 }
 
 local role_policy = {
@@ -175,6 +179,7 @@ local role_policy = {
   ExportSearchFeed = { "catalog-admin", "support", "admin", "viewer" },
   DeleteProduct = { "catalog-admin", "editor", "admin" },
   PurgeCache = { "catalog-admin", "admin", "support" },
+  ExportMerchantFeed = { "catalog-admin", "support", "admin" },
 }
 
 local state = {
@@ -1564,6 +1569,107 @@ function handlers.ExportSearchFeed(msg)
     updatedAfter = updated_after,
     includeDeleted = msg.IncludeDeleted or false,
   }
+end
+
+function handlers.ExportMerchantFeed(msg)
+  local ok_extra, extras = validation.require_no_extras(msg, {
+    "Action",
+    "Request-Id",
+    "Site-Id",
+    "Limit",
+    "Cursor",
+    "Path",
+    "Actor-Role",
+    "Schema-Version",
+    "Signature",
+  })
+  if not ok_extra then
+    return codec.error("UNSUPPORTED_FIELD", "Unexpected fields", { unexpected = extras })
+  end
+  local site = msg["Site-Id"]
+  if not site then
+    return codec.error("INVALID_INPUT", "Site-Id required")
+  end
+  local limit = tonumber(msg.Limit) or 1000
+  if limit < 1 then
+    limit = 1
+  end
+  if limit > 5000 then
+    limit = 5000
+  end
+  local cursor = msg.Cursor or ""
+  local prefix = "product:" .. site .. ":"
+  local keys = {}
+  for key, _ in pairs(state.products) do
+    if key:sub(1, #prefix) == prefix then
+      table.insert(keys, key)
+    end
+  end
+  table.sort(keys)
+  local start_index = 1
+  if cursor ~= "" then
+    for i, k in ipairs(keys) do
+      if k == cursor then
+        start_index = i + 1
+        break
+      end
+    end
+  end
+  local rows = {}
+  for i = start_index, math.min(#keys, start_index + limit - 1) do
+    local key = keys[i]
+    local p = state.products[key].payload
+    table.insert(rows, {
+      id = p.sku or key,
+      title = p.name,
+      description = p.description,
+      link = p.url or p.Link,
+      image_link = (p.assets and p.assets[1]) or nil,
+      availability = p.available and "in stock" or "out of stock",
+      price = string.format("%.2f %s", p.price or 0, p.currency or MERCHANT_CENTER_CURRENCY),
+      brand = p.brand,
+      gtin = p.gtin,
+      mpn = p.mpn,
+      condition = p.condition or "new",
+      shipping = {
+        country = MERCHANT_CENTER_COUNTRY,
+        service = p.shippingService or "Standard",
+        price = string.format(
+          "%.2f %s",
+          (p.shipping and p.shipping.price) or 0,
+          p.currency or MERCHANT_CENTER_CURRENCY
+        ),
+      },
+    })
+  end
+  local next_cursor = (#keys > start_index + limit - 1) and keys[start_index + limit - 1] or nil
+  if msg.Path or MERCHANT_CENTER_PATH then
+    local path = msg.Path or MERCHANT_CENTER_PATH
+    local f = io.open(path, "w")
+    if f then
+      for _, r in ipairs(rows) do
+        f:write(table.concat({
+          r.id,
+          r.title or "",
+          r.description or "",
+          r.link or "",
+          r.image_link or "",
+          r.availability or "",
+          r.price or "",
+          r.brand or "",
+          r.gtin or "",
+          r.mpn or "",
+          r.condition or "",
+          r.shipping.country or "",
+          r.shipping.service or "",
+          r.shipping.price or "",
+        }, ","))
+        f:write "\n"
+      end
+      f:close()
+    end
+  end
+  return codec.ok { siteId = site, items = rows, nextCursor = next_cursor, total = #rows }
 end
 
 -- Cache purge stub -------------------------------------------------------
