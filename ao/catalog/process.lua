@@ -246,6 +246,7 @@ local state = {
   stock_policies = {}, -- siteId -> sku -> { allow_backorder, preorder_at, low_stock_threshold }
   stock_alerts = {}, -- siteId -> list of { sku, total, threshold, ts }
   backorders = {}, -- siteId -> list of { sku, qty, preorder_at, eta_days, createdAt, source, ref }
+  shipment_events = {}, -- shipmentId -> list of { ts, status, meta }
 }
 
 local function gen_id(prefix)
@@ -1285,6 +1286,18 @@ function handlers.HandleCarrierWebhook(msg)
   sh.tracking = msg.Tracking or sh.tracking
   sh.eta = msg.Eta or sh.eta
   sh.updatedAt = os.time()
+  record_shipment_event(
+    msg["Shipment-Id"],
+    sh.status,
+    { source = "carrier", tracking = sh.tracking }
+  )
+  if sh.orderId and state.orders[sh.orderId] then
+    if sh.status == "delivered" then
+      state.orders[sh.orderId].status = "delivered"
+    elseif sh.status == "exception" or sh.status == "delayed" then
+      state.orders[sh.orderId].status = "shipment_issue"
+    end
+  end
   audit.record(
     "catalog",
     "HandleCarrierWebhook",
@@ -2183,6 +2196,7 @@ function handlers.ApplyShipmentEvent(msg)
   sh.trackingUrl = msg["Tracking-Url"] or sh.trackingUrl
   sh.eta = msg.Eta or sh.eta
   sh.status = msg.Status or sh.status or "pending"
+  record_shipment_event(msg["Shipment-Id"], sh.status, { source = "apply", tracking = sh.tracking })
   audit.record("catalog", "ApplyShipmentEvent", msg, nil, { shipment = msg["Shipment-Id"] })
   return codec.ok {
     shipmentId = msg["Shipment-Id"],
@@ -2223,6 +2237,11 @@ function handlers.ApplyTrackingEvent(msg)
   sh.eta = msg.Eta or sh.eta
   sh.carrier = msg.Carrier or sh.carrier
   sh.status = msg.Status or sh.status
+  record_shipment_event(
+    msg["Shipment-Id"],
+    sh.status or "in_transit",
+    { source = "track", tracking = sh.tracking }
+  )
   audit.record(
     "catalog",
     "ApplyTrackingEvent",
@@ -3650,6 +3669,15 @@ local function notify_rma(site_id, return_id, event, payload)
     RMA_WEBHOOK
   )
   os.execute(cmd)
+end
+
+local function record_shipment_event(shipment_id, status, meta)
+  state.shipment_events[shipment_id] = state.shipment_events[shipment_id] or {}
+  table.insert(state.shipment_events[shipment_id], {
+    ts = os.time(),
+    status = status,
+    meta = meta,
+  })
 end
 
 local function deliver_stock_alert(site_id, alert)
